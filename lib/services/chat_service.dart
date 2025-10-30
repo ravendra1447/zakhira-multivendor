@@ -17,7 +17,7 @@ import 'package:video_compress/video_compress.dart';
 
 import '../config.dart';
 import '../main.dart';
-import '../models/chat_model.dart';
+import '../models/chat_model.dart' hide Chat;
 import 'crypto_manager.dart';
 import '../utils/sound_utils.dart';
 
@@ -466,6 +466,37 @@ class ChatService {
 
       print("📥 Processing message from $source: $idToProcess");
 
+      // ✅ STEP 1: STRONG DUPLICATE CHECK - Check by ID (FIRST THING)
+      final existingById = _messageBox.values.firstWhereOrNull(
+            (msg) => msg.messageId == idToProcess,
+      );
+
+      if (existingById != null) {
+        print("⚠️ Message already exists in database: $idToProcess");
+        print("   - Existing Content: ${existingById.messageContent}");
+        print("   - Existing Type: ${existingById.messageType}");
+        return;
+      }
+
+      // ✅ STEP 2: Handle tempId to messageId conversion
+      if (tempId != null && messageId != null) {
+        await updateMessageId(tempId, messageId, forceDelivered ? 1 : 0);
+        print("✅ TempId converted: $tempId -> $messageId");
+
+        // Check if message already exists with new ID
+        final existingWithNewId = _messageBox.values.firstWhereOrNull(
+              (msg) => msg.messageId == messageId,
+        );
+
+        if (existingWithNewId != null) {
+          print("⚠️ Message already exists with new ID: $messageId");
+          return;
+        }
+
+        // Update idToProcess to new messageId
+        idToProcess = messageId;
+      }
+
       // ✅ STRONG DUPLICATE PROTECTION - Multiple layers
       if (_processedMessageIds.contains(idToProcess)) {
         print("⚠️ Message already being processed: $idToProcess");
@@ -478,130 +509,138 @@ class ChatService {
         _processedMessageIds.remove(idToProcess!);
       });
 
-      // ✅ STEP 1: Handle tempId to messageId conversion FIRST
-      if (tempId != null && messageId != null) {
-        await updateMessageId(tempId, messageId, forceDelivered ? 1 : 0);
-        print("✅ TempId converted: $tempId -> $messageId");
-
-        // After conversion, check if message already exists with new ID
-        final existingWithNewId = _messageBox.values.firstWhereOrNull(
-              (msg) => msg.messageId == messageId,
-        );
-
-        if (existingWithNewId != null) {
-          print("⚠️ Message already exists with new ID: $messageId");
-          return;
-        }
-      }
-
-      // ✅ STEP 2: STRONG DUPLICATE CHECK - Check by ID
-      final existingById = _messageBox.values.firstWhereOrNull(
-            (msg) => msg.messageId == idToProcess,
-      );
-
-      if (existingById != null) {
-        print("⚠️ Message already exists in database: $idToProcess");
-        return;
-      }
-
-      // ✅ STEP 3: Process message content
+      // ✅ EXTRACT ALL DATA
+      final blurHash = data["blur_hash"]?.toString();
+      final thumbnailBase64 = data["thumbnail_data"]?.toString();
+      final lowQualityUrl = data["low_quality_url"]?.toString();
+      final highQualityUrl = data["high_quality_url"]?.toString();
+      final mediaUrl = data["media_url"]?.toString();
       final messageContent = data["message_text"]?.toString() ?? "";
-      final mediaUrl = data["media_url"]?.toString() ?? "";
       final messageType = data["message_type"]?.toString() ?? "text";
+
+      print("🔍 RAW DATA FROM SERVER:");
+      print("   - Message Type: $messageType");
+      print("   - Blur Hash: $blurHash");
+      print("   - Thumbnail Base64: ${thumbnailBase64 != null ? 'Available' : 'Not Available'}");
+      print("   - Low Quality URL: $lowQualityUrl");
+      print("   - High Quality URL: $highQualityUrl");
+      print("   - Media URL: $mediaUrl");
+
+      // ✅ SMART MEDIA DATA EXTRACTION
+      String finalContent = messageContent;
+      String finalMessageType = messageType;
+      String? finalLowQualityUrl = lowQualityUrl;
+      String? finalHighQualityUrl = highQualityUrl;
+      String? finalBlurHash = blurHash;
+      String? finalThumbnailBase64 = thumbnailBase64;
+
       final messageTimestamp = DateTime.tryParse(data["timestamp"]?.toString() ?? "") ?? DateTime.now();
       final chatId = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
       final senderId = int.tryParse(data["sender_id"]?.toString() ?? "0") ?? 0;
 
-      String finalContent = messageContent;
-      String finalMessageType = messageType;
+      print("🔄 Processing Strategy:");
+      print("   - Incoming Type: $messageType");
+      print("   - Has Media URL: ${mediaUrl != null && mediaUrl.isNotEmpty}");
 
-      print("🔄 Processing content:");
-      print("   Type: $messageType");
-      print("   Media URL: $mediaUrl");
-      print("   Temp ID: $tempId");
-      print("   Message ID: $messageId");
+      // ✅ STEP 3: Handle MEDIA messages specially
+      if (messageType == "media" ||
+          (messageType == "encrypted" && mediaUrl != null && mediaUrl.isNotEmpty)) {
 
-      // ✅ STEP 4: Handle different message types
-      if (messageType == "encrypted") {
-        try {
-          // ✅ FIRST: Check if this is actually a media message disguised as encrypted
-          if (mediaUrl.isNotEmpty && messageContent == "media") {
-            print("🔄 Detected media message in encrypted format");
-            final fileName = mediaUrl.split('/').last;
-            finalContent = '${Config.baseNodeApiUrl}/media/file/$fileName';
-            finalMessageType = "media";
-            print("✅ Converted to media message: $finalContent");
+        print("🎯 PROCESSING MEDIA MESSAGE");
+
+        // ✅ USE SERVER-PROVIDED MEDIA DATA DIRECTLY
+        if (mediaUrl != null && mediaUrl.isNotEmpty) {
+          finalContent = mediaUrl;
+          finalMessageType = "media";
+
+          // ✅ PRESERVE ALL SERVER-PROVIDED MEDIA DATA
+          if (lowQualityUrl != null && lowQualityUrl.isNotEmpty) {
+            finalLowQualityUrl = _resolveMediaUrl(lowQualityUrl);
+            print("✅ Using server low quality URL: $finalLowQualityUrl");
           } else {
-            // Try actual decryption for text messages
-            final decryptedData = await _cryptoManager.decryptAndDecompress(messageContent);
-            final decodedData = jsonDecode(decryptedData['content']);
-            finalContent = decodedData['content'] ?? "[Decryption Failed]";
-            finalMessageType = decodedData['type'] ?? "text";
-            print("✅ Decrypted text message: $finalContent");
+            finalLowQualityUrl = _resolveMediaUrl(mediaUrl);
+            print("🔄 Using media URL as low quality: $finalLowQualityUrl");
           }
+
+          if (highQualityUrl != null && highQualityUrl.isNotEmpty) {
+            finalHighQualityUrl = _resolveMediaUrl(highQualityUrl);
+            print("✅ Using server high quality URL: $finalHighQualityUrl");
+          } else {
+            finalHighQualityUrl = _resolveMediaUrl(mediaUrl);
+            print("🔄 Using media URL as high quality: $finalHighQualityUrl");
+          }
+
+          if (blurHash != null && blurHash.isNotEmpty) {
+            finalBlurHash = blurHash;
+            print("✅ Using server blur hash: ${blurHash.substring(0, 20)}...");
+          } else {
+            finalBlurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Fallback
+            print("🔄 Using fallback blur hash");
+          }
+
+          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+            finalThumbnailBase64 = thumbnailBase64;
+            print("✅ Using server thumbnail base64");
+          }
+
+          print("🎉 FINAL MEDIA CONFIG:");
+          print("   - Content: $finalContent");
+          print("   - Type: $finalMessageType");
+          print("   - Low Quality: $finalLowQualityUrl");
+          print("   - High Quality: $finalHighQualityUrl");
+          print("   - Blur Hash: ${finalBlurHash != null ? 'Available' : 'Not Available'}");
+          print("   - Thumbnail: ${finalThumbnailBase64 != null ? 'Available' : 'Not Available'}");
+        }
+      } else if (messageType == "encrypted") {
+        // Handle encrypted text messages
+        try {
+          final decryptedData = await _cryptoManager.decryptAndDecompress(messageContent);
+          final decodedData = jsonDecode(decryptedData['content']);
+          finalContent = decodedData['content'] ?? "[Decryption Failed]";
+          finalMessageType = decodedData['type'] ?? "text";
+          print("✅ Decrypted text message: $finalContent");
         } catch (e) {
           print("❌ Decryption failed: $e");
-          // ✅ FALLBACK: If decryption fails but we have media URL, treat as media
-          if (mediaUrl.isNotEmpty) {
-            final fileName = mediaUrl.split('/').last;
-            finalContent = '${Config.baseNodeApiUrl}/media/file/$fileName';
-            finalMessageType = "media";
-            print("🔄 Fallback to media message: $finalContent");
-          } else {
-            finalContent = "[Decryption Failed]";
-            finalMessageType = "text";
-          }
-        }
-      } else if (messageType == "media") {
-        // ✅ Media message - server sends media_url directly
-        if (mediaUrl.isNotEmpty) {
-          final fileName = mediaUrl.split('/').last;
-
-          // ✅ IMPORTANT: Check if it's already a full URL
-          if (mediaUrl.startsWith('http')) {
-            finalContent = mediaUrl;
-          } else {
-            finalContent = '${Config.baseNodeApiUrl}/media/file/$fileName';
-          }
-
-          finalMessageType = "media";
-          print("✅ Media message processed: $finalContent");
-
-          // Test the media URL
-          await _testMediaUrl(finalContent);
-        } else {
-          finalContent = "[Media URL Missing]";
+          finalContent = "[Decryption Failed]";
           finalMessageType = "text";
-          print("❌ Media message but no media_url found in data");
         }
-      } else if (messageType == "text") {
-        // Plain text message
-        finalContent = messageContent;
-        finalMessageType = "text";
-        print("✅ Plain text message received: $finalContent");
-      } else {
-        // Handle unknown message types gracefully
-        print("⚠️ Unknown message type: $messageType, treating as text");
-        finalContent = messageContent.isNotEmpty ? messageContent : "[Message]";
-        finalMessageType = "text";
       }
 
-      // ✅ STEP 5: FINAL DUPLICATE CHECK - Check if we already have this exact message
+      // ✅ STEP 4: FINAL CONTENT-BASED DUPLICATE CHECK (RELAXED)
       final finalExistingCheck = _messageBox.values.firstWhereOrNull(
             (msg) =>
         msg.chatId == chatId &&
             msg.senderId == senderId &&
             msg.messageContent == finalContent &&
-            msg.timestamp.difference(messageTimestamp).inSeconds.abs() < 3,
+            msg.timestamp.difference(messageTimestamp).inSeconds.abs() < 10, // Increased to 10 seconds
       );
 
       if (finalExistingCheck != null) {
-        print("⚠️ FINAL DUPLICATE CHECK FAILED - Message already exists: $idToProcess");
-        print("   Existing ID: ${finalExistingCheck.messageId}");
+        print("⚠️ CONTENT DUPLICATE CHECK - Similar message exists:");
+        print("   - Existing ID: ${finalExistingCheck.messageId}");
+        print("   - Existing Content: ${finalExistingCheck.messageContent}");
+        print("   - New Content: $finalContent");
+
+        // ✅ UPDATE EXISTING MESSAGE INSTEAD OF CREATING NEW ONE
+        finalExistingCheck.isDelivered = forceDelivered ? 1 : 0;
+        if (finalLowQualityUrl != null) finalExistingCheck.lowQualityUrl = finalLowQualityUrl;
+        if (finalHighQualityUrl != null) finalExistingCheck.highQualityUrl = finalHighQualityUrl;
+        if (finalBlurHash != null) finalExistingCheck.blurHash = finalBlurHash;
+        if (finalThumbnailBase64 != null) finalExistingCheck.thumbnailBase64 = finalThumbnailBase64;
+
+        await _messageBox.put(finalExistingCheck.messageId, finalExistingCheck);
+        print("✅ Updated existing message with new media data");
+
+        // Emit update event
+        if (_newMessageController.hasListener) {
+          _newMessageController.add(finalExistingCheck);
+          print("📢 Stream event emitted for updated message: ${finalExistingCheck.messageId}");
+        }
+
         return;
       }
 
-      // ✅ STEP 6: Create and save message
+      // ✅ STEP 5: Create and save NEW message
       final msg = Message(
         messageId: idToProcess,
         chatId: chatId,
@@ -616,23 +655,30 @@ class ChatService {
         receiverName: data["receiver_name"]?.toString(),
         senderPhoneNumber: data["sender_phone"]?.toString(),
         receiverPhoneNumber: data["receiver_phone"]?.toString(),
+        lowQualityUrl: finalLowQualityUrl,
+        highQualityUrl: finalHighQualityUrl,
+        blurHash: finalBlurHash,
+        thumbnailBase64: finalThumbnailBase64,
       );
 
-      // ✅ FIX: SAVE TO HIVE BUT DON'T IMMEDIATELY EMIT STREAM EVENT
       await saveMessageLocal(msg);
-      print("💾 Message saved successfully: $idToProcess");
+      print("💾 NEW Message saved successfully: $idToProcess");
+      print("💾 Media Data Saved:");
+      print("   - Low Quality: ${msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty}");
+      print("   - High Quality: ${msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty}");
+      print("   - Blur Hash: ${msg.blurHash != null && msg.blurHash!.isNotEmpty}");
+      print("   - Thumbnail: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty}");
 
-      // ✅ FIX: DELAYED STREAM EVENT - PREVENT MULTIPLE UI UPDATES
+      // ✅ DELAYED STREAM EVENT
       Future.delayed(const Duration(milliseconds: 100), () {
-        // ✅ CHECK AGAIN IF MESSAGE STILL EXISTS BEFORE EMITTING
         final finalCheck = _messageBox.get(idToProcess);
         if (finalCheck != null && _newMessageController.hasListener) {
           _newMessageController.add(msg);
-          print("📢 Stream event emitted: $idToProcess");
+          print("📢 Stream event emitted for NEW message: $idToProcess");
         }
       });
 
-      // ✅ STEP 8: Send delivery confirmation if this message is for current user
+      // ✅ STEP 6: Send delivery confirmation
       final isForCurrentUser = currentUserId.toString() != data["sender_id"].toString();
       if (isForCurrentUser && _socket != null && _socket!.connected) {
         _socket!.emit("message_delivered", {
@@ -640,7 +686,6 @@ class ChatService {
           "chat_id": msg.chatId,
           "receiver_id": currentUserId,
         });
-
         await updateDeliveryStatus(idToProcess, 1);
         print("📤 Delivery confirmed: $idToProcess");
       }
@@ -651,10 +696,21 @@ class ChatService {
       print("❌ Error in _handleIncomingData: $e");
       print("Stack: $st");
     } finally {
-      // ✅ ALWAYS remove from processed IDs
       if (idToProcess != null) {
         _processedMessageIds.remove(idToProcess);
       }
+    }
+  }
+
+// ✅ URL RESOLUTION HELPER
+  static String _resolveMediaUrl(String url) {
+    if (url.startsWith('http')) {
+      return url;
+    } else if (url.startsWith('/uploads/')) {
+      final fileName = url.split('/').last;
+      return '${Config.baseNodeApiUrl}/media/file/$fileName';
+    } else {
+      return '${Config.baseNodeApiUrl}$url';
     }
   }
 
@@ -998,6 +1054,7 @@ class ChatService {
   }
 
   /// Background processing and uploading of media
+  /// Background processing and uploading of media
   static Future<void> _processAndSendMedia({
     required String mediaPath,
     required int chatId,
@@ -1016,6 +1073,10 @@ class ChatService {
 
     _uploadingMediaIds.add(tempId);
 
+    // ✅ DECLARE VARIABLES HERE
+    String? blurHash;
+    String? thumbnailBase64;
+
     try {
       // ✅ STEP 1: Check if temp message exists
       final existingTempMsg = _messageBox.get(tempId) as Message?;
@@ -1024,7 +1085,46 @@ class ChatService {
         return;
       }
 
-      // ✅ STEP 2: Compress media
+      // ✅ STEP 2: GENERATE THUMBNAIL AND BLUR HASH FIRST
+      try {
+        final ext = mediaPath.split('.').last.toLowerCase();
+
+        if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+          // For images, generate thumbnail and blur hash
+          final compressedThumbnail = await FlutterImageCompress.compressWithFile(
+            mediaPath,
+            quality: 30,
+            minWidth: 100,
+            minHeight: 100,
+          );
+
+          if (compressedThumbnail != null) {
+            thumbnailBase64 = base64Encode(compressedThumbnail);
+            print("✅ Generated thumbnail base64: ${thumbnailBase64.length} bytes");
+
+            // Generate blur hash for images
+            // blurHash = await _generateBlurHash(mediaPath); // Uncomment if you have blur hash library
+            blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Placeholder blur hash
+            print("✅ Generated blur hash: $blurHash");
+          }
+        } else if (['mp4', 'mov', 'avi', 'mkv'].contains(ext)) {
+          // For videos, generate thumbnail from first frame
+          final thumbnailFile = await VideoCompress.getFileThumbnail(mediaPath);
+          final thumbnailBytes = await thumbnailFile.readAsBytes();
+          thumbnailBase64 = base64Encode(thumbnailBytes);
+          print("✅ Generated video thumbnail base64: ${thumbnailBase64.length} bytes");
+
+          blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Placeholder blur hash for video
+          print("✅ Generated video blur hash: $blurHash");
+        }
+      } catch (e) {
+        print("⚠️ Could not generate thumbnail/blur hash: $e");
+        // Set default values if generation fails
+        thumbnailBase64 = "";
+        blurHash = "";
+      }
+
+      // ✅ STEP 3: Compress media
       Uint8List fileBytes;
       final ext = mediaPath.split('.').last.toLowerCase();
 
@@ -1057,7 +1157,7 @@ class ChatService {
 
       print("📦 Prepared media for upload: $originalName ($totalSize bytes)");
 
-      // ✅ STEP 3: Upload using server's 3-step process
+      // ✅ STEP 4: Upload using server's 3-step process
       final String? mediaUrl = await _uploadMediaToServer(
           fileBytes,
           originalName,
@@ -1080,7 +1180,7 @@ class ChatService {
 
       print("✅ Media uploaded successfully: $mediaUrl");
 
-      // ✅ STEP 4: Send final media message via socket
+      // ✅ STEP 5: Send final media message via socket
       final fileName = mediaUrl.split('/').last;
       final fullMediaUrl = '${Config.baseNodeApiUrl}/media/file/$fileName';
 
@@ -1095,7 +1195,7 @@ class ChatService {
       final encryptedContent = encryptedData['content'];
       final encryptedType = encryptedData['type'];
 
-      // ✅ Send via socket
+      // ✅ Send via socket WITH ALL MEDIA OPTIMIZATION FIELDS
       if (_socket != null && _socket!.connected) {
         _socket!.emit("send_message", {
           "chat_id": chatId,
@@ -1105,6 +1205,10 @@ class ChatService {
           "message_type": encryptedType,
           "temp_id": tempId,
           "media_url": fullMediaUrl,
+          "low_quality_url": fullMediaUrl,
+          "blur_hash": blurHash ?? "",
+          "thumbnail_data": thumbnailBase64 ?? "",
+          "image_variant": "blurred",
           "sender_name": senderName,
           "receiver_name": receiverName,
           "sender_phone": senderPhoneNumber,
@@ -1112,17 +1216,17 @@ class ChatService {
           "timestamp": DateTime.now().toIso8601String(),
         });
         print("📤 Emitted send_message for media with temp_id: $tempId");
+        print("📤 Sent blur_hash: ${blurHash != null && blurHash!.isNotEmpty}");
+        print("📤 Sent thumbnail_data: ${thumbnailBase64 != null && thumbnailBase64!.isNotEmpty}");
       }
 
-      // ✅ STEP 5: Update local temporary message
-      //existingTempMsg.messageContent = fullMediaUrl;
+      // ✅ STEP 6: Update local temporary message
       existingTempMsg.isDelivered = 1;
-      //await _messageBox.put(tempId, existingTempMsg);
       _newMessageController.add(existingTempMsg);
 
       print("✅ Media message sent and local temp message updated: $fullMediaUrl");
 
-      // ✅ STEP 6: Send push notification
+      // ✅ STEP 7: Send push notification
       await _sendPushNotification(receiverId, '📷 Media', chatId, userId, senderName ?? 'User');
 
     } catch (e) {
@@ -1135,6 +1239,21 @@ class ChatService {
       _uploadingMediaIds.remove(tempId);
     }
   }
+
+// ✅ ADD THIS HELPER FUNCTION IF YOU WANT TO GENERATE BLUR HASH
+/*
+static Future<String> _generateBlurHash(String imagePath) async {
+  try {
+    // You'll need to add a blur hash generation package
+    // For example: flutter_blurhash or image_to_blurhash
+    // This is just a placeholder implementation
+    return "L5H2EC=PM+yV0g-mq.wG9c010J}I";
+  } catch (e) {
+    print("❌ Error generating blur hash: $e");
+    return "";
+  }
+}
+*/
 
   /// ✅ CORRECTED: Upload using server's 3-step API
   static Future<String?> _uploadMediaToServer(

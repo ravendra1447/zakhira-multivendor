@@ -1,10 +1,10 @@
-// lib/pages/chat_screen.dart
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter_blurhash/flutter_blurhash.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:hive/hive.dart';
@@ -15,14 +15,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:path_provider/path_provider.dart';
 
 // Import the necessary models and services
-import '../main.dart';
+import '../config.dart';
 import '../models/chat_model.dart';
 import '../services/chat_service.dart';
 import '../services/local_auth_service.dart';
 import '../services/contact_service.dart';
 import 'new_chat_page.dart';
 import 'media_viewer_screen.dart';
-import '../widgets/chat_image.dart';
 
 // Helper function to format date headers
 String formatDateHeader(DateTime date) {
@@ -97,15 +96,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ UPLOAD PROGRESS TRACKING
   final Map<String, double> _uploadProgress = {};
 
-  // ✅ WHATSAPP-STYLE IMAGE CACHE - NO BLINKING, NO WHITE SPACE
-  final Map<String, File> _imageCache = {};
-  final Set<String> _imageDownloadInProgress = {};
-  final Set<String> _loadedFullImages = {};
-
-  // ✅ WHATSAPP-LIKE IMAGE QUALITY SETTINGS
-  static const double _maxImageWidth = 1080;
-  static const double _maxImageHeight = 1920;
-  static const int _imageQuality = 75;
+  // ✅ FIXED: PERSISTENT LOADING STATES
+  final Map<String, int> _imageLoadStages = {};
+  final Map<String, Timer> _loadTimers = {};
+  final Set<String> _fullyLoadedMessages = {};
 
   // ✅ LOAD MORE MESSAGES
   DateTime _oldestMessageTime = DateTime.now();
@@ -117,27 +111,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   set _areMessagesLoaded(bool value) {
     _authBox.put('messages_loaded_${widget.chatId}', value);
-  }
-
-  // ✅ THUMBNAIL URL GENERATOR
-  String _generateThumbnailUrl(String fullImageUrl) {
-    if (fullImageUrl.contains('_full.')) {
-      return fullImageUrl.replaceAll('_full.', '_thumb.');
-    }
-
-    if (fullImageUrl.contains('.jpg')) {
-      return fullImageUrl.replaceAll('.jpg', '_thumb.jpg');
-    }
-
-    if (fullImageUrl.contains('.jpeg')) {
-      return fullImageUrl.replaceAll('.jpeg', '_thumb.jpeg');
-    }
-
-    if (fullImageUrl.contains('.png')) {
-      return fullImageUrl.replaceAll('.png', '_thumb.png');
-    }
-
-    return fullImageUrl;
   }
 
   // ✅ API BASE URL
@@ -203,6 +176,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
         if (existingMessage == null) {
           print("💾 New message from socket: ${msg.messageId}");
+          print("📸 Low quality URL available: ${msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty}");
+          print("🎨 BlurHash available: ${msg.blurHash != null && msg.blurHash!.isNotEmpty}");
+          print("🖼️ Thumbnail Base64 available: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty}");
+
+          // ✅ AUTO-START PROGRESSIVE LOADING FOR NEW MESSAGES
+          _startProgressiveLoading(msg);
+
           await _resolveHeader();
           if (_shouldScrollToBottom) {
             _jumpToBottom();
@@ -286,11 +266,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _newMessageSubscription?.cancel();
     _uploadProgressSubscription?.cancel();
     _messageDeliveredSubscription?.cancel();
+
+    // ✅ CLEANUP LOADING TIMERS
+    _loadTimers.forEach((key, timer) => timer.cancel());
+    _loadTimers.clear();
+
     _scrollController.dispose();
     _processedMessageIds.clear();
     _uploadProgress.clear();
-    _imageCache.clear();
-    _imageDownloadInProgress.clear();
+    _imageLoadStages.clear();
+    _fullyLoadedMessages.clear();
     super.dispose();
   }
 
@@ -372,6 +357,172 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ FIXED: PERSISTENT PROGRESSIVE LOADING FUNCTIONS
+  void _startProgressiveLoading(Message msg) {
+    final messageId = msg.messageId;
+
+    // ✅ CHECK IF MESSAGE IS ALREADY FULLY LOADED
+    if (_fullyLoadedMessages.contains(messageId)) {
+      print("✅ Message already fully loaded: $messageId");
+      _imageLoadStages[messageId] = 3; // Mark as high quality loaded
+      return;
+    }
+
+    // ✅ CHECK IF ALREADY LOADING
+    if (_imageLoadStages.containsKey(messageId)) {
+      print("⚠️ Already loading: $messageId");
+      return;
+    }
+
+    print("🚀 Starting WhatsApp-style loading: $messageId");
+    print("   - BlurHash: ${msg.blurHash != null ? 'Available' : 'Not Available'}");
+    print("   - Low Quality URL: ${msg.lowQualityUrl ?? 'Not Available'}");
+    print("   - High Quality URL: ${msg.highQualityUrl ?? 'Not Available'}");
+
+    // Start with stage 1 (low quality loading)
+    _imageLoadStages[messageId] = 1;
+
+    // Auto-load high quality after low quality is visible
+    _loadTimers[messageId] = Timer(const Duration(milliseconds: 800), () {
+      if (_imageLoadStages[messageId] == 2 && mounted) {
+        _loadHighQualityImage(msg);
+      }
+    });
+
+    if (mounted) setState(() {});
+  }
+
+  void _markLowQualityLoaded(Message msg) {
+    final messageId = msg.messageId;
+    print("✅ Low quality loaded: $messageId");
+    _imageLoadStages[messageId] = 2;
+
+    if (mounted) setState(() {});
+  }
+
+  void _loadHighQualityImage(Message msg) {
+    final messageId = msg.messageId;
+
+    if (_imageLoadStages[messageId] == 3) return;
+
+    print("🔄 Loading high quality: $messageId");
+    _imageLoadStages[messageId] = 3;
+
+    // ✅ MARK AS FULLY LOADED ONCE HIGH QUALITY LOADS
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _fullyLoadedMessages.add(messageId);
+        setState(() {});
+      }
+    });
+
+    if (mounted) setState(() {});
+  }
+
+  // ✅ FIXED: WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET WITH PERSISTENCE
+  Widget _buildWhatsAppStyleImage(Message msg, String mediaUrl) {
+    final messageId = msg.messageId;
+    final loadStage = _imageLoadStages[messageId] ?? 0;
+
+    // ✅ FIX: ONLY START LOADING IF NOT ALREADY LOADED
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_imageLoadStages[messageId] == null &&
+          !_fullyLoadedMessages.contains(messageId) &&
+          (msg.messageType == 'media' || msg.messageType == 'encrypted_media')) {
+        _startProgressiveLoading(msg);
+      }
+    });
+
+    return Stack(
+      children: [
+        // ✅ 1. BLUR HASH - INSTANT (0ms) - ONLY SHOW IF LOW QUALITY NOT LOADED
+        if (msg.blurHash != null && msg.blurHash!.isNotEmpty && loadStage < 2)
+          Positioned.fill(
+            child: Container(
+              color: Colors.grey[200],
+              child: BlurHash(
+                hash: msg.blurHash!,
+                imageFit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+        // ✅ 2. LOW QUALITY IMAGE - FAST (100-500ms)
+        if (loadStage >= 1)
+          Positioned.fill(
+            child: CachedNetworkImage(
+              imageUrl: msg.lowQualityUrl ?? mediaUrl,
+              fit: BoxFit.cover,
+              placeholder: (context, url) {
+                // Show blur hash while low quality loads
+                return msg.blurHash != null
+                    ? BlurHash(hash: msg.blurHash!, imageFit: BoxFit.cover)
+                    : Container(color: Colors.grey[300]);
+              },
+              errorWidget: (context, url, error) {
+                // If low quality fails, load high quality directly
+                _loadHighQualityImage(msg);
+                return Container(color: Colors.grey[300]);
+              },
+              imageBuilder: (context, imageProvider) {
+                // Low quality loaded successfully
+                if (loadStage == 1) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _markLowQualityLoaded(msg);
+                  });
+                }
+                return Image(image: imageProvider, fit: BoxFit.cover);
+              },
+            ),
+          ),
+
+        // ✅ 3. HIGH QUALITY IMAGE - SLOW (500ms-2s) - FADE IN OVER LOW QUALITY
+        if (loadStage >= 3)
+          Positioned.fill(
+            child: CachedNetworkImage(
+              imageUrl: msg.highQualityUrl ?? mediaUrl,
+              fit: BoxFit.cover,
+              fadeInDuration: const Duration(milliseconds: 300),
+              placeholder: (context, url) {
+                // Show low quality while high quality loads
+                return Container(); // Low quality already visible in background
+              },
+              imageBuilder: (context, imageProvider) {
+                // High quality loaded - fade in over low quality
+                return AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 400),
+                  child: Image(image: imageProvider, fit: BoxFit.cover),
+                );
+              },
+            ),
+          ),
+
+        // ✅ LOADING INDICATOR (Only show if loading in progress and not fully loaded)
+        if ((loadStage == 1 || loadStage == 3) && !_fullyLoadedMessages.contains(messageId))
+          Positioned(
+            bottom: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Future<void> _resolveHeader() async {
     try {
       String? phone = _authBox.get('otherUserPhone');
@@ -442,60 +593,51 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   // ✅ FIXED: _fetchMessages with STRONG duplicate prevention
+  // ✅ FIXED: ALWAYS LOAD LAST 50 MESSAGES FROM SERVER (WHATSAPP STYLE)
   Future<void> _fetchMessages() async {
     try {
-      final localMessages = ChatService.getLocalMessages(widget.chatId);
+      print("🔄 Loading last 50 messages from server for chat ${widget.chatId}");
 
-      if (localMessages.length >= 5) {
-        print("✅ Using ${localMessages.length} local messages for chat ${widget.chatId}");
-        setState(() {
-          _areMessagesLoaded = true;
-        });
-        return;
-      }
+      final url = Uri.parse("$apiBase/get_messages.php?chat_id=${widget.chatId}");
 
-      print("🔄 Fetching messages from server for chat ${widget.chatId}");
+      print("🌐 Request URL: $url");
 
-      final res = await http.get(Uri.parse("$apiBase/get_messages.php?chat_id=${widget.chatId}"));
+      final res = await http.get(url);
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+
         if (data["success"] == true && data["messages"] != null) {
           int newMessagesCount = 0;
           int duplicateCount = 0;
 
-          for (var msg in data["messages"]) {
+          final messages = List.from(data["messages"]);
+          print("📥 Received ${messages.length} messages from server");
+
+          for (var msg in messages) {
             final messageId = msg["message_id"]?.toString();
             final tempId = msg["temp_id"]?.toString();
             final idToProcess = messageId ?? tempId;
 
             if (idToProcess == null) continue;
 
-            if (_processedMessageIds.contains(idToProcess)) {
-              duplicateCount++;
-              continue;
-            }
-
+            // ✅ LESS STRICT DUPLICATE CHECK FOR FRESH INSTALL
             final existingMessage = _messageBox.values.firstWhereOrNull(
-                  (existingMsg) =>
-              existingMsg.messageId == idToProcess ||
-                  (existingMsg.messageContent == msg["message_text"]?.toString() &&
-                      existingMsg.timestamp.difference(
-                          DateTime.tryParse(msg["timestamp"]?.toString() ?? "") ?? DateTime.now()
-                      ).inSeconds.abs() < 5),
+                  (existingMsg) => existingMsg.messageId == idToProcess,
             );
 
             if (existingMessage == null) {
-              _processedMessageIds.add(idToProcess);
               await _handleIncomingData(msg);
               newMessagesCount++;
             } else {
               duplicateCount++;
-              print("⚠️ Duplicate message from server: $idToProcess");
             }
           }
 
-          print("✅ Loaded $newMessagesCount new messages, skipped $duplicateCount duplicates for chatId=${widget.chatId}");
+          print("✅ Loaded $newMessagesCount new messages, skipped $duplicateCount duplicates");
+
+        } else {
+          print("❌ Server response indicates failure: ${data['message']}");
         }
       } else {
         print("❌ Server error: ${res.statusCode}");
@@ -513,6 +655,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ FIXED: BETTER INCOMING MESSAGE HANDLING
   Future<void> _handleIncomingData(dynamic data) async {
     try {
       final messageId = data["message_id"]?.toString();
@@ -524,39 +667,88 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final existingMessage = _messageBox.values.firstWhereOrNull(
-            (msg) => msg.messageId == idToProcess && msg.chatId == widget.chatId,
-      );
+      // ✅ IMPROVED MESSAGE TYPE DETECTION
+      String messageText = data["message_text"]?.toString() ?? "";
+      String messageType = data["message_type"]?.toString() ?? "text";
 
-      if (existingMessage != null) {
-        print("⚠️ Message with ID $idToProcess already exists. Skipping.");
-        return;
+      // ✅ AUTO-DETECT MEDIA MESSAGES
+      bool hasMedia = (data["media_url"] != null && data["media_url"].toString().isNotEmpty) ||
+          (data["low_quality_url"] != null && data["low_quality_url"].toString().isNotEmpty) ||
+          (data["high_quality_url"] != null && data["high_quality_url"].toString().isNotEmpty);
+
+      if (hasMedia) {
+        messageType = "media";
+        messageText = "media"; // Set text to "media" for media messages
       }
+
+      // ✅ EXTRACT MEDIA URLs
+      String? mediaUrl = data["media_url"]?.toString();
+      String? lowQualityUrl = data["low_quality_url"]?.toString();
+      String? highQualityUrl = data["high_quality_url"]?.toString();
+      String? blurHash = data["blur_hash"]?.toString();
+      String? thumbnailBase64 = data["thumbnail_data"]?.toString() ?? data["thumbnail"]?.toString();
+
+      // ✅ CONVERT TO FULL URLS IF NEEDED
+      mediaUrl = _convertToFullUrl(mediaUrl);
+      lowQualityUrl = _convertToFullUrl(lowQualityUrl);
+      highQualityUrl = _convertToFullUrl(highQualityUrl);
+
+      print("🔍 PROCESSING MESSAGE:");
+      print("   - ID: $idToProcess");
+      print("   - Type: $messageType");
+      print("   - Has Media: $hasMedia");
+      print("   - Text: $messageText");
+      print("   - Media URL: $mediaUrl");
+      print("   - Low Quality: $lowQualityUrl");
+      print("   - High Quality: $highQualityUrl");
 
       final msg = Message(
         messageId: idToProcess,
         chatId: int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0,
         senderId: int.tryParse(data["sender_id"]?.toString() ?? "0") ?? 0,
         receiverId: int.tryParse(data["receiver_id"]?.toString() ?? "0") ?? 0,
-        messageContent: data["message_text"]?.toString() ?? "",
-        messageType: data["message_type"]?.toString() ?? "text",
-        isRead: 0,
-        isDelivered: 0,
+        messageContent: mediaUrl ?? messageText,
+        messageType: messageType,
+        isRead: int.tryParse(data["is_read"]?.toString() ?? "0") ?? 0,
+        isDelivered: int.tryParse(data["is_delivered"]?.toString() ?? "0") ?? 0,
         timestamp: DateTime.tryParse(data["timestamp"]?.toString() ?? "") ?? DateTime.now(),
         senderName: data["sender_name"]?.toString(),
         receiverName: data["receiver_name"]?.toString(),
         senderPhoneNumber: data["sender_phone"]?.toString(),
         receiverPhoneNumber: data["receiver_phone"]?.toString(),
+        lowQualityUrl: lowQualityUrl,
+        highQualityUrl: highQualityUrl,
+        blurHash: blurHash,
+        thumbnailBase64: thumbnailBase64,
       );
 
       await ChatService.saveMessageLocal(msg);
-      print("💾 Saved incoming message: $idToProcess");
+      print("💾 Saved message: $idToProcess (Type: $messageType)");
+
+      // ✅ START PROGRESSIVE LOADING FOR MEDIA MESSAGES
+      if (messageType == 'media' && mounted && !_fullyLoadedMessages.contains(msg.messageId)) {
+        _startProgressiveLoading(msg);
+      }
 
     } catch (e) {
       print("❌ Error handling incoming data: $e");
+      print("❌ Problematic data: ${data.toString()}");
     }
   }
 
+// ✅ ADD THIS HELPER FUNCTION (Class mein add karein)
+  String? _convertToFullUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+
+    if (url.startsWith('/uploads/')) {
+      final fileName = url.split('/').last;
+      return '${Config.baseNodeApiUrl}/media/file/$fileName?quality=high';
+    } else if (!url.startsWith('http')) {
+      return '${Config.baseNodeApiUrl}$url';
+    }
+
+    return url;
+  }
   void _clearTemporaryMessages() {
     try {
       final temporaryMessages = _messageBox.values.where((msg) =>
@@ -613,26 +805,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: _imageQuality,
-        maxWidth: _maxImageWidth,
-        maxHeight: _maxImageHeight,
+        imageQuality: 75,
+        maxWidth: 1080,
+        maxHeight: 1920,
       );
 
       if (pickedFile != null) {
-        // ✅ PRINT ORIGINAL IMAGE SIZE
-        final originalFile = File(pickedFile.path);
-        final originalSize = await originalFile.length();
-        final imageProperties = await _getImageDimensions(originalFile);
-
-        print("🖼️ ORIGINAL IMAGE INFO:");
-        print("   📁 File: ${pickedFile.path}");
-        print("   📊 Size: ${(originalSize / 1024 / 1024).toStringAsFixed(2)} MB");
-        print("   📐 Dimensions: ${imageProperties['width']}x${imageProperties['height']}");
-        print("   ⚙️ Max allowed: ${_maxImageWidth}x${_maxImageHeight}");
-        print("   🎯 Quality: $_imageQuality%");
-
         setState(() {
-          _imageFile = originalFile;
+          _imageFile = File(pickedFile.path);
           _focusNode.unfocus();
         });
 
@@ -640,20 +820,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       print("Error picking image: $e");
-    }
-  }
-
-  // ✅ GET IMAGE DIMENSIONS
-  Future<Map<String, double>> _getImageDimensions(File imageFile) async {
-    try {
-      final decodedImage = await decodeImageFromList(await imageFile.readAsBytes());
-      return {
-        'width': decodedImage.width.toDouble(),
-        'height': decodedImage.height.toDouble(),
-      };
-    } catch (e) {
-      print("❌ Error getting image dimensions: $e");
-      return {'width': 0, 'height': 0};
     }
   }
 
@@ -674,19 +840,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     try {
       if (_imageFile != null) {
-        print("🚀 SENDING IMAGE INFO:");
-
-        // ✅ PRINT SENDING IMAGE DETAILS
-        final sendingFile = _imageFile!;
-        final sendingSize = await sendingFile.length();
-        final sendingDimensions = await _getImageDimensions(sendingFile);
-
-        print("   📤 Sending Image:");
-        print("   📁 Path: ${sendingFile.path}");
-        print("   📊 Size: ${(sendingSize / 1024 / 1024).toStringAsFixed(2)} MB");
-        print("   📐 Dimensions: ${sendingDimensions['width']}x${sendingDimensions['height']}");
-        print("   ⚙️ Settings: ${_maxImageWidth}x${_maxImageHeight} at $_imageQuality% quality");
-
         _jumpToBottom();
 
         await ChatService.sendMediaMessage(
@@ -732,265 +885,174 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _forwardMessages() async {
-    if (selectedMessageIds.isEmpty) return;
+  // ✅ UPDATED MEDIA MESSAGE BUBBLE WITH PERSISTENT LOADING
+  Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
+    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
 
-    final targetChatId = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => NewChatPage(isForForwarding: true),
-      ),
-    );
-
-    if (targetChatId != null && targetChatId is int) {
-      final messageIdsForForwarding = selectedMessageIds
-          .map((id) => int.tryParse(id) ?? 0)
-          .where((id) => id != 0)
-          .toSet();
-
-      await ChatService.forwardMessages(
-        originalMessageIds: messageIdsForForwarding,
-        targetChatId: targetChatId,
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Messages forwarded!")),
-      );
-
-      setState(() {
-        selectedMessageIds.clear();
-      });
-    }
-  }
-
-  Future<void> _showDeleteConfirmation(String messageId) async {
-    final message = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
-    if (message == null) return;
-
-    final userId = LocalAuthService.getUserId();
-    final isMe = message.senderId == userId;
-
-    final String deleteRole = isMe ? 'sender' : 'receiver';
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Delete Message?"),
-        content: Text(
-          isMe
-              ? "Are you sure you want to delete this message for everyone?"
-              : "Are you sure you want to delete this message for yourself?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text("CANCEL"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text("DELETE", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      if (userId == null) return;
-
-      await ChatService.deleteMessage(
-        messageId: messageId,
-        userId: userId,
-        role: deleteRole,
-      );
-
-      setState(() {
-        selectedMessageIds.clear();
-      });
-    }
-  }
-
-  // ✅ FIXED: WHATSAPP-STYLE IMAGE LOADING - NO BLINKING, NO WHITE SPACE
-  Widget _buildWhatsAppStyleImage(Message msg, String mediaUrl) {
-    return FutureBuilder<File?>(
-      future: _getCachedImage(mediaUrl),
-      builder: (context, snapshot) {
-        // ✅ CASE 1: Image already cached - SHOW HD IMMEDIATELY
-        if (snapshot.hasData && snapshot.data != null) {
-          final cachedFile = snapshot.data!;
-          _loadedFullImages.add(msg.messageId);
-
-          // ✅ PRINT CACHED IMAGE INFO
-          _printCachedImageInfo(cachedFile, mediaUrl);
-
-          return Image.file(
-            cachedFile,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
-          );
-        }
-
-        // ✅ CASE 2: Downloading - Show INSTANT BLUR PREVIEW
-        else {
-          // Start background download if not already started
-          if (!_imageDownloadInProgress.contains(msg.messageId)) {
-            _imageDownloadInProgress.add(msg.messageId);
-            _downloadAndCacheImage(mediaUrl, msg.messageId);
-          }
-
-          return _buildDirectBlurPreview(mediaUrl);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        if (selectedMessageIds.isNotEmpty) {
+          setState(() {
+            selectedMessageIds.clear();
+          });
+        } else if (_focusNode.hasFocus) {
+          _focusNode.unfocus();
+        } else {
+          _openImageFullScreen(msg);
         }
       },
-    );
-  }
-
-  // ✅ PRINT CACHED IMAGE INFORMATION
-  void _printCachedImageInfo(File cachedFile, String mediaUrl) async {
-    try {
-      final fileSize = await cachedFile.length();
-      final dimensions = await _getImageDimensions(cachedFile);
-
-      print("💾 CACHED IMAGE INFO:");
-      print("   📁 URL: $mediaUrl");
-      print("   💽 Cache Path: ${cachedFile.path}");
-      print("   📊 Size: ${(fileSize / 1024).toStringAsFixed(2)} KB");
-      print("   📐 Dimensions: ${dimensions['width']}x${dimensions['height']}");
-      print("   ✅ Status: Loaded from cache");
-    } catch (e) {
-      print("❌ Error printing cached image info: $e");
-    }
-  }
-
-  // ✅ FIXED: DIRECT BLUR PREVIEW - NO BLINKING, NO WHITE SPACE
-  Widget _buildDirectBlurPreview(String mediaUrl) {
-    return CachedNetworkImage(
-      imageUrl: _generateThumbnailUrl(mediaUrl),
-      fit: BoxFit.cover,
-      width: double.infinity,
-      height: double.infinity,
-      placeholder: (context, url) => Container(
-        color: Colors.grey[300], // Grey background - NO WHITE
-        child: Center(
-          child: Container(
-            width: 40,
-            height: 40,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+      onLongPress: () {
+        setState(() {
+          final msgId = msg.messageId.toString();
+          if (selectedMessageIds.contains(msgId)) {
+            selectedMessageIds.remove(msgId);
+          } else {
+            selectedMessageIds.clear();
+            selectedMessageIds.add(msgId);
+          }
+        });
+      },
+      child: RepaintBoundary(
+        child: Container(
+          decoration: BoxDecoration(
+            border: isSelected ? Border.all(color: Colors.lightGreen, width: 2) : null,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Align(
+            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              padding: const EdgeInsets.all(6),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.only(
+                  topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
+                  topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
+                  bottomLeft: const Radius.circular(16),
+                  bottomRight: const Radius.circular(16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    spreadRadius: 1,
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ✅ USE PERSISTENT PROGRESSIVE IMAGE LOADER
+                  _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                ],
+              ),
             ),
           ),
         ),
       ),
-      errorWidget: (context, url, error) => Container(
-        color: Colors.grey[300], // Grey background - NO WHITE
-        child: const Icon(Icons.image, color: Colors.grey, size: 40),
-      ),
-      fadeInDuration: Duration.zero, // NO FADE - INSTANT SHOW
-      fadeOutDuration: Duration.zero,
     );
   }
 
-  // ✅ WHATSAPP-STYLE IMAGE CACHE MANAGEMENT - NO BLINKING
-  Future<File?> _getCachedImage(String mediaUrl) async {
-    final fileName = mediaUrl.split('/').last;
-    final appDir = await getTemporaryDirectory();
-    final cacheFile = File('${appDir.path}/$fileName');
-
-    if (await cacheFile.exists()) {
-      return cacheFile;
-    }
-    return null;
-  }
-
-  Future<void> _downloadAndCacheImage(String mediaUrl, String messageId) async {
-    try {
-      final fileName = mediaUrl.split('/').last;
-      final appDir = await getTemporaryDirectory();
-      final cacheFile = File('${appDir.path}/$fileName');
-
-      print("📥 DOWNLOADING IMAGE:");
-      print("   🔗 URL: $mediaUrl");
-      print("   💾 Cache Path: ${cacheFile.path}");
-
-      // Download image
-      final response = await http.get(Uri.parse(mediaUrl));
-      if (response.statusCode == 200) {
-        final fileSize = response.bodyBytes.length;
-        await cacheFile.writeAsBytes(response.bodyBytes);
-        _imageCache[mediaUrl] = cacheFile;
-
-        // ✅ PRINT DOWNLOADED IMAGE INFO
-        final dimensions = await _getImageDimensions(cacheFile);
-        print("   ✅ DOWNLOAD COMPLETE:");
-        print("   📊 Size: ${(fileSize / 1024).toStringAsFixed(2)} KB");
-        print("   📐 Dimensions: ${dimensions['width']}x${dimensions['height']}");
-        print("   🎯 Cached successfully: $fileName");
-
-        // Update UI
-        if (mounted) {
-          setState(() {});
-        }
-      } else {
-        print("   ❌ Download failed: HTTP ${response.statusCode}");
-      }
-    } catch (e) {
-      print('❌ Image download failed: $e');
-    } finally {
-      _imageDownloadInProgress.remove(messageId);
-    }
-  }
-
-  // ✅ OPTIMIZED DATE HEADER
-  Widget _buildDateHeader(String date) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFDCF8C6),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        date,
-        style: const TextStyle(
-            color: Colors.black87,
-            fontSize: 12,
-            fontWeight: FontWeight.w500
-        ),
-      ),
-    );
-  }
-
-  // ✅ FIXED: BETTER MEDIA ERROR WIDGET - NO BLINKING
-  Widget _buildMediaError(String url, String error) {
-    return Container(
-      color: Colors.grey[300], // Grey background - NO WHITE
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.image, color: Colors.grey, size: 40),
-          SizedBox(height: 8),
-          Text(
-            'Image',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ WHATSAPP-STYLE LOCAL MEDIA PREVIEW - NO BLINKING
-  Widget _buildLocalMediaPreview(String localPath, Message msg, bool isMe) {
+  // ✅ UPDATED MEDIA MESSAGE WITH PERSISTENT LOADING
+  Widget _buildMediaMessage(Message msg, String mediaUrl, Color textColor) {
+    final userId = LocalAuthService.getUserId();
+    final bool isMe = msg.senderId == userId;
     final tempId = msg.messageId.toString();
     final uploadProgress = _uploadProgress[tempId];
     final isUploading = uploadProgress != null && uploadProgress < 100;
 
-    // ✅ PRINT LOCAL IMAGE INFO
-    _printLocalImageInfo(localPath);
+    // ✅ INSTANT LOCAL PREVIEW
+    if (mediaUrl.startsWith('/') || File(mediaUrl).existsSync()) {
+      return _buildLocalMediaPreview(mediaUrl, msg, isMe);
+    }
+
+    // ✅ PERSISTENT WHATSAPP-STYLE PROGRESSIVE LOADING
+    return GestureDetector(
+      onTap: () => _openImageFullScreen(msg),
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.65,
+        ),
+        child: Stack(
+          children: [
+            // ✅ SMART PERSISTENT PROGRESSIVE IMAGE LOADING
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.65,
+                height: 300,
+                color: Colors.transparent,
+                child: _buildWhatsAppStyleImage(msg, mediaUrl),
+              ),
+            ),
+
+            // ✅ UPLOAD PROGRESS (for sender only)
+            if (isMe && isUploading && uploadProgress != null)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${uploadProgress.toInt()}%',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+
+            // ✅ TIME STAMP WITH TICKS
+            Positioned(
+              bottom: 6,
+              right: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatTime(msg.timestamp),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    if (isMe) const SizedBox(width: 4),
+                    if (isMe)
+                      _buildMessageTicks(msg, isUploading: isUploading),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ WHATSAPP-STYLE LOCAL MEDIA PREVIEW
+  Widget _buildLocalMediaPreview(String localPath, Message msg, bool isMe) {
+    final tempId = msg.messageId.toString();
+    final uploadProgress = _uploadProgress[tempId];
+    final isUploading = uploadProgress != null && uploadProgress < 100;
 
     return GestureDetector(
       onTap: () {
@@ -1011,13 +1073,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         child: Stack(
           children: [
-            // ✅ INSTANT LOCAL IMAGE SHOW - NO BLINKING
+            // ✅ INSTANT LOCAL IMAGE SHOW
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.65,
                 height: 300,
-                color: Colors.grey[300], // Grey background - NO WHITE
+                color: Colors.grey[300],
                 child: Image.file(
                   File(localPath),
                   fit: BoxFit.cover,
@@ -1084,25 +1146,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ PRINT LOCAL IMAGE INFORMATION
-  void _printLocalImageInfo(String localPath) async {
-    try {
-      final file = File(localPath);
-      if (await file.exists()) {
-        final fileSize = await file.length();
-        final dimensions = await _getImageDimensions(file);
-
-        print("📱 LOCAL IMAGE INFO:");
-        print("   📁 Path: $localPath");
-        print("   📊 Size: ${(fileSize / 1024).toStringAsFixed(2)} KB");
-        print("   📐 Dimensions: ${dimensions['width']}x${dimensions['height']}");
-        print("   🏷️ Type: Local file");
-      }
-    } catch (e) {
-      print("❌ Error printing local image info: $e");
-    }
-  }
-
   // ✅ FIXED: WHATSAPP-STYLE MESSAGE TICKS
   Widget _buildMessageTicks(Message msg, {bool isUploading = false}) {
     if (isUploading) {
@@ -1134,177 +1177,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ ULTRA-FAST MEDIA LOADING - WhatsApp Style (NO BLINKING, NO WHITE SPACE)
-  Widget _buildMediaMessage(Message msg, String mediaUrl, Color textColor) {
-    final userId = LocalAuthService.getUserId();
-    final bool isMe = msg.senderId == userId;
-    final tempId = msg.messageId.toString();
-    final uploadProgress = _uploadProgress[tempId];
-    final isUploading = uploadProgress != null && uploadProgress < 100;
 
-    // ✅ INSTANT LOCAL PREVIEW
-    if (mediaUrl.startsWith('/') || File(mediaUrl).existsSync()) {
-      return _buildLocalMediaPreview(mediaUrl, msg, isMe);
-    }
-
-    // ✅ WHATSAPP-STYLE: FAST DOWNLOAD WITH BLUR PREVIEW (NO BLINKING, NO WHITE SPACE)
-    return GestureDetector(
-      onTap: () => _openImageFullScreen(msg),
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.65,
-        ),
-        child: Stack(
-          children: [
-            // ✅ WHATSAPP-STYLE IMAGE LOADING - NO BLINKING, NO WHITE SPACE
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.65,
-                height: 300,
-                color: Colors.grey[300], // Grey background - NO WHITE
-                child: _buildWhatsAppStyleImage(msg, mediaUrl),
-              ),
-            ),
-
-            // ✅ UPLOAD PROGRESS
-            if (isUploading && uploadProgress != null)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${uploadProgress.toInt()}%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-
-            // ✅ TIME STAMP WITH TICKS
-            Positioned(
-              bottom: 6,
-              right: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatTime(msg.timestamp),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                    if (isMe) const SizedBox(width: 4),
-                    if (isMe)
-                      _buildMessageTicks(msg, isUploading: isUploading),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ UPDATED MEDIA MESSAGE BUBBLE
-  Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
-    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (selectedMessageIds.isNotEmpty) {
-          setState(() {
-            selectedMessageIds.clear();
-          });
-        } else if (_focusNode.hasFocus) {
-          _focusNode.unfocus();
-        } else {
-          _openImageFullScreen(msg);
-        }
-      },
-      onLongPress: () {
-        setState(() {
-          final msgId = msg.messageId.toString();
-          if (selectedMessageIds.contains(msgId)) {
-            selectedMessageIds.remove(msgId);
-          } else {
-            selectedMessageIds.clear();
-            selectedMessageIds.add(msgId);
-          }
-        });
-      },
-      child: RepaintBoundary(
-        child: Container(
-          decoration: BoxDecoration(
-            border: isSelected ? Border.all(color: Colors.lightGreen, width: 2) : null,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Align(
-            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              padding: const EdgeInsets.all(6),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.only(
-                  topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
-                  topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
-                  bottomLeft: const Radius.circular(16),
-                  bottomRight: const Radius.circular(16),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildMediaMessage(msg, msg.messageContent, Colors.black),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ✅ UPDATED TEXT MESSAGE BUBBLE WITH FIXED TICKS
+  // ✅ FIXED MESSAGE BUBBLE FOR BETTER MESSAGE HANDLING
   Widget _buildMessageBubble(Message msg, {Key? key}) {
     final String msgId = msg.messageId.toString();
     final bool isSelected = selectedMessageIds.contains(msgId);
-
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
 
-    if (msg.messageId.toString().startsWith('temp_') && msg.messageType == 'media') {
+    // ✅ IMPROVED MEDIA DETECTION
+    final bool isMediaMessage = msg.messageType == 'media' ||
+        msg.messageType == 'encrypted_media' ||
+        (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
+        (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
+
+    if (msg.messageId.toString().startsWith('temp_') && isMediaMessage) {
       return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
     }
 
@@ -1317,9 +1204,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final bool contentDeleted = !isMe && msg.isDeletedSender == 1;
     final String content = contentDeleted ? '❌ This message was deleted' : msg.messageContent;
-    final messageType = msg.messageType;
-
-    final bool isMediaMessage = (messageType == 'media' || messageType == 'encrypted_media') && !contentDeleted;
 
     final borderRadius = BorderRadius.only(
       topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
@@ -1362,7 +1246,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              padding: messageType == 'text' || contentDeleted
+              padding: (msg.messageType == 'text' && !isMediaMessage) || contentDeleted
                   ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
                   : const EdgeInsets.all(6),
               constraints: BoxConstraints(
@@ -1385,15 +1269,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (contentDeleted)
-                    Text(content, style: TextStyle(color: Colors.red[800], fontSize: 14, fontStyle: FontStyle.italic))
-                  else if (messageType == 'text')
-                    Text(content, style: TextStyle(color: textColor, fontSize: 16))
-                  else if (messageType == 'media' || messageType == 'encrypted_media')
-                      _buildMediaMessage(msg, content, textColor)
-                    else
-                      Text("Unsupported message type", style: TextStyle(color: textColor, fontSize: 16)),
+                    Text(
+                        content,
+                        style: TextStyle(color: Colors.red[800], fontSize: 14, fontStyle: FontStyle.italic)
+                    )
 
-                  if (messageType == 'text' && !contentDeleted) ...[
+                  // ✅ TEXT MESSAGE
+                  else if (msg.messageType == 'text' && !isMediaMessage)
+                    Text(content, style: TextStyle(color: textColor, fontSize: 16))
+
+                  // ✅ MEDIA MESSAGE
+                  else if (isMediaMessage)
+                      _buildMediaMessage(msg, msg.messageContent, textColor)
+
+                    // ✅ FALLBACK FOR UNKNOWN TYPES - SHOW ORIGINAL CONTENT
+                    else
+                      Text(
+                        content.isNotEmpty ? content : "📎 Attachment",
+                        style: TextStyle(color: textColor, fontSize: 16),
+                      ),
+
+                  // ✅ TIME STAMP FOR TEXT MESSAGES
+                  if (msg.messageType == 'text' && !contentDeleted && !isMediaMessage) ...[
                     const SizedBox(height: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1419,6 +1316,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String _formatTime(DateTime timestamp) {
     return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+  }
+
+  // ✅ FIXED: BETTER MEDIA ERROR WIDGET
+  Widget _buildMediaError(String url, String error) {
+    return Container(
+      color: Colors.grey[300],
+      child: const Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.image, color: Colors.grey, size: 40),
+          SizedBox(height: 8),
+          Text(
+            'Image',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ OPTIMIZED DATE HEADER
+  Widget _buildDateHeader(String date) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFDCF8C6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        date,
+        style: const TextStyle(
+            color: Colors.black87,
+            fontSize: 12,
+            fontWeight: FontWeight.w500
+        ),
+      ),
+    );
   }
 
   Widget _buildEncryptionNotice() {
@@ -1535,6 +1470,85 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  // ✅ FORWARD MESSAGES FUNCTION
+  Future<void> _forwardMessages() async {
+    if (selectedMessageIds.isEmpty) return;
+
+    final targetChatId = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewChatPage(isForForwarding: true),
+      ),
+    );
+
+    if (targetChatId != null && targetChatId is int) {
+      final messageIdsForForwarding = selectedMessageIds
+          .map((id) => int.tryParse(id) ?? 0)
+          .where((id) => id != 0)
+          .toSet();
+
+      await ChatService.forwardMessages(
+        originalMessageIds: messageIdsForForwarding,
+        targetChatId: targetChatId,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Messages forwarded!")),
+      );
+
+      setState(() {
+        selectedMessageIds.clear();
+      });
+    }
+  }
+
+  // ✅ DELETE MESSAGE FUNCTION
+  Future<void> _showDeleteConfirmation(String messageId) async {
+    final message = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
+    if (message == null) return;
+
+    final userId = LocalAuthService.getUserId();
+    final isMe = message.senderId == userId;
+
+    final String deleteRole = isMe ? 'sender' : 'receiver';
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Message?"),
+        content: Text(
+          isMe
+              ? "Are you sure you want to delete this message for everyone?"
+              : "Are you sure you want to delete this message for yourself?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("CANCEL"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text("DELETE", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      if (userId == null) return;
+
+      await ChatService.deleteMessage(
+        messageId: messageId,
+        userId: userId,
+        role: deleteRole,
+      );
+
+      setState(() {
+        selectedMessageIds.clear();
+      });
+    }
   }
 
   @override

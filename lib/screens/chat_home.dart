@@ -1,7 +1,6 @@
-// lib/pages/chat_home.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:hive/hive.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -36,7 +35,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
   bool _contactsSynced = false;
   bool _notificationAsked = false;
 
-
   late final List<Widget> _screens = [
     ChatsTab(userStatus: _userStatus),
     const GroupsTab(),
@@ -55,8 +53,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
       ChatService.markAllMessagesAsDelivered(userId);
     }
   }
-
-
 
   void _setupUserStatusListener() {
     ChatService.ensureConnected();
@@ -169,6 +165,328 @@ class ChatsTab extends StatefulWidget {
 
 class _ChatsTabState extends State<ChatsTab> {
   static final _cryptoManager = CryptoManager();
+
+  // ✅ SWIPE ACTION METHODS
+  void _showMoreOptions(BuildContext context, Contact contact) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBottomSheetHeader(contact),
+              ListTile(
+                leading: const Icon(Icons.volume_off, color: Colors.grey),
+                title: const Text("Mute Notifications"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteChat(contact.chatId!, contact.name);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cleaning_services, color: Colors.grey),
+                title: const Text("Clear Chat"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _clearChat(contact.chatId!, contact.name);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.red),
+                title: const Text("Block User"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _blockUser(contact.chatId!, contact.name);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text("Delete Chat"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteChat(contact.chatId!, contact.name);
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBottomSheetHeader(Contact contact) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: Colors.grey,
+            child: const Icon(Icons.person, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  contact.name,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  'Chat options',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _muteChat(int chatId, String contactName) {
+    print("Muted chat: $chatId");
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Muted notifications for $contactName")),
+    );
+    // TODO: Implement actual mute logic in Hive
+  }
+
+  void _clearChat(int chatId, String contactName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Clear Chat?"),
+        content: Text("Are you sure you want to clear all messages with $contactName?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCEL"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performClearChat(chatId, contactName);
+            },
+            child: const Text("CLEAR", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ UPDATED: USE CHAT SERVICE FOR CLEARING CHAT
+  void _performClearChat(int chatId, String contactName) async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) return;
+
+      // Use ChatService to clear chat (this will notify server and other user)
+      await ChatService.clearChat(chatId);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Cleared chat with $contactName")),
+      );
+
+      // Refresh UI
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print("Error clearing chat: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error clearing chat: $e")),
+      );
+    }
+  }
+
+  void _blockUser(int chatId, String contactName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Block User?"),
+        content: Text("Are you sure you want to block $contactName? You will no longer receive messages from them."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCEL"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performBlockUser(chatId, contactName);
+            },
+            child: const Text("BLOCK", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ UPDATED: USE CHAT SERVICE FOR BLOCKING USER
+  void _performBlockUser(int chatId, String contactName) async {
+    try {
+      // Find the other user ID from the chat
+      final messagesBox = Hive.box<Message>('messages');
+      final userId = LocalAuthService.getUserId();
+
+      if (userId == null) return;
+
+      // Get the other user ID from any message in this chat
+      final message = messagesBox.values.firstWhereOrNull((msg) => msg.chatId == chatId);
+      if (message == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Cannot find user to block")),
+        );
+        return;
+      }
+
+      final otherUserId = message.senderId == userId ? message.receiverId : message.senderId;
+
+      // Use ChatService to block user
+      await ChatService.blockUser(otherUserId);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Blocked $contactName")),
+      );
+
+      // Refresh UI
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print("Error blocking user: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error blocking user: $e")),
+      );
+    }
+  }
+
+  void _deleteChat(int chatId, String contactName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Chat?"),
+        content: Text("Are you sure you want to delete ALL messages with $contactName? This action cannot be undone."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCEL"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performDeleteChat(chatId, contactName);
+            },
+            child: const Text("DELETE", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ COMPLETELY UPDATED: USE CHAT SERVICE deleteMessage FOR EACH MESSAGE
+  void _performDeleteChat(int chatId, String contactName) async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) return;
+
+      // Step 1: Get all messages for this chat
+      final messagesBox = Hive.box<Message>('messages');
+      final messages = messagesBox.values
+          .where((msg) => msg.chatId == chatId)
+          .toList();
+
+      if (messages.isEmpty) {
+        // If no messages, just delete from chat list
+        final chatBox = Hive.box<Chat>('chatList');
+        chatBox.delete(chatId);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Deleted chat with $contactName")),
+        );
+
+        if (mounted) setState(() {});
+        return;
+      }
+
+      // Step 2: Delete each message using ChatService.deleteMessage
+      int deletedCount = 0;
+      for (var msg in messages) {
+        try {
+          // Determine role for deletion
+          final String role = msg.senderId == userId ? 'sender' : 'receiver';
+
+          // Use ChatService.deleteMessage API
+          await ChatService.deleteMessage(
+            messageId: msg.messageId,
+            userId: userId,
+            role: role,
+          );
+
+          deletedCount++;
+        } catch (e) {
+          print("Error deleting message ${msg.messageId}: $e");
+        }
+      }
+
+      // Step 3: Delete from chat list
+      final chatBox = Hive.box<Chat>('chatList');
+      chatBox.delete(chatId);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Deleted $deletedCount messages with $contactName")),
+      );
+
+      // Step 4: Refresh UI
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print("Error deleting chat: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error deleting chat: $e")),
+      );
+    }
+  }
+
+  // ✅ UNREAD COUNT FUNCTION
+  int _getUnreadCount(int chatId, int currentUserId) {
+    final messagesBox = Hive.box<Message>('messages');
+    final unreadMessages = messagesBox.values.where((msg) =>
+    msg.chatId == chatId &&
+        msg.receiverId == currentUserId &&
+        (msg.isRead == 0 || msg.isRead == null));
+    return unreadMessages.length;
+  }
+
+  // ✅ MARK ALL MESSAGES AS READ FOR A CHAT
+  Future<void> _markChatAsRead(int chatId, int currentUserId) async {
+    final messagesBox = Hive.box<Message>('messages');
+    final unreadMessages = messagesBox.values.where((msg) =>
+    msg.chatId == chatId &&
+        msg.receiverId == currentUserId &&
+        (msg.isRead == 0 || msg.isRead == null));
+
+    for (var msg in unreadMessages) {
+      // Update local message status
+      msg.isRead = 1;
+      await messagesBox.put(msg.messageId, msg);
+
+      // Notify server about read status
+      await ChatService.markMessageRead(msg.messageId, chatId);
+    }
+
+    // Refresh UI
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   // ✅ WhatsApp style message display for home screen
   String _getDisplayMessage(Message message) {
@@ -331,75 +649,168 @@ class _ChatsTabState extends State<ChatsTab> {
                   final contact = sortedContacts[index];
                   final latestMessage = latestMessages.values.firstWhereOrNull((msg) => msg.chatId == contact.chatId);
                   final isOnline = widget.userStatus[contact.id] == 'online';
+                  final unreadCount = contact.chatId != null ? _getUnreadCount(contact.chatId!, userId) : 0;
 
-                  return ListTile(
-                    leading: Stack(
+                  // ✅ SWIPE ENABLED CHAT TILE
+                  return Slidable(
+                    key: ValueKey(contact.chatId ?? contact.id),
+
+                    // 👉 Right swipe for actions (WhatsApp style)
+                    endActionPane: ActionPane(
+                      motion: const DrawerMotion(),
                       children: [
-                        CircleAvatar(
-                          backgroundColor: Colors.grey,
-                          child: const Icon(Icons.person, color: Colors.white),
+                        // 🔹 "More" Button
+                        SlidableAction(
+                          onPressed: (context) => _showMoreOptions(context, contact),
+                          backgroundColor: Colors.grey.shade700,
+                          icon: Icons.more_vert,
+                          label: 'More',
                         ),
-                        if (isOnline)
-                          Positioned(
-                            right: 0,
-                            bottom: 0,
-                            child: Container(
-                              width: 12,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
+
+                        // 🔹 "Delete" Button
+                        SlidableAction(
+                          onPressed: (context) => _deleteChat(contact.chatId!, contact.name),
+                          backgroundColor: Colors.red,
+                          icon: Icons.delete,
+                          label: 'Delete',
+                        ),
+                      ],
+                    ),
+
+                    // 👉 Your existing ListTile content
+                    child: ListTile(
+                      leading: Stack(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: Colors.grey,
+                            child: const Icon(Icons.person, color: Colors.white),
+                          ),
+                          if (isOnline)
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                    title: Text(contact.name),
-                    subtitle: Row(
-                      children: [
-                        if (latestMessage != null)
-                          _buildTickIcon(latestMessage, userId),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            isOnline ? 'Online' : (contact.lastMessage ?? "No message"),
-                            style: TextStyle(
-                              color: isOnline ? Colors.green.shade600 : Colors.grey,
-                              fontWeight: isOnline ? FontWeight.bold : FontWeight.normal,
+                          if (unreadCount > 0)
+                            Positioned(
+                              top: 0,
+                              right: 0,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 1.5),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    unreadCount > 9 ? '9+' : unreadCount.toString(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        ],
+                      ),
+                      title: Text(
+                        contact.name,
+                        style: TextStyle(
+                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
                         ),
-                      ],
-                    ),
-                    trailing: Text(
-                      _formatTime(contact.lastMessageTime),
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                    onTap: () {
-                      if (contact.chatId == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Chat ID not found.")),
-                        );
-                        return;
-                      }
+                      ),
+                      subtitle: Row(
+                        children: [
+                          if (latestMessage != null)
+                            _buildTickIcon(latestMessage, userId),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              isOnline ? 'Online' : (contact.lastMessage ?? "No message"),
+                              style: TextStyle(
+                                color: isOnline
+                                    ? Colors.green.shade600
+                                    : (unreadCount > 0 ? Colors.black : Colors.grey),
+                                fontWeight: isOnline || unreadCount > 0
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _formatTime(contact.lastMessageTime),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: unreadCount > 0 ? Colors.black : Colors.grey,
+                              fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          if (unreadCount > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF25D366),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                unreadCount > 9 ? '9+' : unreadCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      onTap: () {
+                        if (contact.chatId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Chat ID not found.")),
+                          );
+                          return;
+                        }
 
-                      // ✅ WHATSAPP-STYLE: Directly open at last message
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatScreen(
-                            chatId: contact.chatId!,
-                            otherUserId: contact.id,
-                            otherUserName: contact.name,
+                        // ✅ MARK AS READ BEFORE OPENING CHAT
+                        _markChatAsRead(contact.chatId!, userId);
+
+                        // ✅ WHATSAPP-STYLE: Directly open at last message
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatScreen(
+                              chatId: contact.chatId!,
+                              otherUserId: contact.id,
+                              otherUserName: contact.name,
+                            ),
                           ),
-                        ),
-                      ).then((_) {
-                        // ✅ Ensure scroll to bottom when returning to chat
-                        // This helps maintain the WhatsApp-like behavior
-                      });
-                    },
+                        ).then((_) {
+                          // ✅ Ensure UI refresh when returning from chat
+                          if (mounted) {
+                            setState(() {});
+                          }
+                        });
+                      },
+                    ),
                   );
                 },
               ),

@@ -73,6 +73,16 @@ class Message extends HiveObject {
   @HiveField(23)
   int _imageLoadStage = 0;
 
+  // ✅ NEW FIELDS FOR REPLY AND FORWARD FUNCTIONALITY
+  @HiveField(24)
+  String? replyToMessageId;
+
+  @HiveField(25)
+  bool isForwarded;
+
+  @HiveField(26)
+  String? forwardedFrom;
+
   // Optional fields
   @HiveField(9)
   String? senderName;
@@ -110,6 +120,10 @@ class Message extends HiveObject {
     this.highQualityUrl,
     this.blurHash,
     this.thumbnailBase64,
+    // ✅ NEW FIELDS WITH DEFAULT VALUES
+    this.replyToMessageId,
+    this.isForwarded = false,
+    this.forwardedFrom,
   });
 
   // ✅ PROGRESSIVE LOADING GETTERS AND SETTERS
@@ -135,7 +149,7 @@ class Message extends HiveObject {
     return _imageLoadStage == 2 && highQualityUrl != null;
   }
 
-  // ✅ FROM JSON FACTORY METHOD
+  // ✅ FROM JSON FACTORY METHOD - UPDATED WITH NEW FIELDS
   factory Message.fromJson(Map<String, dynamic> json) {
     try {
       final dynamic messageIdFromServer = json['message_id'];
@@ -203,6 +217,11 @@ class Message extends HiveObject {
         }
       }
 
+      // ✅ HANDLE REPLY AND FORWARD FIELDS
+      final String? replyToMessageId = json['reply_to_message_id']?.toString();
+      final bool isForwarded = json['is_forwarded'] == true || json['is_forwarded'] == 1;
+      final String? forwardedFrom = json['forwarded_from']?.toString();
+
       DateTime parsedTimestamp;
       final dynamic timestampData = json['timestamp'];
       if (timestampData is int) {
@@ -236,6 +255,10 @@ class Message extends HiveObject {
         lowQualityUrl: lowQualityUrl,
         highQualityUrl: highQualityUrl,
         blurHash: json['blur_hash']?.toString() ?? json['blurHash']?.toString(),
+        // ✅ NEW FIELDS
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+        forwardedFrom: forwardedFrom,
         extraData: json['extra_data'] != null
             ? Map<String, dynamic>.from(json['extra_data'])
             : null,
@@ -273,7 +296,7 @@ class Message extends HiveObject {
     }
   }
 
-  // ✅ TO JSON METHOD
+  // ✅ TO JSON METHOD - UPDATED WITH NEW FIELDS
   Map<String, dynamic> toJson() {
     return {
       'message_id': messageId,
@@ -298,11 +321,15 @@ class Message extends HiveObject {
       'low_quality_url': lowQualityUrl,
       'high_quality_url': highQualityUrl,
       'blur_hash': blurHash,
+      // ✅ NEW FIELDS
+      'reply_to_message_id': replyToMessageId,
+      'is_forwarded': isForwarded,
+      'forwarded_from': forwardedFrom,
       'extra_data': extraData,
     };
   }
 
-  // ✅ COPYWITH
+  // ✅ COPYWITH - UPDATED WITH NEW FIELDS
   Message copyWith({
     String? messageId,
     int? chatId,
@@ -327,6 +354,10 @@ class Message extends HiveObject {
     String? highQualityUrl,
     String? blurHash,
     String? thumbnailBase64,
+    // ✅ NEW FIELDS
+    String? replyToMessageId,
+    bool? isForwarded,
+    String? forwardedFrom,
   }) {
     return Message(
       messageId: messageId ?? this.messageId,
@@ -351,6 +382,10 @@ class Message extends HiveObject {
       highQualityUrl: highQualityUrl ?? this.highQualityUrl,
       blurHash: blurHash ?? this.blurHash,
       thumbnailBase64: thumbnailBase64 ?? this.thumbnailBase64,
+      // ✅ NEW FIELDS
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      isForwarded: isForwarded ?? this.isForwarded,
+      forwardedFrom: forwardedFrom ?? this.forwardedFrom,
       extraData: extraData ?? this.extraData,
     );
   }
@@ -367,6 +402,10 @@ class Message extends HiveObject {
   bool get hasLowQualityUrl => lowQualityUrl != null && lowQualityUrl!.isNotEmpty;
   bool get hasHighQualityUrl => highQualityUrl != null && highQualityUrl!.isNotEmpty;
   bool get hasBlurHash => blurHash != null && blurHash!.isNotEmpty;
+
+  // ✅ NEW GETTERS FOR REPLY AND FORWARD
+  bool get hasReply => replyToMessageId != null && replyToMessageId!.isNotEmpty;
+  bool get isForwardedMessage => isForwarded;
 
   String get displayContent {
     if (messageType == 'media' || messageType == 'encrypted_media') {
@@ -456,6 +495,8 @@ class Message extends HiveObject {
         'highQuality: ${highQualityUrl != null ? "available" : "none"}, '
         'blurHash: ${blurHash != null ? "available" : "none"}, '
         'thumbnailBase64: ${thumbnailBase64 != null ? "${thumbnailBase64?.length} chars" : "none"}, '
+        'replyTo: ${replyToMessageId ?? "none"}, '
+        'forwarded: $isForwarded, '
         'loaded: $isImageLoaded)';
   }
 }

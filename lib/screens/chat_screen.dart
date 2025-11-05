@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -20,6 +20,7 @@ import '../models/chat_model.dart';
 import '../services/chat_service.dart';
 import '../services/local_auth_service.dart';
 import '../services/contact_service.dart';
+import 'multi_image_picker_screen.dart';
 import 'new_chat_page.dart';
 import 'media_viewer_screen.dart';
 
@@ -64,9 +65,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Set<String> selectedMessageIds = {};
   late ScrollController _scrollController;
+
   File? _imageFile;
   final _messageBox = Hive.box<Message>('messages');
   final _authBox = Hive.box('authBox');
+  final _scrollBox = Hive.box('chatScroll');
 
   bool _isTyping = false;
   bool _isOtherUserTyping = false;
@@ -90,6 +93,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _shouldScrollToBottom = true;
   bool _hasInitialScrollDone = false;
 
+  // ✅ REPLY FUNCTIONALITY
+  Message? _replyingToMessage;
+  final GlobalKey _replyPreviewKey = GlobalKey();
+
+  // ✅ SWIPE TO REPLY VARIABLES
+  double _swipeOffset = 0.0;
+  bool _isSwiping = false;
+  Message? _swipeMessage;
+
+  // ✅ FLOATING SCROLL BUTTON
+  bool _showScrollToBottom = false;
+
+  // ✅ SELECTION MODE
+  bool _selectionMode = false;
+
+  // ✅ OPTIMIZED SCROLLING VARIABLES
+  bool _isAtBottom = true;
+  double _scrollThreshold = 100.0;
+
+  // ✅ PERFORMANCE OPTIMIZATION - MESSAGE CACHING
+  List<Message> _cachedMessages = [];
+  bool _needsRefresh = true;
+  Timer? _updateTimer;
+
   // ✅ DUPLICATE PROTECTION
   final Set<String> _processedMessageIds = {};
 
@@ -103,35 +130,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ LOAD MORE MESSAGES
   DateTime _oldestMessageTime = DateTime.now();
-
-  // ✅ PERMANENT FIX: Use Hive to store loaded status
-  bool get _areMessagesLoaded {
-    return _authBox.get('messages_loaded_${widget.chatId}', defaultValue: false) ?? false;
-  }
-
-  set _areMessagesLoaded(bool value) {
-    _authBox.put('messages_loaded_${widget.chatId}', value);
-  }
-
-  // ✅ API BASE URL
-  static const String apiBase = "http://184.168.126.71/api";
+  bool _hasMoreMessages = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _scrollController = ScrollController(keepScrollOffset: true);
+    _scrollController = ScrollController(
+      keepScrollOffset: true,
+    );
 
+    _initializeChat();
+    _restoreScrollPosition();
+  }
+
+  void _initializeChat() {
     ChatService.initSocket();
     ChatService.ensureConnected();
 
     _lastReadMessageId = int.tryParse(_authBox.get('lastReadMessageId_${widget.chatId}', defaultValue: '0').toString()) ?? 0;
 
-    // ✅ IMMEDIATE SCROLL TO BOTTOM ON INIT
+    _scrollController.addListener(() {
+      _updateScrollToBottomPreference();
+      _updateLastReadMessageId();
+      _updateFloatingButtonVisibility();
+
+      if (_scrollController.offset <= _scrollController.position.minScrollExtent + 200 &&
+          _hasMoreMessages &&
+          !_isLoadingMore) {
+        _loadMoreMessages();
+      }
+    });
+
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _jumpToBottom();
+      if (mounted && _shouldScrollToBottom) {
+        _scrollToBottomSmooth();
       }
     });
 
@@ -141,7 +175,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!_areMessagesLoaded) {
         await _fetchMessages();
       } else {
-        print("✅ Using previously loaded messages for chat ${widget.chatId}");
         if (mounted) setState(() {});
       }
 
@@ -149,23 +182,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _jumpToBottom();
+          _scrollToBottomSmooth();
           _isFirstLoad = false;
         }
       });
       _hasInitialScrollDone = true;
     });
 
-    // ✅ FIXED: STRONG DUPLICATE PROTECTION IN NEW MESSAGE LISTENER
     _newMessageSubscription = ChatService.onNewMessage.listen((msg) async {
       if (mounted && msg.chatId == widget.chatId) {
         if (_processedMessageIds.contains(msg.messageId)) {
-          print("⚠️ DUPLICATE BLOCKED in UI: ${msg.messageId}");
           return;
         }
 
         _processedMessageIds.add(msg.messageId);
-
         Future.delayed(const Duration(seconds: 30), () {
           _processedMessageIds.remove(msg.messageId);
         });
@@ -175,25 +205,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
 
         if (existingMessage == null) {
-          print("💾 New message from socket: ${msg.messageId}");
-          print("📸 Low quality URL available: ${msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty}");
-          print("🎨 BlurHash available: ${msg.blurHash != null && msg.blurHash!.isNotEmpty}");
-          print("🖼️ Thumbnail Base64 available: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty}");
-
-          // ✅ AUTO-START PROGRESSIVE LOADING FOR NEW MESSAGES
-          _startProgressiveLoading(msg);
+          if (_isAtBottom) {
+            _scrollToBottomSmooth();
+            HapticFeedback.selectionClick();
+          } else {
+            _showNewMessageToast();
+          }
 
           await _resolveHeader();
-          if (_shouldScrollToBottom) {
-            _jumpToBottom();
+
+          if ((msg.messageType == 'media' || msg.messageType == 'encrypted_media') &&
+              !_fullyLoadedMessages.contains(msg.messageId)) {
+            _startProgressiveLoading(msg);
           }
-        } else {
-          print("⚠️ Duplicate message from socket: ${msg.messageId}");
+
+          _needsRefresh = true;
         }
       }
     });
 
-    // ✅ UPLOAD PROGRESS LISTENER
     _uploadProgressSubscription = ChatService.onUploadProgress.listen((progressData) {
       final tempId = progressData['tempId'];
       final progress = progressData['progress'];
@@ -209,10 +239,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
-    // ✅ MESSAGE DELIVERED LISTENER - FOR TICKS UPDATE
     _messageDeliveredSubscription = ChatService.onMessageDelivered.listen((messageId) {
       if (mounted) {
-        print("✅ Message delivered update: $messageId");
+        _needsRefresh = true;
       }
     });
 
@@ -232,25 +261,125 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
-    _scrollController.addListener(() {
-      _updateLastReadMessageId();
-      _updateScrollToBottomPreference();
-
-      if (_scrollController.offset <= _scrollController.position.minScrollExtent + 100) {
-        _loadMoreMessages();
-      }
-    });
-
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
         setState(() {
           _isKeyboardOpen = true;
         });
+        if (_shouldScrollToBottom) {
+          _scrollToBottomSmooth();
+        }
       } else {
         setState(() {
           _isKeyboardOpen = false;
         });
       }
+    });
+  }
+
+  bool get _areMessagesLoaded {
+    return _authBox.get('messages_loaded_${widget.chatId}', defaultValue: false) ?? false;
+  }
+
+  set _areMessagesLoaded(bool value) {
+    _authBox.put('messages_loaded_${widget.chatId}', value);
+  }
+
+  List<Message> _getOptimizedMessages() {
+    if (!_needsRefresh && _cachedMessages.isNotEmpty) {
+      return _cachedMessages;
+    }
+
+    final messages = _messageBox.values
+        .where((msg) => msg.chatId == widget.chatId)
+        .where((msg) => !msg.messageId.toString().startsWith('temp_') ||
+        (msg.messageId.toString().startsWith('temp_') && msg.messageType == 'media'))
+        .toList();
+
+    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    _cachedMessages = messages;
+    _needsRefresh = false;
+
+    return messages;
+  }
+
+  void _scrollToBottomSmooth() {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients && _shouldScrollToBottom) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        try {
+          final maxScroll = _scrollController.position.maxScrollExtent;
+          _scrollController.jumpTo(maxScroll);
+        } catch (e) {
+          print("Scroll error: $e");
+        }
+      }
+    });
+  }
+
+  void _saveScrollPosition() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.offset;
+    _scrollBox.put('chat_${widget.chatId}', pos);
+  }
+
+  void _restoreScrollPosition() {
+    final pos = _scrollBox.get('chat_${widget.chatId}', defaultValue: 0.0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients && pos > 0) {
+        _scrollController.jumpTo(pos.toDouble());
+      }
+    });
+  }
+
+  void _showNewMessageToast() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('New message'),
+        duration: const Duration(seconds: 2),
+        action: SnackBarAction(
+          label: 'Scroll',
+          onPressed: _scrollToBottom,
+        ),
+      ),
+    );
+  }
+
+  void _updateScrollToBottomPreference() {
+    if (!_scrollController.hasClients) return;
+
+    final double currentOffset = _scrollController.offset;
+    final double maxOffset = _scrollController.position.maxScrollExtent;
+
+    setState(() {
+      _isAtBottom = (maxOffset - currentOffset) <= _scrollThreshold;
+      _shouldScrollToBottom = _isAtBottom;
+    });
+
+    _saveScrollPosition();
+  }
+
+  void _updateFloatingButtonVisibility() {
+    if (!_scrollController.hasClients) return;
+
+    final double currentOffset = _scrollController.offset;
+    final double maxOffset = _scrollController.position.maxScrollExtent;
+
+    setState(() {
+      _showScrollToBottom = (maxOffset - currentOffset) > 400;
     });
   }
 
@@ -266,10 +395,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _newMessageSubscription?.cancel();
     _uploadProgressSubscription?.cancel();
     _messageDeliveredSubscription?.cancel();
+    _updateTimer?.cancel();
 
-    // ✅ CLEANUP LOADING TIMERS
     _loadTimers.forEach((key, timer) => timer.cancel());
     _loadTimers.clear();
+
+    _saveScrollPosition();
 
     _scrollController.dispose();
     _processedMessageIds.clear();
@@ -295,11 +426,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  // ✅ IMPROVED JUMP TO BOTTOM - WHATSAPP STYLE
   void _jumpToBottom() {
     if (!_scrollController.hasClients) return;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && _shouldScrollToBottom) {
         try {
           final maxScroll = _scrollController.position.maxScrollExtent;
@@ -310,17 +440,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           print("Scroll error: $e");
         }
       }
-    });
-  }
-
-  void _updateScrollToBottomPreference() {
-    if (!_scrollController.hasClients) return;
-    final double currentOffset = _scrollController.offset;
-    final double maxOffset = _scrollController.position.maxScrollExtent;
-    final double threshold = 100.0;
-
-    setState(() {
-      _shouldScrollToBottom = (maxOffset - currentOffset) <= threshold;
     });
   }
 
@@ -335,11 +454,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _updateLastReadMessageId() {
     if (!_scrollController.hasClients) return;
 
-    final messages = _messageBox.values
-        .where((msg) => msg.chatId == widget.chatId)
-        .toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
+    final messages = _getOptimizedMessages();
     if (messages.isEmpty) return;
 
     final firstVisibleIndex = (_scrollController.position.maxScrollExtent - _scrollController.offset) ~/ (60);
@@ -357,32 +472,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: PERSISTENT PROGRESSIVE LOADING FUNCTIONS
   void _startProgressiveLoading(Message msg) {
     final messageId = msg.messageId;
 
-    // ✅ CHECK IF MESSAGE IS ALREADY FULLY LOADED
     if (_fullyLoadedMessages.contains(messageId)) {
-      print("✅ Message already fully loaded: $messageId");
-      _imageLoadStages[messageId] = 3; // Mark as high quality loaded
+      _imageLoadStages[messageId] = 3;
       return;
     }
 
-    // ✅ CHECK IF ALREADY LOADING
     if (_imageLoadStages.containsKey(messageId)) {
-      print("⚠️ Already loading: $messageId");
       return;
     }
 
-    print("🚀 Starting WhatsApp-style loading: $messageId");
-    print("   - BlurHash: ${msg.blurHash != null ? 'Available' : 'Not Available'}");
-    print("   - Low Quality URL: ${msg.lowQualityUrl ?? 'Not Available'}");
-    print("   - High Quality URL: ${msg.highQualityUrl ?? 'Not Available'}");
-
-    // Start with stage 1 (low quality loading)
     _imageLoadStages[messageId] = 1;
 
-    // Auto-load high quality after low quality is visible
     _loadTimers[messageId] = Timer(const Duration(milliseconds: 800), () {
       if (_imageLoadStages[messageId] == 2 && mounted) {
         _loadHighQualityImage(msg);
@@ -394,21 +497,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _markLowQualityLoaded(Message msg) {
     final messageId = msg.messageId;
-    print("✅ Low quality loaded: $messageId");
     _imageLoadStages[messageId] = 2;
-
     if (mounted) setState(() {});
   }
 
   void _loadHighQualityImage(Message msg) {
     final messageId = msg.messageId;
-
     if (_imageLoadStages[messageId] == 3) return;
 
-    print("🔄 Loading high quality: $messageId");
     _imageLoadStages[messageId] = 3;
 
-    // ✅ MARK AS FULLY LOADED ONCE HIGH QUALITY LOADS
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _fullyLoadedMessages.add(messageId);
@@ -419,120 +517,206 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  // ✅ FIXED: WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET WITH PERSISTENCE
-  Widget _buildWhatsAppStyleImage(Message msg, String mediaUrl) {
-    final messageId = msg.messageId;
-    final loadStage = _imageLoadStages[messageId] ?? 0;
+  void _handleSwipeStart(DragStartDetails details, Message message) {
+    if (_selectionMode) return;
+    _swipeMessage = message;
+    _isSwiping = true;
+  }
 
-    // ✅ FIX: ONLY START LOADING IF NOT ALREADY LOADED
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_imageLoadStages[messageId] == null &&
-          !_fullyLoadedMessages.contains(messageId) &&
-          (msg.messageType == 'media' || msg.messageType == 'encrypted_media')) {
-        _startProgressiveLoading(msg);
+  void _handleSwipeUpdate(DragUpdateDetails details) {
+    if (!_isSwiping || _selectionMode) return;
+
+    _swipeOffset += details.delta.dx;
+
+    if (_swipeOffset > 0) {
+      _swipeOffset = _swipeOffset.clamp(0.0, 100.0);
+    } else {
+      _swipeOffset = 0.0;
+    }
+
+    setState(() {});
+  }
+
+  void _handleSwipeEnd(DragEndDetails details) {
+    if (!_isSwiping || _selectionMode) return;
+
+    if (_swipeOffset > 60) {
+      _startReply(_swipeMessage!);
+      HapticFeedback.lightImpact();
+    }
+
+    _swipeOffset = 0.0;
+    _isSwiping = false;
+    _swipeMessage = null;
+    setState(() {});
+  }
+
+  Widget _buildFloatingScrollButton() {
+    if (!_showScrollToBottom || !_scrollController.hasClients) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      bottom: 100,
+      right: 16,
+      child: FloatingActionButton(
+        backgroundColor: const Color(0xFF075E54),
+        mini: true,
+        onPressed: () {
+          _scrollToBottom();
+          HapticFeedback.lightImpact();
+        },
+        child: const Icon(Icons.arrow_downward, color: Colors.white, size: 20),
+      ),
+    );
+  }
+
+  void _enterSelectionMode(String messageId) {
+    setState(() {
+      _selectionMode = true;
+      selectedMessageIds.add(messageId);
+    });
+  }
+
+  void _toggleSelection(String messageId) {
+    setState(() {
+      if (selectedMessageIds.contains(messageId)) {
+        selectedMessageIds.remove(messageId);
+        if (selectedMessageIds.isEmpty) _selectionMode = false;
+      } else {
+        selectedMessageIds.add(messageId);
       }
     });
+  }
 
-    return Stack(
-      children: [
-        // ✅ 1. BLUR HASH - INSTANT (0ms) - ONLY SHOW IF LOW QUALITY NOT LOADED
-        if (msg.blurHash != null && msg.blurHash!.isNotEmpty && loadStage < 2)
-          Positioned.fill(
-            child: Container(
-              color: Colors.grey[200],
-              child: BlurHash(
-                hash: msg.blurHash!,
-                imageFit: BoxFit.cover,
-              ),
+  void _clearSelection() {
+    setState(() {
+      _selectionMode = false;
+      selectedMessageIds.clear();
+    });
+  }
+
+  Widget _buildSelectionBottomBar() {
+    if (!_selectionMode) return const SizedBox.shrink();
+
+    return Container(
+      height: 60,
+      decoration: BoxDecoration(
+        color: const Color(0xFF075E54),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: _clearSelection,
+          ),
+          Text(
+            "${selectedMessageIds.length}",
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
             ),
           ),
-
-        // ✅ 2. LOW QUALITY IMAGE - FAST (100-500ms)
-        if (loadStage >= 1)
-          Positioned.fill(
-            child: CachedNetworkImage(
-              imageUrl: msg.lowQualityUrl ?? mediaUrl,
-              fit: BoxFit.cover,
-              placeholder: (context, url) {
-                // Show blur hash while low quality loads
-                return msg.blurHash != null
-                    ? BlurHash(hash: msg.blurHash!, imageFit: BoxFit.cover)
-                    : Container(color: Colors.grey[300]);
-              },
-              errorWidget: (context, url, error) {
-                // If low quality fails, load high quality directly
-                _loadHighQualityImage(msg);
-                return Container(color: Colors.grey[300]);
-              },
-              imageBuilder: (context, imageProvider) {
-                // Low quality loaded successfully
-                if (loadStage == 1) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _markLowQualityLoaded(msg);
-                  });
-                }
-                return Image(image: imageProvider, fit: BoxFit.cover);
-              },
-            ),
-          ),
-
-        // ✅ 3. HIGH QUALITY IMAGE - SLOW (500ms-2s) - FADE IN OVER LOW QUALITY
-        if (loadStage >= 3)
-          Positioned.fill(
-            child: CachedNetworkImage(
-              imageUrl: msg.highQualityUrl ?? mediaUrl,
-              fit: BoxFit.cover,
-              fadeInDuration: const Duration(milliseconds: 300),
-              placeholder: (context, url) {
-                // Show low quality while high quality loads
-                return Container(); // Low quality already visible in background
-              },
-              imageBuilder: (context, imageProvider) {
-                // High quality loaded - fade in over low quality
-                return AnimatedOpacity(
-                  opacity: 1.0,
-                  duration: const Duration(milliseconds: 400),
-                  child: Image(image: imageProvider, fit: BoxFit.cover),
-                );
-              },
-            ),
-          ),
-
-        // ✅ LOADING INDICATOR (Only show if loading in progress and not fully loaded)
-        if ((loadStage == 1 || loadStage == 3) && !_fullyLoadedMessages.contains(messageId))
-          Positioned(
-            bottom: 8,
-            right: 8,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Colors.white),
+          Row(
+            children: [
+              if (_hasTextMessagesSelected())
+                IconButton(
+                  icon: const Icon(Icons.copy, color: Colors.white),
+                  onPressed: _copySelectedMessages,
                 ),
+              IconButton(
+                icon: const Icon(Icons.forward, color: Colors.white),
+                onPressed: _forwardSelectedMessages,
               ),
-            ),
+              IconButton(
+                icon: const Icon(Icons.delete, color: Colors.white),
+                onPressed: _deleteSelectedMessages,
+              ),
+            ],
           ),
-      ],
+        ],
+      ),
     );
+  }
+
+  bool _hasTextMessagesSelected() {
+    for (final messageId in selectedMessageIds) {
+      final message = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
+      if (message != null && message.messageType == 'text') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _copySelectedMessages() {
+    final textMessages = selectedMessageIds
+        .map((id) => _messageBox.values.firstWhereOrNull((m) => m.messageId == id))
+        .where((msg) => msg != null && msg.messageType == 'text')
+        .map((msg) => msg!.messageContent)
+        .toList();
+
+    if (textMessages.isNotEmpty) {
+      final textToCopy = textMessages.join('\n\n');
+      Clipboard.setData(ClipboardData(text: textToCopy));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Copied ${textMessages.length} message${textMessages.length > 1 ? 's' : ''}"),
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFF075E54),
+        ),
+      );
+
+      _clearSelection();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No text messages selected to copy"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _copySingleMessage(String messageId) {
+    final message = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
+    if (message != null && message.messageType == 'text') {
+      Clipboard.setData(ClipboardData(text: message.messageContent));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Message copied"),
+          duration: Duration(seconds: 2),
+          backgroundColor: Color(0xFF075E54),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Cannot copy media messages"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _resolveHeader() async {
     try {
       String? phone = _authBox.get('otherUserPhone');
       if (phone == null || phone.toString().trim().isEmpty) {
-        final msgs = _messageBox.values
-            .where((m) => m.chatId == widget.chatId)
-            .toList()
-          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        final msgs = _getOptimizedMessages();
 
-        for (final m in msgs) {
+        for (final m in msgs.reversed) {
           if (m.senderId == widget.otherUserId && (m.senderPhoneNumber?.isNotEmpty ?? false)) {
             phone = m.senderPhoneNumber!;
             break;
@@ -568,20 +752,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ LOAD MORE MESSAGES FOR INFINITE SCROLL
   Future<void> _loadMoreMessages() async {
-    if (_isLoadingMore) return;
+    if (_isLoadingMore || !_hasMoreMessages) return;
 
     setState(() => _isLoadingMore = true);
 
     try {
-      final messages = _messageBox.values
-          .where((msg) => msg.chatId == widget.chatId)
-          .toList();
+      final currentScroll = _scrollController.offset;
+      final messages = _getOptimizedMessages();
 
       if (messages.isNotEmpty) {
-        messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         _oldestMessageTime = messages.first.timestamp;
+
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(currentScroll + 100);
+          }
+        });
       }
     } catch (e) {
       print("Error loading more messages: $e");
@@ -592,15 +781,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: _fetchMessages with STRONG duplicate prevention
-  // ✅ FIXED: ALWAYS LOAD LAST 50 MESSAGES FROM SERVER (WHATSAPP STYLE)
   Future<void> _fetchMessages() async {
     try {
-      print("🔄 Loading last 50 messages from server for chat ${widget.chatId}");
-
-      final url = Uri.parse("$apiBase/get_messages.php?chat_id=${widget.chatId}");
-
-      print("🌐 Request URL: $url");
+      final url = Uri.parse("${Config.baseNodeApiUrl}/messages/combined/${widget.chatId}");
 
       final res = await http.get(url);
 
@@ -612,7 +795,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           int duplicateCount = 0;
 
           final messages = List.from(data["messages"]);
-          print("📥 Received ${messages.length} messages from server");
 
           for (var msg in messages) {
             final messageId = msg["message_id"]?.toString();
@@ -621,7 +803,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
             if (idToProcess == null) continue;
 
-            // ✅ LESS STRICT DUPLICATE CHECK FOR FRESH INSTALL
             final existingMessage = _messageBox.values.firstWhereOrNull(
                   (existingMsg) => existingMsg.messageId == idToProcess,
             );
@@ -645,17 +826,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       setState(() {
         _areMessagesLoaded = true;
+        _needsRefresh = true;
       });
 
     } catch (e) {
       print("❌ Fetch messages error: $e");
       setState(() {
         _areMessagesLoaded = true;
+        _needsRefresh = true;
       });
     }
   }
 
-  // ✅ FIXED: BETTER INCOMING MESSAGE HANDLING
   Future<void> _handleIncomingData(dynamic data) async {
     try {
       final messageId = data["message_id"]?.toString();
@@ -663,44 +845,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final idToProcess = messageId ?? tempId;
 
       if (idToProcess == null) {
-        print("❌ Incoming data has no valid message_id or temp_id");
         return;
       }
 
-      // ✅ IMPROVED MESSAGE TYPE DETECTION
       String messageText = data["message_text"]?.toString() ?? "";
       String messageType = data["message_type"]?.toString() ?? "text";
 
-      // ✅ AUTO-DETECT MEDIA MESSAGES
       bool hasMedia = (data["media_url"] != null && data["media_url"].toString().isNotEmpty) ||
           (data["low_quality_url"] != null && data["low_quality_url"].toString().isNotEmpty) ||
           (data["high_quality_url"] != null && data["high_quality_url"].toString().isNotEmpty);
 
       if (hasMedia) {
         messageType = "media";
-        messageText = "media"; // Set text to "media" for media messages
+        messageText = "media";
       }
 
-      // ✅ EXTRACT MEDIA URLs
       String? mediaUrl = data["media_url"]?.toString();
       String? lowQualityUrl = data["low_quality_url"]?.toString();
       String? highQualityUrl = data["high_quality_url"]?.toString();
       String? blurHash = data["blur_hash"]?.toString();
       String? thumbnailBase64 = data["thumbnail_data"]?.toString() ?? data["thumbnail"]?.toString();
+      String? replyToMessageId = data["reply_to_message_id"]?.toString();
+      bool isForwarded = data["is_forwarded"] == true || data["is_forwarded"] == 1;
+      String? forwardedFrom = data["forwarded_from"]?.toString();
 
-      // ✅ CONVERT TO FULL URLS IF NEEDED
       mediaUrl = _convertToFullUrl(mediaUrl);
       lowQualityUrl = _convertToFullUrl(lowQualityUrl);
       highQualityUrl = _convertToFullUrl(highQualityUrl);
-
-      print("🔍 PROCESSING MESSAGE:");
-      print("   - ID: $idToProcess");
-      print("   - Type: $messageType");
-      print("   - Has Media: $hasMedia");
-      print("   - Text: $messageText");
-      print("   - Media URL: $mediaUrl");
-      print("   - Low Quality: $lowQualityUrl");
-      print("   - High Quality: $highQualityUrl");
 
       final msg = Message(
         messageId: idToProcess,
@@ -720,23 +891,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         highQualityUrl: highQualityUrl,
         blurHash: blurHash,
         thumbnailBase64: thumbnailBase64,
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+        forwardedFrom: forwardedFrom,
       );
 
       await ChatService.saveMessageLocal(msg);
-      print("💾 Saved message: $idToProcess (Type: $messageType)");
 
-      // ✅ START PROGRESSIVE LOADING FOR MEDIA MESSAGES
       if (messageType == 'media' && mounted && !_fullyLoadedMessages.contains(msg.messageId)) {
         _startProgressiveLoading(msg);
       }
 
+      _needsRefresh = true;
+
     } catch (e) {
       print("❌ Error handling incoming data: $e");
-      print("❌ Problematic data: ${data.toString()}");
     }
   }
 
-// ✅ ADD THIS HELPER FUNCTION (Class mein add karein)
   String? _convertToFullUrl(String? url) {
     if (url == null || url.isEmpty) return null;
 
@@ -749,6 +921,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     return url;
   }
+
   void _clearTemporaryMessages() {
     try {
       final temporaryMessages = _messageBox.values.where((msg) =>
@@ -762,6 +935,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       if (temporaryMessages.isNotEmpty) {
         print("🧹 Cleared ${temporaryMessages.length} temporary messages for chat ${widget.chatId}");
+        _needsRefresh = true;
       }
     } catch (e) {
       print("❌ Error clearing temporary messages: $e");
@@ -785,6 +959,75 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _typingTimer?.cancel();
   }
 
+  void _startReply(Message message) {
+    setState(() {
+      _replyingToMessage = message;
+    });
+    _focusNode.requestFocus();
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyingToMessage = null;
+    });
+  }
+
+  Widget _buildReplyPreview() {
+    if (_replyingToMessage == null) return const SizedBox.shrink();
+
+    final replyMsg = _replyingToMessage!;
+    final isMe = replyMsg.senderId == LocalAuthService.getUserId();
+    final senderName = isMe ? "You" : (replyMsg.senderName ?? "User");
+
+    return Container(
+      key: _replyPreviewKey,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        border: Border(
+          bottom: BorderSide(color: Colors.grey[300]!),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Replying to $senderName",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.green,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _getReplyPreviewText(replyMsg),
+                  style: const TextStyle(fontSize: 14),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            onPressed: _cancelReply,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getReplyPreviewText(Message msg) {
+    if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
+      return '📷 Media';
+    }
+    return msg.messageContent;
+  }
+
   void _openImageFullScreen(Message message) {
     final bool isLocalFile = message.messageId.toString().startsWith('temp_') ||
         (message.messageContent.startsWith('/') && File(message.messageContent).existsSync());
@@ -801,7 +1044,219 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _pickImage() async {
+  // ✅ WHATSAPP-STYLE MULTIPLE IMAGES COLLAGE PREVIEW
+  Widget _buildMultipleImagesPreview(Message msg, List<String> imageUrls, bool isMe, bool isUploading, double? uploadProgress) {
+    final totalImages = imageUrls.length;
+
+    return GestureDetector(
+      onTap: () {
+        // Open first image in full screen
+        if (imageUrls.isNotEmpty) {
+          _openImageFullScreen(msg);
+        }
+      },
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.65,
+        ),
+        child: Column(
+          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            // ✅ COLLAGE LAYOUT BASED ON NUMBER OF IMAGES
+            if (totalImages == 2) _buildTwoImageCollage(imageUrls, msg)
+            else if (totalImages == 3) _buildThreeImageCollage(imageUrls, msg)
+            else if (totalImages == 4) _buildFourImageCollage(imageUrls, msg)
+              else _buildGridCollage(imageUrls, msg),
+
+            // ✅ TIMESTAMP AND STATUS
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatTime(msg.timestamp),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                  if (isMe) const SizedBox(width: 4),
+                  if (isMe)
+                    _buildMessageTicks(msg, isUploading: isUploading),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ 2 IMAGES COLLAGE
+  Widget _buildTwoImageCollage(List<String> imageUrls, Message msg) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildCollageImage(imageUrls[0], msg, borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(8),
+            bottomLeft: Radius.circular(8),
+          )),
+        ),
+        const SizedBox(width: 2),
+        Expanded(
+          child: _buildCollageImage(imageUrls[1], msg, borderRadius: const BorderRadius.only(
+            topRight: Radius.circular(8),
+            bottomRight: Radius.circular(8),
+          )),
+        ),
+      ],
+    );
+  }
+
+  // ✅ 3 IMAGES COLLAGE (WhatsApp Style)
+  Widget _buildThreeImageCollage(List<String> imageUrls, Message msg) {
+    return Column(
+      children: [
+        // First image - top (full width)
+        _buildCollageImage(imageUrls[0], msg, borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(8),
+          topRight: Radius.circular(8),
+        ), height: 120),
+
+        const SizedBox(height: 2),
+        // Bottom two images
+        Row(
+          children: [
+            Expanded(
+              child: _buildCollageImage(imageUrls[1], msg, borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(8),
+              ), height: 80),
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: _buildCollageImage(imageUrls[2], msg, borderRadius: const BorderRadius.only(
+                bottomRight: Radius.circular(8),
+              ), height: 80),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ✅ 4 IMAGES COLLAGE (2x2 Grid)
+  Widget _buildFourImageCollage(List<String> imageUrls, Message msg) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildCollageImage(imageUrls[0], msg, borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+              ), height: 80),
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: _buildCollageImage(imageUrls[1], msg, borderRadius: const BorderRadius.only(
+                topRight: Radius.circular(8),
+              ), height: 80),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Row(
+          children: [
+            Expanded(
+              child: _buildCollageImage(imageUrls[2], msg, borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(8),
+              ), height: 80),
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: _buildCollageImage(imageUrls[3], msg, borderRadius: const BorderRadius.only(
+                bottomRight: Radius.circular(8),
+              ), height: 80),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ✅ 5+ IMAGES GRID COLLAGE
+  Widget _buildGridCollage(List<String> imageUrls, Message msg) {
+    final totalImages = imageUrls.length;
+    final displayImages = imageUrls.take(4).toList();
+    final remaining = totalImages - 4;
+
+    return GridView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 2,
+        mainAxisSpacing: 2,
+        childAspectRatio: 1,
+      ),
+      itemCount: displayImages.length,
+      itemBuilder: (context, index) {
+        BorderRadius borderRadius = BorderRadius.zero;
+
+        // Set border radius for corners
+        if (index == 0) borderRadius = const BorderRadius.only(topLeft: Radius.circular(8));
+        else if (index == 1) borderRadius = const BorderRadius.only(topRight: Radius.circular(8));
+        else if (index == 2 && displayImages.length == 3) borderRadius = const BorderRadius.only(bottomLeft: Radius.circular(8));
+        else if (index == displayImages.length - 1) borderRadius = const BorderRadius.only(bottomRight: Radius.circular(8));
+
+        return Stack(
+          children: [
+            _buildCollageImage(displayImages[index], msg, borderRadius: borderRadius),
+            if (index == 3 && remaining > 0)
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: borderRadius,
+                ),
+                child: Center(
+                  child: Text(
+                    '+$remaining',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ✅ COLLAGE IMAGE BUILDER
+  Widget _buildCollageImage(String imageUrl, Message msg, {BorderRadius borderRadius = BorderRadius.zero, double? height}) {
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Container(
+        height: height,
+        color: Colors.grey[300],
+        child: imageUrl.startsWith('/') || File(imageUrl).existsSync()
+            ? Image.file(File(imageUrl), fit: BoxFit.cover)
+            : _buildWhatsAppStyleImage(msg, imageUrl),
+      ),
+    );
+  }
+
+  // ✅ SINGLE IMAGE PICKER
+  Future<void> _pickSingleImage() async {
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -815,11 +1270,101 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _imageFile = File(pickedFile.path);
           _focusNode.unfocus();
         });
-
         _sendMessage();
       }
     } catch (e) {
-      print("Error picking image: $e");
+      print("Error picking single image: $e");
+    }
+  }
+
+  // ✅ MULTIPLE IMAGE PICKER
+  Future<void> _pickMultipleImages() async {
+    try {
+      final List<File>? selectedImages = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MultiImagePickerScreen(
+            chatId: widget.chatId,
+            receiverId: widget.otherUserId,
+            maxSelection: 10,
+          ),
+        ),
+      );
+
+      if (selectedImages != null && selectedImages.isNotEmpty) {
+        await _sendMultipleImages(selectedImages);
+      }
+    } catch (e) {
+      print("Error in multiple image picker: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to pick images')),
+      );
+    }
+  }
+
+  // ✅ MULTIPLE IMAGES SEND METHOD
+  Future<void> _sendMultipleImages(List<File> imageFiles) async {
+    setState(() {
+      _isSending = true;
+      _shouldScrollToBottom = true;
+    });
+
+    try {
+      // Send as multiple individual messages (WhatsApp style)
+      for (int i = 0; i < imageFiles.length; i++) {
+        final file = imageFiles[i];
+
+        await ChatService.sendMediaMessage(
+          chatId: widget.chatId,
+          receiverId: widget.otherUserId,
+          mediaPath: file.path,
+          senderName: _authBox.get('userName'),
+          receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
+          senderPhoneNumber: _authBox.get('userPhone'),
+          receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
+        );
+
+        // Small delay between consecutive uploads
+        if (i < imageFiles.length - 1) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Sent ${imageFiles.length} images')),
+      );
+
+    } catch (e) {
+      print("Error sending multiple images: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send some images')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  // ✅ TAKE PHOTO FROM CAMERA
+  Future<void> _takePhoto() async {
+    try {
+      final XFile? pickedFile = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 75,
+        maxWidth: 1080,
+        maxHeight: 1920,
+      );
+
+      if (pickedFile != null) {
+        setState(() {
+          _imageFile = File(pickedFile.path);
+          _focusNode.unfocus();
+        });
+        _sendMessage();
+      }
+    } catch (e) {
+      print("Error taking photo: $e");
     }
   }
 
@@ -850,9 +1395,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
           senderPhoneNumber: _authBox.get('userPhone'),
           receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
+          replyToMessageId: _replyingToMessage?.messageId,
         );
 
-        setState(() => _imageFile = null);
+        setState(() {
+          _imageFile = null;
+          _replyingToMessage = null;
+        });
       } else {
         await ChatService.sendMessage(
           chatId: widget.chatId,
@@ -863,12 +1412,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
           senderPhoneNumber: _authBox.get('userPhone'),
           receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
+          replyToMessageId: _replyingToMessage?.messageId,
         );
 
         _controller.clear();
+        setState(() {
+          _replyingToMessage = null;
+        });
       }
 
       _resolveHeader();
+      _needsRefresh = true;
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToBottom();
@@ -885,71 +1439,181 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ UPDATED MEDIA MESSAGE BUBBLE WITH PERSISTENT LOADING
-  Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
+  // ✅ UPDATED MESSAGE BUBBLE WITH COLLAGE SUPPORT
+  Widget _buildMessageBubble(Message msg, {Key? key}) {
+    final String msgId = msg.messageId.toString();
+    final bool isSelected = selectedMessageIds.contains(msgId);
+    final userId = LocalAuthService.getUserId();
+    final bool isMe = msg.senderId == userId;
+
+    final bool isMediaMessage = msg.messageType == 'media' ||
+        msg.messageType == 'encrypted_media' ||
+        (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
+        (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
+
+    // ✅ CHECK FOR MULTIPLE IMAGES
+    final bool hasMultipleImages = msg.messageContent.contains('||multi||');
+    List<String> imageUrls = [];
+
+    if (hasMultipleImages) {
+      imageUrls = msg.messageContent.split('||multi||');
+    }
+
+    if (msg.messageId.toString().startsWith('temp_') && isMediaMessage) {
+      return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
+    }
+
+    if ((isMe && msg.isDeletedSender == 1) || (!isMe && msg.isDeletedReceiver == 1)) {
+      return const SizedBox.shrink();
+    }
+
     final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
+    final selectedColor = isMe ? const Color(0xFFC5E1A5) : const Color(0xFFE0E0E0);
+
+    final textColor = Colors.black;
+
+    final bool contentDeleted = !isMe && msg.isDeletedSender == 1;
+    final String content = contentDeleted ? '❌ This message was deleted' : msg.messageContent;
+
+    final borderRadius = BorderRadius.only(
+      topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
+      topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
+      bottomLeft: const Radius.circular(16),
+      bottomRight: const Radius.circular(16),
+    );
 
     return GestureDetector(
+      onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+      onHorizontalDragUpdate: _handleSwipeUpdate,
+      onHorizontalDragEnd: _handleSwipeEnd,
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (selectedMessageIds.isNotEmpty) {
-          setState(() {
-            selectedMessageIds.clear();
-          });
-        } else if (_focusNode.hasFocus) {
-          _focusNode.unfocus();
-        } else {
-          _openImageFullScreen(msg);
-        }
-      },
-      onLongPress: () {
-        setState(() {
-          final msgId = msg.messageId.toString();
-          if (selectedMessageIds.contains(msgId)) {
-            selectedMessageIds.remove(msgId);
-          } else {
-            selectedMessageIds.clear();
-            selectedMessageIds.add(msgId);
-          }
-        });
-      },
-      child: RepaintBoundary(
-        child: Container(
-          decoration: BoxDecoration(
-            border: isSelected ? Border.all(color: Colors.lightGreen, width: 2) : null,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Align(
-            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Transform.translate(
+        offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+        child: RepaintBoundary(
+          key: key,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (_selectionMode) {
+                _toggleSelection(msgId);
+              } else if (_focusNode.hasFocus) {
+                _focusNode.unfocus();
+              } else if (isMediaMessage) {
+                _openImageFullScreen(msg);
+              }
+            },
+            onLongPress: () {
+              if (_selectionMode) {
+                _toggleSelection(msgId);
+              } else {
+                _enterSelectionMode(msgId);
+              }
+            },
             child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              padding: const EdgeInsets.all(6),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
               decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.only(
-                  topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
-                  topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
-                  bottomLeft: const Radius.circular(16),
-                  bottomRight: const Radius.circular(16),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
+                color: isSelected ? selectedColor : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: Column(
-                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+              child: Stack(
                 children: [
-                  // ✅ USE PERSISTENT PROGRESSIVE IMAGE LOADER
-                  _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                  Align(
+                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      padding: (msg.messageType == 'text' && !isMediaMessage) || contentDeleted
+                          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                          : const EdgeInsets.all(6),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.75,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected ? selectedColor : color,
+                        borderRadius: borderRadius,
+                        boxShadow: isSelected ? [] : [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.1),
+                            spreadRadius: 1,
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ✅ REPLY PREVIEW IN MESSAGE
+                          if (msg.replyToMessageId != null && msg.replyToMessageId!.isNotEmpty)
+                            _buildReplyInMessage(msg),
+
+                          if (contentDeleted)
+                            Text(
+                                content,
+                                style: TextStyle(color: Colors.red[800], fontSize: 14, fontStyle: FontStyle.italic)
+                            )
+
+                          else if (msg.messageType == 'text' && !isMediaMessage)
+                            Text(content, style: TextStyle(color: textColor, fontSize: 16))
+
+                          else if (isMediaMessage)
+                              hasMultipleImages && imageUrls.length > 1
+                                  ? _buildMultipleImagesPreview(msg, imageUrls, isMe, false, null)
+                                  : _buildMediaMessage(msg, msg.messageContent, textColor)
+
+                            else
+                              Text(
+                                content.isNotEmpty ? content : "📎 Attachment",
+                                style: TextStyle(color: textColor, fontSize: 16),
+                              ),
+
+                          if (msg.messageType == 'text' && !contentDeleted && !isMediaMessage) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _formatTime(msg.timestamp),
+                                  style: TextStyle(
+                                    color: isSelected ? Colors.black87 : Colors.black54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                if (isMe) const SizedBox(width: 4),
+                                if (isMe)
+                                  _buildMessageTicks(msg),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ✅ SELECTION CHECKBOX
+                  if (_selectionMode)
+                    Positioned(
+                      top: 12,
+                      left: isMe ? null : 12,
+                      right: isMe ? 12 : null,
+                      child: GestureDetector(
+                        onTap: () => _toggleSelection(msgId),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFF075E54) : Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF075E54) : Colors.grey,
+                              width: 2,
+                            ),
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check, size: 16, color: Colors.white)
+                              : null,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -959,7 +1623,234 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ UPDATED MEDIA MESSAGE WITH PERSISTENT LOADING
+  // ✅ BUILD REPLY IN MESSAGE
+  Widget _buildReplyInMessage(Message msg) {
+    final repliedMessage = _messageBox.values.firstWhereOrNull(
+          (m) => m.messageId == msg.replyToMessageId,
+    );
+
+    if (repliedMessage == null) {
+      return Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: const Text(
+          "Original message not found",
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      );
+    }
+
+    final isMeReply = repliedMessage.senderId == LocalAuthService.getUserId();
+    final senderName = isMeReply ? "You" : (repliedMessage.senderName ?? "User");
+
+    return GestureDetector(
+      onTap: () {
+        _scrollToOriginalMessage(repliedMessage);
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(8),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              senderName,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.green,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _getReplyPreviewText(repliedMessage),
+              style: const TextStyle(fontSize: 12),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _scrollToOriginalMessage(Message originalMsg) {
+    final messages = _getOptimizedMessages();
+    final index = messages.indexWhere((msg) => msg.messageId == originalMsg.messageId);
+
+    if (index != -1) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent * (index / messages.length),
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  // ✅ SHOW MESSAGE OPTIONS
+  void _showMessageOptions(Message msg) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (msg.messageType == 'text')
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _copySingleMessage(msg.messageId);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(context);
+                _startReply(msg);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.forward),
+              title: const Text('Forward'),
+              onTap: () {
+                Navigator.pop(context);
+                _forwardSingleMessage(msg.messageId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteConfirmation(msg.messageId);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ MEDIA MESSAGE BUBBLE
+  Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
+    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
+    final selectedColor = isMe ? const Color(0xFFC5E1A5) : const Color(0xFFE0E0E0);
+
+    return GestureDetector(
+      onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+      onHorizontalDragUpdate: _handleSwipeUpdate,
+      onHorizontalDragEnd: _handleSwipeEnd,
+      behavior: HitTestBehavior.opaque,
+      child: Transform.translate(
+        offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (_selectionMode) {
+              _toggleSelection(msg.messageId);
+            } else if (_focusNode.hasFocus) {
+              _focusNode.unfocus();
+            } else {
+              _openImageFullScreen(msg);
+            }
+          },
+          onLongPress: () {
+            if (_selectionMode) {
+              _toggleSelection(msg.messageId);
+            } else {
+              _enterSelectionMode(msg.messageId);
+            }
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: isSelected ? selectedColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Stack(
+              children: [
+                Align(
+                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                    padding: const EdgeInsets.all(6),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected ? selectedColor : color,
+                      borderRadius: BorderRadius.only(
+                        topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
+                        topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
+                        bottomLeft: const Radius.circular(16),
+                        bottomRight: const Radius.circular(16),
+                      ),
+                      boxShadow: isSelected ? [] : [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 1,
+                          blurRadius: 2,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (msg.replyToMessageId != null && msg.replyToMessageId!.isNotEmpty)
+                          _buildReplyInMessage(msg),
+
+                        _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                      ],
+                    ),
+                  ),
+                ),
+
+                if (_selectionMode)
+                  Positioned(
+                    top: 12,
+                    left: isMe ? null : 12,
+                    right: isMe ? 12 : null,
+                    child: GestureDetector(
+                      onTap: () => _toggleSelection(msg.messageId),
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: isSelected ? const Color(0xFF075E54) : Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? const Color(0xFF075E54) : Colors.grey,
+                            width: 2,
+                          ),
+                        ),
+                        child: isSelected
+                            ? const Icon(Icons.check, size: 16, color: Colors.white)
+                            : null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMediaMessage(Message msg, String mediaUrl, Color textColor) {
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
@@ -967,12 +1858,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final uploadProgress = _uploadProgress[tempId];
     final isUploading = uploadProgress != null && uploadProgress < 100;
 
-    // ✅ INSTANT LOCAL PREVIEW
+    // ✅ CHECK FOR MULTIPLE IMAGES
+    final bool hasMultipleImages = mediaUrl.contains('||multi||');
+    List<String> imageUrls = [];
+
+    if (hasMultipleImages) {
+      imageUrls = mediaUrl.split('||multi||');
+    }
+
+    // ✅ SHOW COLLAGE FOR MULTIPLE IMAGES
+    if (hasMultipleImages && imageUrls.length > 1) {
+      return _buildMultipleImagesPreview(msg, imageUrls, isMe, isUploading, uploadProgress);
+    }
+
+    // Single image handling
     if (mediaUrl.startsWith('/') || File(mediaUrl).existsSync()) {
       return _buildLocalMediaPreview(mediaUrl, msg, isMe);
     }
 
-    // ✅ PERSISTENT WHATSAPP-STYLE PROGRESSIVE LOADING
     return GestureDetector(
       onTap: () => _openImageFullScreen(msg),
       child: Container(
@@ -981,7 +1884,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         child: Stack(
           children: [
-            // ✅ SMART PERSISTENT PROGRESSIVE IMAGE LOADING
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Container(
@@ -992,7 +1894,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
 
-            // ✅ UPLOAD PROGRESS (for sender only)
             if (isMe && isUploading && uploadProgress != null)
               Positioned(
                 top: 8,
@@ -1014,7 +1915,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
 
-            // ✅ TIME STAMP WITH TICKS
             Positioned(
               bottom: 6,
               right: 6,
@@ -1048,7 +1948,98 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ WHATSAPP-STYLE LOCAL MEDIA PREVIEW
+  // ✅ OPTIMIZED WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET
+  Widget _buildWhatsAppStyleImage(Message msg, String mediaUrl) {
+    final messageId = msg.messageId;
+    final loadStage = _imageLoadStages[messageId] ?? 0;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_imageLoadStages[messageId] == null &&
+          !_fullyLoadedMessages.contains(messageId) &&
+          (msg.messageType == 'media' || msg.messageType == 'encrypted_media')) {
+        _startProgressiveLoading(msg);
+      }
+    });
+
+    return Stack(
+      children: [
+        if (msg.blurHash != null && msg.blurHash!.isNotEmpty && loadStage < 2)
+          Positioned.fill(
+            child: Container(
+              color: Colors.grey[200],
+              child: BlurHash(
+                hash: msg.blurHash!,
+                imageFit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+        if (loadStage >= 1)
+          Positioned.fill(
+            child: CachedNetworkImage(
+              imageUrl: msg.lowQualityUrl ?? mediaUrl,
+              fit: BoxFit.cover,
+              placeholder: (context, url) {
+                return msg.blurHash != null
+                    ? BlurHash(hash: msg.blurHash!, imageFit: BoxFit.cover)
+                    : Container(color: Colors.grey[300]);
+              },
+              errorWidget: (context, url, error) {
+                _loadHighQualityImage(msg);
+                return Container(color: Colors.grey[300]);
+              },
+              imageBuilder: (context, imageProvider) {
+                if (loadStage == 1) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _markLowQualityLoaded(msg);
+                  });
+                }
+                return Image(image: imageProvider, fit: BoxFit.cover);
+              },
+            ),
+          ),
+
+        if (loadStage >= 3)
+          Positioned.fill(
+            child: CachedNetworkImage(
+              imageUrl: msg.highQualityUrl ?? mediaUrl,
+              fit: BoxFit.cover,
+              fadeInDuration: const Duration(milliseconds: 300),
+              placeholder: (context, url) => Container(),
+              imageBuilder: (context, imageProvider) {
+                return AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 400),
+                  child: Image(image: imageProvider, fit: BoxFit.cover),
+                );
+              },
+            ),
+          ),
+
+        if ((loadStage == 1 || loadStage == 3) && !_fullyLoadedMessages.contains(messageId))
+          Positioned(
+            bottom: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildLocalMediaPreview(String localPath, Message msg, bool isMe) {
     final tempId = msg.messageId.toString();
     final uploadProgress = _uploadProgress[tempId];
@@ -1073,7 +2064,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         child: Stack(
           children: [
-            // ✅ INSTANT LOCAL IMAGE SHOW
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Container(
@@ -1090,7 +2080,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
 
-            // ✅ UPLOAD PROGRESS INDICATOR
             if (isUploading && uploadProgress != null)
               Positioned(
                 top: 8,
@@ -1112,7 +2101,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
 
-            // ✅ TIME AND TICKS OVERLAY
             Positioned(
               bottom: 6,
               right: 6,
@@ -1146,7 +2134,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ FIXED: WHATSAPP-STYLE MESSAGE TICKS
   Widget _buildMessageTicks(Message msg, {bool isUploading = false}) {
     if (isUploading) {
       return Icon(
@@ -1177,148 +2164,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-
-  // ✅ FIXED MESSAGE BUBBLE FOR BETTER MESSAGE HANDLING
-  Widget _buildMessageBubble(Message msg, {Key? key}) {
-    final String msgId = msg.messageId.toString();
-    final bool isSelected = selectedMessageIds.contains(msgId);
-    final userId = LocalAuthService.getUserId();
-    final bool isMe = msg.senderId == userId;
-
-    // ✅ IMPROVED MEDIA DETECTION
-    final bool isMediaMessage = msg.messageType == 'media' ||
-        msg.messageType == 'encrypted_media' ||
-        (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
-        (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
-
-    if (msg.messageId.toString().startsWith('temp_') && isMediaMessage) {
-      return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
-    }
-
-    if ((isMe && msg.isDeletedSender == 1) || (!isMe && msg.isDeletedReceiver == 1)) {
-      return const SizedBox.shrink();
-    }
-
-    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
-    final textColor = Colors.black;
-
-    final bool contentDeleted = !isMe && msg.isDeletedSender == 1;
-    final String content = contentDeleted ? '❌ This message was deleted' : msg.messageContent;
-
-    final borderRadius = BorderRadius.only(
-      topLeft: isMe ? const Radius.circular(16) : const Radius.circular(2),
-      topRight: isMe ? const Radius.circular(2) : const Radius.circular(16),
-      bottomLeft: const Radius.circular(16),
-      bottomRight: const Radius.circular(16),
-    );
-
-    return RepaintBoundary(
-      key: key,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          if (selectedMessageIds.isNotEmpty) {
-            setState(() {
-              selectedMessageIds.clear();
-            });
-          } else if (_focusNode.hasFocus) {
-            _focusNode.unfocus();
-          } else if (isMediaMessage) {
-            _openImageFullScreen(msg);
-          }
-        },
-        onLongPress: () {
-          setState(() {
-            if (selectedMessageIds.contains(msgId)) {
-              selectedMessageIds.remove(msgId);
-            } else {
-              selectedMessageIds.clear();
-              selectedMessageIds.add(msgId);
-            }
-          });
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            border: isSelected ? Border.all(color: Colors.lightGreen, width: 2) : null,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Align(
-            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              padding: (msg.messageType == 'text' && !isMediaMessage) || contentDeleted
-                  ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
-                  : const EdgeInsets.all(6),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: borderRadius,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (contentDeleted)
-                    Text(
-                        content,
-                        style: TextStyle(color: Colors.red[800], fontSize: 14, fontStyle: FontStyle.italic)
-                    )
-
-                  // ✅ TEXT MESSAGE
-                  else if (msg.messageType == 'text' && !isMediaMessage)
-                    Text(content, style: TextStyle(color: textColor, fontSize: 16))
-
-                  // ✅ MEDIA MESSAGE
-                  else if (isMediaMessage)
-                      _buildMediaMessage(msg, msg.messageContent, textColor)
-
-                    // ✅ FALLBACK FOR UNKNOWN TYPES - SHOW ORIGINAL CONTENT
-                    else
-                      Text(
-                        content.isNotEmpty ? content : "📎 Attachment",
-                        style: TextStyle(color: textColor, fontSize: 16),
-                      ),
-
-                  // ✅ TIME STAMP FOR TEXT MESSAGES
-                  if (msg.messageType == 'text' && !contentDeleted && !isMediaMessage) ...[
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _formatTime(msg.timestamp),
-                          style: const TextStyle(color: Colors.black54, fontSize: 12),
-                        ),
-                        if (isMe) const SizedBox(width: 4),
-                        if (isMe)
-                          _buildMessageTicks(msg),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   String _formatTime(DateTime timestamp) {
     return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
   }
 
-  // ✅ FIXED: BETTER MEDIA ERROR WIDGET
   Widget _buildMediaError(String url, String error) {
     return Container(
       color: Colors.grey[300],
@@ -1336,7 +2185,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ OPTIMIZED DATE HEADER
+  // ✅ UNREAD MESSAGE SEPARATOR BUBBLE
+  Widget _buildUnreadSeparator() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade100,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Text('New Messages', style: TextStyle(fontSize: 12)),
+      ),
+    );
+  }
+
   Widget _buildDateHeader(String date) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -1415,65 +2278,106 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ✅ UPDATED INPUT AREA WITH MULTIPLE IMAGE OPTIONS
   Widget _buildInputArea() {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      color: Colors.grey[100],
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 100),
-              padding: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.grey[300]!),
+    return Column(
+      children: [
+        _buildReplyPreview(),
+
+        Container(
+          padding: const EdgeInsets.all(8),
+          color: Colors.grey[100],
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: _takePhoto,
+                icon: Icon(Icons.camera_alt, color: Colors.grey[600]),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  IconButton(
-                    onPressed: () {},
-                    icon: Icon(Icons.emoji_emotions_outlined, color: Colors.grey[600]),
+
+              Expanded(
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 100),
+                  padding: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.grey[300]!),
                   ),
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      autofocus: false,
-                      maxLines: null,
-                      onChanged: (_) => _startTyping(),
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        hintText: "Type a message...",
-                        border: InputBorder.none,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: () {},
+                        icon: Icon(Icons.emoji_emotions_outlined, color: Colors.grey[600]),
                       ),
-                    ),
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          autofocus: false,
+                          maxLines: null,
+                          onChanged: (_) => _startTyping(),
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            hintText: "Type a message...",
+                            border: InputBorder.none,
+                          ),
+                        ),
+                      ),
+
+                      PopupMenuButton<String>(
+                        icon: Icon(Icons.attach_file, color: Colors.grey[600]),
+                        onSelected: (value) {
+                          if (value == 'gallery_multiple') {
+                            _pickMultipleImages();
+                          } else if (value == 'gallery_single') {
+                            _pickSingleImage();
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'gallery_multiple',
+                            child: Row(
+                              children: [
+                                Icon(Icons.photo_library, color: Colors.green),
+                                SizedBox(width: 8),
+                                Text('Gallery (Multiple)'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'gallery_single',
+                            child: Row(
+                              children: [
+                                Icon(Icons.photo, color: Colors.blue),
+                                SizedBox(width: 8),
+                                Text('Single Image'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    onPressed: _pickImage,
-                    icon: Icon(Icons.photo_library, color: Colors.grey[600]),
-                  ),
-                ],
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              CircleAvatar(
+                backgroundColor: const Color(0xFF075E54),
+                child: IconButton(
+                  onPressed: _isSending ? null : _sendMessage,
+                  icon: const Icon(Icons.send, color: Colors.white),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          CircleAvatar(
-            backgroundColor: const Color(0xFF075E54),
-            child: IconButton(
-              onPressed: _isSending ? null : _sendMessage,
-              icon: const Icon(Icons.send, color: Colors.white),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  // ✅ FORWARD MESSAGES FUNCTION
-  Future<void> _forwardMessages() async {
+  // ✅ FORWARD SELECTED MESSAGES
+  Future<void> _forwardSelectedMessages() async {
     if (selectedMessageIds.isEmpty) return;
 
     final targetChatId = await Navigator.push(
@@ -1495,16 +2399,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Messages forwarded!")),
+        SnackBar(content: Text("Forwarded ${selectedMessageIds.length} messages")),
       );
 
       setState(() {
         selectedMessageIds.clear();
+        _selectionMode = false;
       });
     }
   }
 
-  // ✅ DELETE MESSAGE FUNCTION
+  // ✅ DELETE SELECTED MESSAGES
+  void _deleteSelectedMessages() {
+    if (selectedMessageIds.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Messages?"),
+        content: Text("Are you sure you want to delete ${selectedMessageIds.length} messages?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCEL"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performDeleteSelected();
+            },
+            child: const Text("DELETE", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _performDeleteSelected() {
+    final userId = LocalAuthService.getUserId();
+    if (userId == null) return;
+
+    for (final messageId in selectedMessageIds) {
+      ChatService.deleteMessage(
+        messageId: messageId,
+        userId: userId,
+        role: 'sender',
+      );
+    }
+
+    setState(() {
+      _selectionMode = false;
+      selectedMessageIds.clear();
+      _needsRefresh = true;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Deleted ${selectedMessageIds.length} messages")),
+    );
+  }
+
+  Future<void> _forwardSingleMessage(String messageId) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewChatPage(isForForwarding: true),
+      ),
+    );
+
+    if (result != null && result is Map) {
+      final targetChatId = result['chatId'] as int;
+
+      await ChatService.forwardMessages(
+        originalMessageIds: {int.parse(messageId)},
+        targetChatId: targetChatId,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Message forwarded!")),
+      );
+    }
+  }
+
   Future<void> _showDeleteConfirmation(String messageId) async {
     final message = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
     if (message == null) return;
@@ -1547,8 +2522,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       setState(() {
         selectedMessageIds.clear();
+        _needsRefresh = true;
       });
     }
+  }
+
+  int _getUnreadStartIndex(List<Message> messages) {
+    for (int i = 0; i < messages.length; i++) {
+      if (messages[i].isRead == 0) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   @override
@@ -1559,13 +2544,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF075E54),
+        backgroundColor: _selectionMode ? const Color(0xFF075E54) : const Color(0xFF075E54),
         elevation: 1,
-        leading: IconButton(
+        leading: _selectionMode
+            ? IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: _clearSelection,
+        )
+            : IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Row(
+        title: _selectionMode
+            ? Text(
+          "${selectedMessageIds.length}",
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+        )
+            : Row(
           children: [
             CircleAvatar(
               backgroundColor: Colors.grey[300],
@@ -1598,122 +2593,140 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           ],
         ),
-        actions: [
+        actions: _selectionMode
+            ? [
+          if (_hasTextMessagesSelected())
+            IconButton(
+              icon: const Icon(Icons.copy, color: Colors.white),
+              onPressed: _copySelectedMessages,
+            ),
+          IconButton(
+            icon: const Icon(Icons.forward, color: Colors.white),
+            onPressed: _forwardSelectedMessages,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, color: Colors.white),
+            onPressed: _deleteSelectedMessages,
+          ),
+        ]
+            : [
           IconButton(icon: const Icon(Icons.videocam, color: Colors.white), onPressed: () {}),
           IconButton(icon: const Icon(Icons.call, color: Colors.white), onPressed: () {}),
-          if (selectedMessageIds.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.forward, color: Colors.white),
-              onPressed: _forwardMessages,
-            ),
-          if (selectedMessageIds.length == 1)
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.white),
-              onPressed: () => _showDeleteConfirmation(selectedMessageIds.first),
-            ),
           IconButton(icon: const Icon(Icons.more_vert, color: Colors.white), onPressed: () {}),
         ],
       ),
-      body: GestureDetector(
-        onTap: () {
-          if (_focusNode.hasFocus) {
-            _focusNode.unfocus();
-          }
-          if (selectedMessageIds.isNotEmpty) {
-            setState(() {
-              selectedMessageIds.clear();
-            });
-          }
-        },
-        behavior: HitTestBehavior.translucent,
-        child: Container(
-          decoration: const BoxDecoration(
-            image: DecorationImage(
-              image: AssetImage('assets/chat_bg.png'),
-              fit: BoxFit.cover,
-            ),
-          ),
-          child: Column(
-            children: [
-              _buildEncryptionNotice(),
-              Expanded(
-                child: ValueListenableBuilder<Box<Message>>(
-                  valueListenable: _messageBox.listenable(),
-                  builder: (context, box, child) {
-                    final messages = box.values
-                        .where((msg) => msg.chatId == widget.chatId)
-                        .where((msg) => !msg.messageId.toString().startsWith('temp_') ||
-                        (msg.messageId.toString().startsWith('temp_') && msg.messageType == 'media'))
-                        .toList();
-
-                    if (messages.isEmpty) {
-                      return const Center(child: Text("Say hi to start the conversation!"));
-                    }
-
-                    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _jumpToBottom();
-                    });
-
-                    return CustomScrollView(
-                      controller: _scrollController,
-                      reverse: false,
-                      physics: const BouncingScrollPhysics(),
-                      cacheExtent: 2000,
-                      slivers: [
-                        if (_isLoadingMore)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.all(8.0),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                              if (index >= messages.length) return null;
-
-                              final msg = messages[index];
-                              final previousMsg = index > 0 ? messages[index - 1] : null;
-                              final currentDate = formatDateHeader(msg.timestamp);
-                              final previousDate = previousMsg != null
-                                  ? formatDateHeader(previousMsg.timestamp)
-                                  : null;
-
-                              if (previousDate != currentDate) {
-                                return Column(
-                                  children: [
-                                    _buildDateHeader(currentDate),
-                                    _buildMessageBubble(msg, key: ValueKey(msg.messageId)),
-                                  ],
-                                );
-                              }
-
-                              return _buildMessageBubble(msg, key: ValueKey(msg.messageId));
-                            },
-                            childCount: messages.length,
-                            addAutomaticKeepAlives: true,
-                            addRepaintBoundaries: true,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+      body: Stack(
+        children: [
+          GestureDetector(
+            onTap: () {
+              if (_focusNode.hasFocus) {
+                _focusNode.unfocus();
+              }
+              if (_selectionMode) {
+                _clearSelection();
+              }
+            },
+            behavior: HitTestBehavior.translucent,
+            child: Container(
+              decoration: const BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage('assets/chat_bg.png'),
+                  fit: BoxFit.cover,
                 ),
               ),
-              _buildImagePreview(),
-              _buildInputArea(),
-            ],
+              child: Column(
+                children: [
+                  _buildEncryptionNotice(),
+                  Expanded(
+                    child: ValueListenableBuilder<Box<Message>>(
+                      valueListenable: _messageBox.listenable(),
+                      builder: (context, box, child) {
+                        final messages = _getOptimizedMessages();
+
+                        if (messages.isEmpty) {
+                          return const Center(child: Text("Say hi to start the conversation!"));
+                        }
+
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (_shouldScrollToBottom && _hasInitialScrollDone) {
+                            _scrollToBottomSmooth();
+                          }
+                        });
+
+                        return ListView.builder(
+                          controller: _scrollController,
+                          reverse: false,
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.all(8),
+                          itemCount: messages.length + (_isLoadingMore ? 1 : 0),
+                          cacheExtent: 2000,
+                          itemBuilder: (context, index) {
+                            if (_isLoadingMore && index == 0) {
+                              return const Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            final adjustedIndex = _isLoadingMore ? index - 1 : index;
+                            if (adjustedIndex >= messages.length) return null;
+
+                            final msg = messages[adjustedIndex];
+                            final previousMsg = adjustedIndex > 0 ? messages[adjustedIndex - 1] : null;
+                            final currentDate = formatDateHeader(msg.timestamp);
+                            final previousDate = previousMsg != null
+                                ? formatDateHeader(previousMsg.timestamp)
+                                : null;
+
+                            if (adjustedIndex == _getUnreadStartIndex(messages)) {
+                              return Column(
+                                children: [
+                                  _buildUnreadSeparator(),
+                                  if (previousDate != currentDate)
+                                    _buildDateHeader(currentDate),
+                                  _buildMessageBubble(msg, key: ValueKey(msg.messageId)),
+                                ],
+                              );
+                            }
+
+                            if (previousDate != currentDate) {
+                              return Column(
+                                children: [
+                                  _buildDateHeader(currentDate),
+                                  _buildMessageBubble(msg, key: ValueKey(msg.messageId)),
+                                ],
+                              );
+                            }
+
+                            return _buildMessageBubble(msg, key: ValueKey(msg.messageId));
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  _buildImagePreview(),
+                  if (!_selectionMode) _buildInputArea(),
+                ],
+              ),
+            ),
           ),
-        ),
+
+          _buildFloatingScrollButton(),
+
+          if (_selectionMode)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildSelectionBottomBar(),
+            ),
+        ],
       ),
     );
   }

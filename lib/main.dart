@@ -11,6 +11,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:whatsappchat/models/chat_model.dart';
 import 'package:whatsappchat/models/contact.dart';
+import 'package:whatsappchat/screens/chat_list_screen.dart';
 import 'package:whatsappchat/screens/contact_list_page.dart';
 import 'package:whatsappchat/services/local_auth_service.dart';
 import 'package:whatsappchat/services/chat_service.dart';
@@ -226,6 +227,7 @@ Future<void> main() async {
   await Hive.openBox<Message>('messages');
   await Hive.openBox<Chat>('chatList');
   await Hive.openBox<Contact>('contacts');
+  await Hive.openBox('chatScroll');
   await Hive.openBox('meta');
   await Hive.openBox('authBox');
 
@@ -317,6 +319,7 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const SplashGate(),
+      //home: const ChatListScreen(),
     );
   }
 }

@@ -436,6 +436,7 @@ class _NewChatPageState extends State<NewChatPage> {
   }
 
   // ✅ FAST CHAT OPENING
+// ✅ FIXED: Return both chatId and userId for forwarding
   Future<void> _openChat(Contact contact) async {
     if (contact.appUserId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -450,7 +451,11 @@ class _NewChatPageState extends State<NewChatPage> {
 
       if (chatId != null) {
         if (widget.isForForwarding) {
-          Navigator.pop(context, chatId);
+          // ✅ FIX: Return Map with both chatId and userId
+          Navigator.pop(context, {
+            'chatId': chatId,
+            'userId': contact.appUserId!,
+          });
         } else {
           Navigator.push(
             context,

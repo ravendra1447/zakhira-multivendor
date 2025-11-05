@@ -62,11 +62,27 @@ class ChatService {
   static Stream<Map<String, dynamic>> get onUploadProgress =>
       _uploadProgressController.stream;
 
+  static final StreamController<Map<String, dynamic>> _messageDeletedController =
+  StreamController.broadcast();
+  static Stream<Map<String, dynamic>> get onMessageDeleted =>
+      _messageDeletedController.stream;
+
+  static final StreamController<Map<String, dynamic>> _chatClearedController =
+  StreamController.broadcast();
+  static Stream<Map<String, dynamic>> get onChatCleared =>
+      _chatClearedController.stream;
+
+  static final StreamController<Map<String, dynamic>> _userBlockedController =
+  StreamController.broadcast();
+  static Stream<Map<String, dynamic>> get onUserBlocked =>
+      _userBlockedController.stream;
+
   static final _cryptoManager = CryptoManager();
   static final Set<String> _processedMessageIds = {};
   static final Set<String> _uploadingMediaIds = {};
+  static final Set<String> _blockedUsers = {};
 
-  // ✅ ADD: Track connected state to prevent multiple connections
+  // ✅ Track connected state to prevent multiple connections
   static bool _isConnecting = false;
   static DateTime? _lastSocketInitTime;
 
@@ -127,9 +143,9 @@ class ChatService {
             .setTransports(['websocket', 'polling'])
             .enableAutoConnect()
             .enableReconnection()
-            .setReconnectionAttempts(3) // ✅ REDUCE from 9999 to prevent spam
-            .setReconnectionDelay(3000) // ✅ INCREASE delay
-            .setTimeout(10000) // ✅ INCREASE timeout
+            .setReconnectionAttempts(3)
+            .setReconnectionDelay(3000)
+            .setTimeout(10000)
             .build(),
       );
 
@@ -195,6 +211,12 @@ class ChatService {
       _socket!.off("user_status");
       _socket!.off("media_upload_progress");
       _socket!.off("media_message_ready");
+      _socket!.off("message_deleted");
+      _socket!.off("chat_cleared");
+      _socket!.off("user_blocked");
+      _socket!.off("user_unblocked");
+      _socket!.off("user_blocked_by");
+      _socket!.off("user_unblocked_by");
     }
     print("✅ Cleaned up old socket listeners");
   }
@@ -373,6 +395,132 @@ class ChatService {
       }
     });
 
+    // ✅ MESSAGE DELETED LISTENER
+    _socket!.on("message_deleted", (data) async {
+      print("🗑️ [message_deleted] event received");
+      try {
+        final messageId = data["message_id"]?.toString();
+        final userId = data["user_id"]?.toString();
+        final role = data["role"]?.toString();
+        final chatId = data["chat_id"]?.toString();
+
+        if (messageId != null && userId != null && role != null) {
+          await _updateMessageDeletionStatusLocal(messageId, role);
+          _messageDeletedController.sink.add({
+            "message_id": messageId,
+            "user_id": userId,
+            "role": role,
+            "chat_id": chatId
+          });
+          print("✅ Message deletion processed: $messageId by $role");
+        }
+      } catch (e) {
+        print("❌ [message_deleted] Error: $e");
+      }
+    });
+
+    // ✅ CHAT CLEARED LISTENER
+    _socket!.on("chat_cleared", (data) async {
+      print("🧹 [chat_cleared] event received");
+      try {
+        final chatId = data["chat_id"]?.toString();
+        final userId = data["user_id"]?.toString();
+
+        if (chatId != null && userId != null) {
+          await _clearChatLocal(int.parse(chatId), int.parse(userId));
+          _chatClearedController.sink.add({
+            "chat_id": chatId,
+            "user_id": userId
+          });
+          print("✅ Chat cleared: $chatId for user $userId");
+        }
+      } catch (e) {
+        print("❌ [chat_cleared] Error: $e");
+      }
+    });
+
+    // ✅ USER BLOCKED LISTENER
+    _socket!.on("user_blocked", (data) {
+      print("🚫 [user_blocked] event received");
+      try {
+        final userId = data["user_id"]?.toString();
+        final blockedUserId = data["blocked_user_id"]?.toString();
+
+        if (userId != null && blockedUserId != null) {
+          _blockedUsers.add(blockedUserId);
+          _userBlockedController.sink.add({
+            "user_id": userId,
+            "blocked_user_id": blockedUserId,
+            "action": "blocked"
+          });
+          print("✅ User blocked: $blockedUserId by $userId");
+        }
+      } catch (e) {
+        print("❌ [user_blocked] Error: $e");
+      }
+    });
+
+    // ✅ USER UNBLOCKED LISTENER
+    _socket!.on("user_unblocked", (data) {
+      print("🔓 [user_unblocked] event received");
+      try {
+        final userId = data["user_id"]?.toString();
+        final unblockedUserId = data["unblocked_user_id"]?.toString();
+
+        if (userId != null && unblockedUserId != null) {
+          _blockedUsers.remove(unblockedUserId);
+          _userBlockedController.sink.add({
+            "user_id": userId,
+            "unblocked_user_id": unblockedUserId,
+            "action": "unblocked"
+          });
+          print("✅ User unblocked: $unblockedUserId by $userId");
+        }
+      } catch (e) {
+        print("❌ [user_unblocked] Error: $e");
+      }
+    });
+
+    // ✅ USER BLOCKED BY LISTENER
+    _socket!.on("user_blocked_by", (data) {
+      print("🚫 [user_blocked_by] event received");
+      try {
+        final userId = data["user_id"]?.toString();
+        final blockedByUserId = data["blocked_by_user_id"]?.toString();
+
+        if (userId != null && blockedByUserId != null) {
+          _userBlockedController.sink.add({
+            "user_id": userId,
+            "blocked_by_user_id": blockedByUserId,
+            "action": "blocked_by"
+          });
+          print("✅ User $userId was blocked by $blockedByUserId");
+        }
+      } catch (e) {
+        print("❌ [user_blocked_by] Error: $e");
+      }
+    });
+
+    // ✅ USER UNBLOCKED BY LISTENER
+    _socket!.on("user_unblocked_by", (data) {
+      print("🔓 [user_unblocked_by] event received");
+      try {
+        final userId = data["user_id"]?.toString();
+        final unblockedByUserId = data["unblocked_by_user_id"]?.toString();
+
+        if (userId != null && unblockedByUserId != null) {
+          _userBlockedController.sink.add({
+            "user_id": userId,
+            "unblocked_by_user_id": unblockedByUserId,
+            "action": "unblocked_by"
+          });
+          print("✅ User $userId was unblocked by $unblockedByUserId");
+        }
+      } catch (e) {
+        print("❌ [user_unblocked_by] Error: $e");
+      }
+    });
+
     // ✅ USER TYPING LISTENER
     _socket!.on("user_typing", (data) {
       print("✍️ [user_typing] event received");
@@ -407,40 +555,24 @@ class ChatService {
     print("✅ All socket listeners setup completed");
   }
 
-  // ✅ CLEANUP TIMERS FUNCTION
-  static void _cleanupTimers() {
-    _pingTimer?.cancel();
-    _pingTimer = null;
-    _statusUpdateTimer?.cancel();
-    _statusUpdateTimer = null;
-    print("✅ Cleaned up socket timers");
-  }
+  // ✅ ADD THIS METHOD TO ChatService CLASS
+  static Future<void> _clearChatLocal(int chatId, int userId) async {
+    try {
+      final messages = _messageBox.values.where((m) => m.chatId == chatId).toList();
+      int clearedCount = 0;
 
-  static bool get isConnected => _socket?.connected ?? false;
+      for (final msg in messages) {
+        if (msg.receiverId == userId) {
+          msg.isDeletedReceiver = 1;
+          await _messageBox.put(msg.messageId, msg);
+          clearedCount++;
+        }
+      }
 
-  static void disposeSocket() {
-    final userId = _authBox.get('userId');
-    if (_socket != null && _socket!.connected && userId != null) {
-      _socket!.emit("user_status", {
-        "userId": userId,
-        "status": "offline"
-      });
+      print("✅ Cleared $clearedCount messages locally for chat $chatId");
+    } catch (e) {
+      print("❌ Error clearing chat locally: $e");
     }
-
-    _cleanupTimers();
-    _cleanupSocketListeners();
-
-    _socket?.disconnect();
-    _socket?.destroy();
-    _socket = null;
-    _isInitialized = false;
-    _isConnecting = false;
-
-    // ✅ CLEAR PROCESSED MESSAGE IDs
-    _processedMessageIds.clear();
-    _uploadingMediaIds.clear();
-
-    print("🔌 Socket completely disposed");
   }
 
   // ------------------- HANDLE INCOMING DATA - COMPLETELY FIXED -------------------
@@ -517,6 +649,13 @@ class ChatService {
       final mediaUrl = data["media_url"]?.toString();
       final messageContent = data["message_text"]?.toString() ?? "";
       final messageType = data["message_type"]?.toString() ?? "text";
+      final replyToMessageId = data["reply_to_message_id"]?.toString();
+
+      // ✅ EXTRACT GROUP DATA FOR MULTIPLE IMAGES
+      final groupData = data["group_data"];
+      final String? groupId = groupData != null ? groupData["groupId"]?.toString() : null;
+      final int imageIndex = groupData != null ? (groupData["imageIndex"] ?? 0) : 0;
+      final int totalImages = groupData != null ? (groupData["totalImages"] ?? 1) : 1;
 
       print("🔍 RAW DATA FROM SERVER:");
       print("   - Message Type: $messageType");
@@ -525,6 +664,8 @@ class ChatService {
       print("   - Low Quality URL: $lowQualityUrl");
       print("   - High Quality URL: $highQualityUrl");
       print("   - Media URL: $mediaUrl");
+      print("   - Reply To: $replyToMessageId");
+      print("   - Group Data: ${groupId != null ? 'Available ($imageIndex/$totalImages)' : 'Not Available'}");
 
       // ✅ SMART MEDIA DATA EXTRACTION
       String finalContent = messageContent;
@@ -627,6 +768,7 @@ class ChatService {
         if (finalHighQualityUrl != null) finalExistingCheck.highQualityUrl = finalHighQualityUrl;
         if (finalBlurHash != null) finalExistingCheck.blurHash = finalBlurHash;
         if (finalThumbnailBase64 != null) finalExistingCheck.thumbnailBase64 = finalThumbnailBase64;
+        if (replyToMessageId != null) finalExistingCheck.replyToMessageId = replyToMessageId;
 
         await _messageBox.put(finalExistingCheck.messageId, finalExistingCheck);
         print("✅ Updated existing message with new media data");
@@ -659,6 +801,15 @@ class ChatService {
         highQualityUrl: finalHighQualityUrl,
         blurHash: finalBlurHash,
         thumbnailBase64: finalThumbnailBase64,
+        replyToMessageId: replyToMessageId,
+        isForwarded: data["is_forwarded"] == 1 ? true : false,
+        forwardedFrom: data["forwarded_from"]?.toString(),
+        // ✅ STORE GROUP DATA FOR MULTIPLE IMAGES
+        extraData: groupId != null ? {
+          'groupId': groupId,
+          'imageIndex': imageIndex,
+          'totalImages': totalImages,
+        } : null,
       );
 
       await saveMessageLocal(msg);
@@ -668,6 +819,9 @@ class ChatService {
       print("   - High Quality: ${msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty}");
       print("   - Blur Hash: ${msg.blurHash != null && msg.blurHash!.isNotEmpty}");
       print("   - Thumbnail: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty}");
+      print("   - Reply To: ${msg.replyToMessageId}");
+      print("   - Is Forwarded: ${msg.isForwarded}");
+      print("   - Group Data: ${msg.extraData != null ? 'Available' : 'Not Available'}");
 
       // ✅ DELAYED STREAM EVENT
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -702,7 +856,7 @@ class ChatService {
     }
   }
 
-// ✅ URL RESOLUTION HELPER
+  // ✅ URL RESOLUTION HELPER
   static String _resolveMediaUrl(String url) {
     if (url.startsWith('http')) {
       return url;
@@ -714,272 +868,484 @@ class ChatService {
     }
   }
 
-  // ------------------- MEDIA URL TEST FUNCTION -------------------
-  static Future<void> _testMediaUrl(String mediaUrl) async {
-    try {
-      print("🔍 Testing media URL: $mediaUrl");
-      final response = await http.head(Uri.parse(mediaUrl));
-      print("🔍 Media URL test result: ${response.statusCode}");
+  // ------------------- MULTIPLE IMAGES SUPPORT -------------------
 
-      if (response.statusCode == 200) {
-        print("✅ Media URL is accessible and working!");
-      } else {
-        print("❌ Media URL returned status: ${response.statusCode}");
-      }
-    } catch (e) {
-      print("❌ Media URL test failed: $e");
+  /// ✅ SEND MULTIPLE MEDIA MESSAGES - COMPLETE METHOD
+  static Future<void> sendMultipleMediaMessages({
+    required int chatId,
+    required int receiverId,
+    required List<String> mediaPaths,
+    String? senderName,
+    String? receiverName,
+    String? senderPhoneNumber,
+    String? receiverPhoneNumber,
+  }) async {
+    if (!_isInitialized) {
+      throw Exception("ChatService not initialized");
     }
-  }
 
-  // ------------------- UPDATE / DELIVERY FUNCTIONS -------------------
-  static Future<void> updateMessageId(String tempId, String newMessageId, int status) async {
+    if (_socket == null || !_socket!.connected) {
+      print("❌ Socket not connected for multiple images");
+      initSocket();
+      await Future.delayed(const Duration(seconds: 2));
+      if (_socket == null || !_socket!.connected) {
+        throw Exception("Socket not connected");
+      }
+    }
+
+    final userId = _authBox.get('userId');
+    if (userId == null) throw Exception("User ID not found");
+
     try {
-      final msg = _messageBox.get(tempId) as Message?;
-      if (msg != null) {
-        // ✅ FIRST: Check if new message ID already exists
-        final existingWithNewId = _messageBox.values.firstWhereOrNull(
-              (m) => m.messageId == newMessageId,
+      print("🔄 Starting to send ${mediaPaths.length} images...");
+
+      // ✅ STEP 1: Generate unique group ID for all images
+      final String groupId = 'group_${DateTime.now().microsecondsSinceEpoch}';
+
+      // ✅ STEP 2: Send each image individually but with group info
+      for (int i = 0; i < mediaPaths.length; i++) {
+        final mediaPath = mediaPaths[i];
+        final tempId = '${groupId}_$i'; // Unique temp ID for each image
+
+        print("📤 Sending image $i/${mediaPaths.length}: $mediaPath");
+
+        // ✅ Create temporary message for instant UI
+        final tempMsg = Message(
+          messageId: tempId,
+          chatId: chatId,
+          senderId: userId,
+          receiverId: receiverId,
+          messageContent: mediaPath,
+          messageType: 'media',
+          isRead: 0,
+          isDelivered: 0,
+          timestamp: DateTime.now(),
+          senderName: senderName,
+          receiverName: receiverName,
+          senderPhoneNumber: senderPhoneNumber,
+          receiverPhoneNumber: receiverPhoneNumber,
+          // ✅ ADD GROUP INFORMATION
+          extraData: {
+            'groupId': groupId,
+            'imageIndex': i,
+            'totalImages': mediaPaths.length,
+          },
         );
 
-        if (existingWithNewId != null) {
-          print("⚠️ Message with new ID already exists: $newMessageId");
-          // Delete the temporary message to avoid duplicates
-          await _messageBox.delete(tempId);
-          return;
+        await saveMessageLocal(tempMsg);
+        _newMessageController.add(tempMsg);
+
+        // ✅ Process and upload this image
+        _processAndSendMultipleMedia(
+          mediaPath: mediaPath,
+          chatId: chatId,
+          receiverId: receiverId,
+          tempId: tempId,
+          userId: userId,
+          senderName: senderName,
+          receiverName: receiverName,
+          senderPhoneNumber: senderPhoneNumber,
+          receiverPhoneNumber: receiverPhoneNumber,
+          groupId: groupId,
+          imageIndex: i,
+          totalImages: mediaPaths.length,
+        );
+
+        // ✅ Small delay between images to avoid overload
+        if (i < mediaPaths.length - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
         }
+      }
 
-        // ✅ Update message ID and status
-        msg.messageId = newMessageId;
-        msg.isDelivered = status;
+      print("✅ All ${mediaPaths.length} images queued for upload");
 
-        await _messageBox.delete(tempId);
-        await _messageBox.put(newMessageId, msg);
+    } catch (e) {
+      print("❌ Error in sendMultipleMediaMessages: $e");
+      rethrow;
+    }
+  }
 
-        print("✅ TempId $tempId replaced with $newMessageId (status=$status)");
+  /// ✅ PROCESS MULTIPLE MEDIA - COMPLETE METHOD
+  static Future<void> _processAndSendMultipleMedia({
+    required String mediaPath,
+    required int chatId,
+    required int receiverId,
+    required String tempId,
+    required int userId,
+    String? senderName,
+    String? receiverName,
+    String? senderPhoneNumber,
+    String? receiverPhoneNumber,
+    required String groupId,
+    required int imageIndex,
+    required int totalImages,
+  }) async {
+    if (_uploadingMediaIds.contains(tempId)) {
+      return;
+    }
 
-        _newMessageController.add(msg);
+    _uploadingMediaIds.add(tempId);
+
+    String? blurHash;
+    String? thumbnailBase64;
+
+    try {
+      // ✅ Generate thumbnail and blur hash
+      final ext = mediaPath.split('.').last.toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+        final compressedThumbnail = await FlutterImageCompress.compressWithFile(
+          mediaPath,
+          quality: 30,
+          minWidth: 100,
+          minHeight: 100,
+        );
+        if (compressedThumbnail != null) {
+          thumbnailBase64 = base64Encode(compressedThumbnail);
+          blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I";
+          print("✅ Generated thumbnail for multiple image $imageIndex");
+        }
+      }
+
+      // ✅ Compress and upload image
+      Uint8List fileBytes;
+      if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+        final compressedBytes = await FlutterImageCompress.compressWithFile(
+          mediaPath,
+          quality: 60,
+          minWidth: 1200,
+          minHeight: 1200,
+        );
+        fileBytes = Uint8List.fromList(compressedBytes ?? await File(mediaPath).readAsBytes());
       } else {
-        print("⚠️ No message found with tempId=$tempId");
-      }
-    } catch (e) {
-      print("❌ Error updating MessageId: $e");
-    }
-  }
-
-  static Future<void> updateDeliveryStatus(String messageId, int status) async {
-    try {
-      final msg = _messageBox.get(messageId) as Message?;
-      if (msg != null) {
-        msg.isDelivered = status;
-        await _messageBox.put(messageId, msg);
-        print("✅ Delivery status updated for $messageId = $status");
-
-        _newMessageController.add(msg);
-        _messageDeliveredController.sink.add(messageId);
-      } else {
-        print("⚠️ No message found with ID $messageId");
-      }
-    } catch (e) {
-      print("❌ Error updating delivery status: $e");
-    }
-  }
-
-  /// Mark all messages of a user as delivered (double tick)
-  static Future<void> markAllMessagesAsDelivered(int userId) async {
-    try {
-      final messages = _messageBox.values
-          .where((m) => m.receiverId == userId && m.isDelivered == 0)
-          .toList();
-
-      final messageIds = <int>[];
-      for (final msg in messages) {
-        msg.isDelivered = 1;
-        await _messageBox.put(msg.messageId, msg);
-        _newMessageController.add(msg);
-
-        messageIds.add(msg.messageId as int);
+        fileBytes = await File(mediaPath).readAsBytes();
       }
 
-      if (messageIds.isNotEmpty && ChatService._socket != null && ChatService._socket!.connected) {
-        ChatService._socket!.emit("mark_delivered_bulk", {
-          "message_ids": messageIds,
-          "receiver_id": userId,
-        });
-      }
+      final originalName = path.basename(mediaPath);
+      final totalSize = fileBytes.length;
 
-      print("✅ All messages marked delivered locally and server notified for userId=$userId");
-    } catch (e) {
-      print("❌ Error marking messages delivered: $e");
-    }
-  }
-
-  // ------------------- SAVE / READ -------------------
-  static Future<void> saveMessageLocal(Message message) async {
-    try {
-      // ✅ FINAL SAFETY CHECK before saving
-      final existingMessage = _messageBox.values.firstWhereOrNull(
-            (msg) =>
-        msg.messageId == message.messageId ||
-            (msg.chatId == message.chatId &&
-                msg.senderId == message.senderId &&
-                msg.messageContent == message.messageContent &&
-                msg.timestamp.difference(message.timestamp).inSeconds.abs() < 3),
+      // ✅ Upload to server
+      final String? mediaUrl = await _uploadMediaToServer(
+          fileBytes,
+          originalName,
+          totalSize,
+          tempId,
+          chatId: chatId,
+          senderId: userId,
+          receiverId: receiverId,
+          onProgress: (progress) {
+            _uploadProgressController.sink.add({
+              'tempId': tempId,
+              'progress': progress,
+            });
+          }
       );
 
-      if (existingMessage != null) {
-        print("⚠️ DUPLICATE BLOCKED in saveMessageLocal: ${message.messageId}");
-        print("   Existing ID: ${existingMessage.messageId}");
-        return;
+      if (mediaUrl == null) {
+        throw Exception("Failed to upload media");
       }
 
-      await _messageBox.put(message.messageId, message);
-      print("💾 Message saved to local storage: ${message.messageId}");
-    } catch (e) {
-      print("❌ Error saving message locally: $e");
-    }
-  }
+      // ✅ Prepare final message with GROUP INFORMATION
+      final fileName = mediaUrl.split('/').last;
+      final fullMediaUrl = '${Config.baseNodeApiUrl}/media/file/$fileName';
 
-  static Future<void> markMessageReadLocal(String messageId) async {
-    try {
-      final msg = (_messageBox.get(messageId) as Message?);
-      if (msg != null) {
-        msg.isRead = 1;
-        await _messageBox.put(messageId, msg);
-        print("💾 Local Hive updated as read: $messageId");
+      final Map<String, dynamic> mediaPayload = {
+        'type': 'media',
+        'content': fullMediaUrl,
+        'groupId': groupId,
+        'imageIndex': imageIndex,
+        'totalImages': totalImages,
+      };
 
-        _newMessageController.add(msg);
-      } else {
-        print("⚠️ No message found in Hive with ID $messageId");
+      final String payloadString = jsonEncode(mediaPayload);
+      final encryptedData = await _cryptoManager.encryptAndCompress(payloadString);
+      final encryptedContent = encryptedData['content'];
+      final encryptedType = encryptedData['type'];
+
+      // ✅ Send via socket WITH GROUP DATA
+      if (_socket != null && _socket!.connected) {
+        _socket!.emit("send_message", {
+          "chat_id": chatId,
+          "sender_id": userId,
+          "receiver_id": receiverId,
+          "message_text": encryptedContent,
+          "message_type": encryptedType,
+          "temp_id": tempId,
+          "media_url": fullMediaUrl,
+          "low_quality_url": fullMediaUrl,
+          "blur_hash": blurHash ?? "",
+          "thumbnail_data": thumbnailBase64 ?? "",
+          "image_variant": "blurred",
+          "sender_name": senderName,
+          "receiver_name": receiverName,
+          "sender_phone": senderPhoneNumber,
+          "receiver_phone": receiverPhoneNumber,
+
+          // ✅ CRITICAL: ADD GROUP INFORMATION
+          "group_data": {
+            "groupId": groupId,
+            "imageIndex": imageIndex,
+            "totalImages": totalImages,
+          },
+
+          "timestamp": DateTime.now().toIso8601String(),
+        });
+
+        print("📤 Emitted multiple image $imageIndex/$totalImages with group: $groupId");
       }
-    } catch (e) {
-      print("❌ Error marking message read locally: $e");
-    }
-  }
 
-  static void joinRoom(int chatId) {
-    if (_socket != null && _socket!.connected) {
-      _socket!.emit("join_chat", chatId);
-      print("✅ Joined room: $chatId");
-    } else {
-      print("⚠️ Socket not connected, trying to reconnect...");
-      initSocket();
-      Future.delayed(const Duration(seconds: 2), () {
-        if (_socket != null && _socket!.connected) {
-          _socket!.emit("join_chat", chatId);
-        }
+      // ✅ Update local message
+      final existingTempMsg = _messageBox.get(tempId) as Message?;
+      if (existingTempMsg != null) {
+        existingTempMsg.isDelivered = 1;
+        _newMessageController.add(existingTempMsg);
+      }
+
+      // ✅ Send notification for each image
+      await _sendPushNotification(
+          receiverId,
+          '📷 Image ${imageIndex + 1}/$totalImages',
+          chatId,
+          userId,
+          senderName ?? 'User'
+      );
+
+    } catch (e) {
+      print("❌ Multiple media upload error: $e");
+      _uploadProgressController.sink.add({
+        'tempId': tempId,
+        'progress': -1.0,
       });
+    } finally {
+      _uploadingMediaIds.remove(tempId);
     }
   }
 
-  static void leaveRoom(int chatId) {
-    if (_socket != null && _socket!.connected) {
-      _socket!.emit("leave_room", {"chat_id": chatId});
-      print("🚪 Left room: $chatId");
-    }
-  }
+  // ------------------- NEW API COMPATIBLE FUNCTIONS -------------------
 
-  static void startTyping(int chatId) {
-    final userId = _authBox.get('userId');
-    if (_socket != null && _socket!.connected && userId != null) {
-      _socket!.emit("typing_start", {"chat_id": chatId, "user_id": userId});
-    }
-  }
-
-  static void stopTyping(int chatId) {
-    final userId = _authBox.get('userId');
-    if (_socket != null && _socket!.connected && userId != null) {
-      _socket!.emit("typing_stop", {"chat_id": chatId, "user_id": userId});
-    }
-  }
-
-  static List<Message> getLocalMessages(int chatId) {
-    try {
-      return _messageBox.values
-          .where((m) => m.chatId == chatId)
-          .where((m) => !m.messageId.toString().startsWith('temp_'))
-          .cast<Message>()
-          .toList()
-        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    } catch (e) {
-      print("❌ Error getting local messages: $e");
-      return [];
-    }
-  }
-
-  static Future<int?> createChat(int otherUserId) async {
+  // ✅ CLEAR CHAT FUNCTION
+  static Future<void> clearChat(int chatId) async {
     try {
       final userId = _authBox.get('userId');
-      if (userId == null) return null;
+      if (userId == null) return;
 
-      final res = await http.post(
-        Uri.parse("$apiBase/create_chat.php"),
+      const apiUrl = "${Config.baseNodeApiUrl}/chats/clear";
+
+      final response = await http.post(
+        Uri.parse(apiUrl),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "sender_id": userId.toString(),
-          "receiver_id": otherUserId.toString(),
+          "chat_id": chatId,
+          "user_id": userId,
         }),
       );
 
-      if (res.statusCode != 200) {
-        print("❌ HTTP Error: ${res.statusCode}");
-        return null;
-      }
-
-      final data = jsonDecode(res.body);
-      if (data["success"] == true && data.containsKey("chat_id")) {
-        final chatId = int.tryParse(data["chat_id"].toString());
-        if (chatId != null) {
-          final chat = Chat(
-            chatId: chatId,
-            contactId: otherUserId,
-            userIds: [],
-            chatTitle: '',
-          );
-          await _chatBox.put(chatId, chat);
-          print("💾 Saved new chat in Hive for chatId=$chatId");
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data["success"] == true) {
+          print("✅ Chat cleared successfully: $chatId");
+        } else {
+          print("❌ Failed to clear chat: ${data['message']}");
         }
-        return chatId;
+      } else {
+        print("❌ HTTP Error clearing chat: ${response.statusCode}");
       }
-      return null;
     } catch (e) {
-      print("❌ Create chat error: $e");
-      return null;
+      print("❌ Error clearing chat: $e");
     }
   }
 
-  static Future<void> fetchMessages(int chatId) async {
+  // ✅ BLOCK USER FUNCTION
+  static Future<void> blockUser(int blockedUserId) async {
     try {
-      final res =
-      await http.get(Uri.parse("$apiBase/get_messages.php?chat_id=$chatId"));
+      final userId = _authBox.get('userId');
+      if (userId == null) return;
+
+      const apiUrl = "${Config.baseNodeApiUrl}/users/block";
+
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "user_id": userId,
+          "blocked_user_id": blockedUserId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data["success"] == true) {
+          _blockedUsers.add(blockedUserId.toString());
+          print("✅ User blocked successfully: $blockedUserId");
+        } else {
+          print("❌ Failed to block user: ${data['message']}");
+        }
+      } else {
+        print("❌ HTTP Error blocking user: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("❌ Error blocking user: $e");
+    }
+  }
+
+  // ✅ UNBLOCK USER FUNCTION
+  static Future<void> unblockUser(int blockedUserId) async {
+    try {
+      final userId = _authBox.get('userId');
+      if (userId == null) return;
+
+      const apiUrl = "${Config.baseNodeApiUrl}/users/unblock";
+
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "user_id": userId,
+          "blocked_user_id": blockedUserId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data["success"] == true) {
+          _blockedUsers.remove(blockedUserId.toString());
+          print("✅ User unblocked successfully: $blockedUserId");
+        } else {
+          print("❌ Failed to unblock user: ${data['message']}");
+        }
+      } else {
+        print("❌ HTTP Error unblocking user: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("❌ Error unblocking user: $e");
+    }
+  }
+
+  // ✅ CHECK IF USER IS BLOCKED
+  static bool isUserBlocked(int userId) {
+    return _blockedUsers.contains(userId.toString());
+  }
+
+  // ✅ GET COMBINED MESSAGES (PHP + NODE)
+  static Future<List<Message>> getCombinedMessages(int chatId) async {
+    try {
+      final apiUrl = "${Config.baseNodeApiUrl}/messages/combined/$chatId";
+
+      final response = await http.get(Uri.parse(apiUrl));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data["success"] == true && data["messages"] != null) {
+          final messages = List<Map<String, dynamic>>.from(data["messages"]);
+          final List<Message> parsedMessages = [];
+
+          for (var msg in messages) {
+            await _handleIncomingData(msg);
+            final message = _messageBox.get(msg["message_id"]?.toString());
+            if (message != null) {
+              parsedMessages.add(message);
+            }
+          }
+
+          print("✅ Combined messages loaded: ${parsedMessages.length} messages");
+          return parsedMessages;
+        }
+      }
+    } catch (e) {
+      print("❌ Error getting combined messages: $e");
+    }
+
+    // Fallback to local messages
+    return getLocalMessages(chatId);
+  }
+
+  // ✅ FORWARD MESSAGES (UPDATED FOR NEW API)
+  static Future<void> forwardMessages({
+    required Set<int> originalMessageIds,
+    required int targetChatId,
+  }) async {
+    if (!_isInitialized) {
+      throw Exception("ChatService has not been initialized.");
+    }
+
+    final List<Message> messagesToForward = originalMessageIds
+        .map((id) => _messageBox.get(id.toString()))
+        .whereType<Message>()
+        .toList();
+
+    print("DEBUG: Forwarding ${messagesToForward.length} messages to chatId=$targetChatId");
+
+    for (final msg in messagesToForward) {
+      await _forwardMessage(
+        originalMessage: msg,
+        targetChatId: targetChatId,
+      );
+    }
+  }
+
+  static Future<void> _forwardMessage({
+    required Message originalMessage,
+    required int targetChatId,
+  }) async {
+    final myUserId = _authBox.get('userId');
+    if (myUserId == null) return;
+
+    final chat = _chatBox.get(targetChatId) as Chat?;
+    final receiverId = chat?.contactId;
+
+    if (receiverId == null) {
+      print("⚠️ Forward failed: receiverId is null for chatId=$targetChatId");
+      return;
+    }
+
+    print(
+        "➡️ Forwarding messageId=${originalMessage.messageId} from userId=$myUserId to receiverId=$receiverId for chatId=$targetChatId");
+
+    _socket?.emit("forward_messages", {
+      "original_message_id": originalMessage.messageId,
+      "forwarded_by_id": myUserId,
+      "to_chat_id": targetChatId,
+      "to_user_id": receiverId,
+    });
+  }
+
+  // ✅ DELETE MESSAGE (UPDATED FOR NEW API)
+  static Future<void> deleteMessage({
+    required String messageId,
+    required int userId,
+    required String role, // 'sender' or 'receiver'
+  }) async {
+    try {
+      const apiUrl = "${Config.baseNodeApiUrl}/delete_message";
+
+      final res = await http.post(
+        Uri.parse(apiUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "messageId": messageId,
+          "userId": userId,
+          "role": role,
+        }),
+      );
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (data["success"] == true && data["messages"] != null) {
-          for (var msg in data["messages"]) {
-            await _handleIncomingData(msg);
-          }
-          print("✅ Messages loaded for chatId=$chatId: ${data["messages"].length}");
+        if (data["success"] == true) {
+          print("✅ Message deletion processed successfully on server: $messageId");
+
+          await _updateMessageDeletionStatusLocal(messageId, role);
+
+        } else {
+          print("❌ Server reported failure in deletion: ${data['error']}");
         }
       } else {
-        print("❌ HTTP Error: ${res.statusCode}");
+        print("❌ HTTP Error during message deletion: ${res.statusCode}");
       }
     } catch (e) {
-      print("❌ Fetch messages error: $e");
+      print("❌ Error deleting message: $e");
     }
   }
 
-  /// Fetch all messages for home screen
-  static Future<void> fetchAllChatsAndMessages() async {
-    if (!_isInitialized) return;
-
-    final chatIds = _messageBox.values.map((m) => m.chatId).toSet();
-    for (final chatId in chatIds) {
-      await fetchMessages(chatId);
-    }
-    print("✅ Fetched all messages for home screen");
-  }
-
-  // ==================== CORRECTED MEDIA UPLOAD ====================
+  // ------------------- MEDIA UPLOAD FUNCTIONS -------------------
 
   /// Send media message using server's 3-step upload process
   static Future<void> sendMediaMessage({
@@ -990,6 +1356,8 @@ class ChatService {
     String? receiverName,
     String? senderPhoneNumber,
     String? receiverPhoneNumber,
+    String? replyToMessageId,
+    Map<String, dynamic>? extraData,
   }) async {
     final tempId = 'temp_${chatId}_${DateTime.now().microsecondsSinceEpoch}';
     if (!_isInitialized) {
@@ -1024,6 +1392,7 @@ class ChatService {
         receiverName: receiverName,
         senderPhoneNumber: senderPhoneNumber,
         receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
       );
 
       await saveMessageLocal(tempMsg);
@@ -1045,6 +1414,7 @@ class ChatService {
         receiverName: receiverName,
         senderPhoneNumber: senderPhoneNumber,
         receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
       );
 
     } catch (e) {
@@ -1053,7 +1423,6 @@ class ChatService {
     }
   }
 
-  /// Background processing and uploading of media
   /// Background processing and uploading of media
   static Future<void> _processAndSendMedia({
     required String mediaPath,
@@ -1065,6 +1434,7 @@ class ChatService {
     String? receiverName,
     String? senderPhoneNumber,
     String? receiverPhoneNumber,
+    String? replyToMessageId,
   }) async {
     if (_uploadingMediaIds.contains(tempId)) {
       print("⚠️ Media $tempId is already being uploaded");
@@ -1073,7 +1443,6 @@ class ChatService {
 
     _uploadingMediaIds.add(tempId);
 
-    // ✅ DECLARE VARIABLES HERE
     String? blurHash;
     String? thumbnailBase64;
 
@@ -1103,7 +1472,6 @@ class ChatService {
             print("✅ Generated thumbnail base64: ${thumbnailBase64.length} bytes");
 
             // Generate blur hash for images
-            // blurHash = await _generateBlurHash(mediaPath); // Uncomment if you have blur hash library
             blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Placeholder blur hash
             print("✅ Generated blur hash: $blurHash");
           }
@@ -1213,6 +1581,8 @@ class ChatService {
           "receiver_name": receiverName,
           "sender_phone": senderPhoneNumber,
           "receiver_phone": receiverPhoneNumber,
+          "reply_to_message_id": replyToMessageId,
+
           "timestamp": DateTime.now().toIso8601String(),
         });
         print("📤 Emitted send_message for media with temp_id: $tempId");
@@ -1239,21 +1609,6 @@ class ChatService {
       _uploadingMediaIds.remove(tempId);
     }
   }
-
-// ✅ ADD THIS HELPER FUNCTION IF YOU WANT TO GENERATE BLUR HASH
-/*
-static Future<String> _generateBlurHash(String imagePath) async {
-  try {
-    // You'll need to add a blur hash generation package
-    // For example: flutter_blurhash or image_to_blurhash
-    // This is just a placeholder implementation
-    return "L5H2EC=PM+yV0g-mq.wG9c010J}I";
-  } catch (e) {
-    print("❌ Error generating blur hash: $e");
-    return "";
-  }
-}
-*/
 
   /// ✅ CORRECTED: Upload using server's 3-step API
   static Future<String?> _uploadMediaToServer(
@@ -1398,6 +1753,7 @@ static Future<String> _generateBlurHash(String imagePath) async {
     String? senderPhoneNumber,
     String? receiverPhoneNumber,
     bool isForwarded = false,
+    String? replyToMessageId,
   }) async {
     if (!_isInitialized) {
       throw Exception("ChatService has not been initialized. Cannot send message.");
@@ -1446,6 +1802,8 @@ static Future<String> _generateBlurHash(String imagePath) async {
         receiverName: receiverName,
         senderPhoneNumber: senderPhoneNumber,
         receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
       );
 
       await saveMessageLocal(tempMsg);
@@ -1462,6 +1820,8 @@ static Future<String> _generateBlurHash(String imagePath) async {
         "receiver_name": receiverName,
         "sender_phone": senderPhoneNumber,
         "receiver_phone": receiverPhoneNumber,
+        "reply_to_message_id": replyToMessageId,
+        "is_forwarded": isForwarded ? 1 : 0,
       });
 
       print("✅ Emitted 'send_message' to socket server");
@@ -1497,54 +1857,252 @@ static Future<String> _generateBlurHash(String imagePath) async {
     }
   }
 
-  // ------------------- FORWARD MESSAGE FUNCTIONS -------------------
-  static Future<void> forwardMessages({
-    required Set<int> originalMessageIds,
-    required int targetChatId,
-  }) async {
-    if (!_isInitialized) {
-      throw Exception("ChatService has not been initialized.");
-    }
+  // ------------------- UTILITY METHODS -------------------
 
-    final List<Message> messagesToForward = originalMessageIds
-        .map((id) => _messageBox.get(id.toString()))
-        .whereType<Message>()
-        .toList();
+  static Future<void> updateMessageId(String tempId, String newMessageId, int status) async {
+    try {
+      final msg = _messageBox.get(tempId) as Message?;
+      if (msg != null) {
+        // ✅ FIRST: Check if new message ID already exists
+        final existingWithNewId = _messageBox.values.firstWhereOrNull(
+              (m) => m.messageId == newMessageId,
+        );
 
-    print("DEBUG: Forwarding ${messagesToForward.length} messages to chatId=$targetChatId");
+        if (existingWithNewId != null) {
+          print("⚠️ Message with new ID already exists: $newMessageId");
+          // Delete the temporary message to avoid duplicates
+          await _messageBox.delete(tempId);
+          return;
+        }
 
-    for (final msg in messagesToForward) {
-      await _forwardMessage(
-        originalMessage: msg,
-        targetChatId: targetChatId,
-      );
+        // ✅ Update message ID and status
+        msg.messageId = newMessageId;
+        msg.isDelivered = status;
+
+        await _messageBox.delete(tempId);
+        await _messageBox.put(newMessageId, msg);
+
+        print("✅ TempId $tempId replaced with $newMessageId (status=$status)");
+
+        _newMessageController.add(msg);
+      } else {
+        print("⚠️ No message found with tempId=$tempId");
+      }
+    } catch (e) {
+      print("❌ Error updating MessageId: $e");
     }
   }
 
-  static Future<void> _forwardMessage({
-    required Message originalMessage,
-    required int targetChatId,
-  }) async {
-    final myUserId = _authBox.get('userId');
-    if (myUserId == null) return;
+  static Future<void> updateDeliveryStatus(String messageId, int status) async {
+    try {
+      final msg = _messageBox.get(messageId) as Message?;
+      if (msg != null) {
+        msg.isDelivered = status;
+        await _messageBox.put(messageId, msg);
+        print("✅ Delivery status updated for $messageId = $status");
 
-    final chat = _chatBox.get(targetChatId) as Chat?;
-    final receiverId = chat?.contactId;
-
-    if (receiverId == null) {
-      print("⚠️ Forward failed: receiverId is null for chatId=$targetChatId");
-      return;
+        _newMessageController.add(msg);
+        _messageDeliveredController.sink.add(messageId);
+      } else {
+        print("⚠️ No message found with ID $messageId");
+      }
+    } catch (e) {
+      print("❌ Error updating delivery status: $e");
     }
+  }
 
-    print(
-        "➡️ Forwarding messageId=${originalMessage.messageId} from userId=$myUserId to receiverId=$receiverId for chatId=$targetChatId");
+  static Future<void> saveMessageLocal(Message message) async {
+    try {
+      // ✅ FINAL SAFETY CHECK before saving
+      final existingMessage = _messageBox.values.firstWhereOrNull(
+            (msg) =>
+        msg.messageId == message.messageId ||
+            (msg.chatId == message.chatId &&
+                msg.senderId == message.senderId &&
+                msg.messageContent == message.messageContent &&
+                msg.timestamp.difference(message.timestamp).inSeconds.abs() < 3),
+      );
 
-    _socket?.emit("forward_messages", {
-      "original_message_id": originalMessage.messageId,
-      "forwarded_by_id": myUserId,
-      "to_chat_id": targetChatId,
-      "to_user_id": receiverId,
-    });
+      if (existingMessage != null) {
+        print("⚠️ DUPLICATE BLOCKED in saveMessageLocal: ${message.messageId}");
+        print("   Existing ID: ${existingMessage.messageId}");
+        return;
+      }
+
+      await _messageBox.put(message.messageId, message);
+      print("💾 Message saved to local storage: ${message.messageId}");
+    } catch (e) {
+      print("❌ Error saving message locally: $e");
+    }
+  }
+
+  static Future<void> markMessageReadLocal(String messageId) async {
+    try {
+      final msg = (_messageBox.get(messageId) as Message?);
+      if (msg != null) {
+        msg.isRead = 1;
+        await _messageBox.put(messageId, msg);
+        print("💾 Local Hive updated as read: $messageId");
+
+        _newMessageController.add(msg);
+      } else {
+        print("⚠️ No message found in Hive with ID $messageId");
+      }
+    } catch (e) {
+      print("❌ Error marking message read locally: $e");
+    }
+  }
+
+  static List<Message> getLocalMessages(int chatId) {
+    try {
+      return _messageBox.values
+          .where((m) => m.chatId == chatId)
+          .where((m) => !m.messageId.toString().startsWith('temp_'))
+          .cast<Message>()
+          .toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    } catch (e) {
+      print("❌ Error getting local messages: $e");
+      return [];
+    }
+  }
+
+  static void joinRoom(int chatId) {
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit("join_chat", chatId);
+      print("✅ Joined room: $chatId");
+    } else {
+      print("⚠️ Socket not connected, trying to reconnect...");
+      initSocket();
+      Future.delayed(const Duration(seconds: 2), () {
+        if (_socket != null && _socket!.connected) {
+          _socket!.emit("join_chat", chatId);
+        }
+      });
+    }
+  }
+
+  static void leaveRoom(int chatId) {
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit("leave_room", {"chat_id": chatId});
+      print("🚪 Left room: $chatId");
+    }
+  }
+
+  static void startTyping(int chatId) {
+    final userId = _authBox.get('userId');
+    if (_socket != null && _socket!.connected && userId != null) {
+      _socket!.emit("typing_start", {"chat_id": chatId, "user_id": userId});
+    }
+  }
+
+  static void stopTyping(int chatId) {
+    final userId = _authBox.get('userId');
+    if (_socket != null && _socket!.connected && userId != null) {
+      _socket!.emit("typing_stop", {"chat_id": chatId, "user_id": userId});
+    }
+  }
+
+  static Future<int?> createChat(int otherUserId) async {
+    try {
+      final userId = _authBox.get('userId');
+      if (userId == null) return null;
+
+      final res = await http.post(
+        Uri.parse("$apiBase/create_chat.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "sender_id": userId.toString(),
+          "receiver_id": otherUserId.toString(),
+        }),
+      );
+
+      if (res.statusCode != 200) {
+        print("❌ HTTP Error: ${res.statusCode}");
+        return null;
+      }
+
+      final data = jsonDecode(res.body);
+      if (data["success"] == true && data.containsKey("chat_id")) {
+        final chatId = int.tryParse(data["chat_id"].toString());
+        if (chatId != null) {
+          final chat = Chat(
+            chatId: chatId,
+            contactId: otherUserId,
+            userIds: [],
+            chatTitle: '',
+          );
+          await _chatBox.put(chatId, chat);
+          print("💾 Saved new chat in Hive for chatId=$chatId");
+        }
+        return chatId;
+      }
+      return null;
+    } catch (e) {
+      print("❌ Create chat error: $e");
+      return null;
+    }
+  }
+
+  static Future<void> fetchMessages(int chatId) async {
+    try {
+      final res =
+      await http.get(Uri.parse("$apiBase/get_messages.php?chat_id=$chatId"));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data["success"] == true && data["messages"] != null) {
+          for (var msg in data["messages"]) {
+            await _handleIncomingData(msg);
+          }
+          print("✅ Messages loaded for chatId=$chatId: ${data["messages"].length}");
+        }
+      } else {
+        print("❌ HTTP Error: ${res.statusCode}");
+      }
+    } catch (e) {
+      print("❌ Fetch messages error: $e");
+    }
+  }
+
+  /// Fetch all messages for home screen
+  static Future<void> fetchAllChatsAndMessages() async {
+    if (!_isInitialized) return;
+
+    final chatIds = _messageBox.values.map((m) => m.chatId).toSet();
+    for (final chatId in chatIds) {
+      await fetchMessages(chatId);
+    }
+    print("✅ Fetched all messages for home screen");
+  }
+
+  /// Mark all messages of a user as delivered (double tick)
+  static Future<void> markAllMessagesAsDelivered(int userId) async {
+    try {
+      final messages = _messageBox.values
+          .where((m) => m.receiverId == userId && m.isDelivered == 0)
+          .toList();
+
+      final messageIds = <int>[];
+      for (final msg in messages) {
+        msg.isDelivered = 1;
+        await _messageBox.put(msg.messageId, msg);
+        _newMessageController.add(msg);
+
+        messageIds.add(msg.messageId as int);
+      }
+
+      if (messageIds.isNotEmpty && ChatService._socket != null && ChatService._socket!.connected) {
+        ChatService._socket!.emit("mark_delivered_bulk", {
+          "message_ids": messageIds,
+          "receiver_id": userId,
+        });
+      }
+
+      print("✅ All messages marked delivered locally and server notified for userId=$userId");
+    } catch (e) {
+      print("❌ Error marking messages delivered: $e");
+    }
   }
 
   /// Ensure socket is connected and user online
@@ -1598,44 +2156,6 @@ static Future<String> _generateBlurHash(String imagePath) async {
     }
   }
 
-  // ------------------- DELETE MESSAGE FUNCTION -------------------
-  static Future<void> deleteMessage({
-    required String messageId,
-    required int userId,
-    required String role, // 'sender' or 'receiver'
-  }) async {
-    try {
-      const apiUrl = "${Config.baseNodeApiUrl}/delete_message";
-
-      final res = await http.post(
-        Uri.parse(apiUrl),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "messageId": messageId,
-          "userId": userId,
-          "role": role,
-        }),
-      );
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data["success"] == true) {
-          print("✅ Message deletion processed successfully on server: $messageId");
-
-          await _updateMessageDeletionStatusLocal(messageId, role);
-
-        } else {
-          print("❌ Server reported failure in deletion: ${data['error']}");
-        }
-      } else {
-        print("❌ HTTP Error during message deletion: ${res.statusCode}");
-      }
-    } catch (e) {
-      print("❌ Error deleting message: $e");
-    }
-  }
-
-  // ------------------- LOCAL DELETION STATUS UPDATE -------------------
   static Future<void> _updateMessageDeletionStatusLocal(String messageId, String role) async {
     try {
       final msg = _messageBox.values.firstWhereOrNull((m) => m.messageId == messageId);
@@ -1683,5 +2203,41 @@ static Future<String> _generateBlurHash(String imagePath) async {
     } else {
       return mediaPath;
     }
+  }
+
+  // ✅ CLEANUP TIMERS FUNCTION
+  static void _cleanupTimers() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _statusUpdateTimer?.cancel();
+    _statusUpdateTimer = null;
+    print("✅ Cleaned up socket timers");
+  }
+
+  static bool get isConnected => _socket?.connected ?? false;
+
+  static void disposeSocket() {
+    final userId = _authBox.get('userId');
+    if (_socket != null && _socket!.connected && userId != null) {
+      _socket!.emit("user_status", {
+        "userId": userId,
+        "status": "offline"
+      });
+    }
+
+    _cleanupTimers();
+    _cleanupSocketListeners();
+
+    _socket?.disconnect();
+    _socket?.destroy();
+    _socket = null;
+    _isInitialized = false;
+    _isConnecting = false;
+
+    // ✅ CLEAR PROCESSED MESSAGE IDs
+    _processedMessageIds.clear();
+    _uploadingMediaIds.clear();
+
+    print("🔌 Socket completely disposed");
   }
 }

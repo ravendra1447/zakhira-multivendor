@@ -147,6 +147,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   StreamSubscription? _newMessageSubscription;
   StreamSubscription? _uploadProgressSubscription;
   StreamSubscription? _messageDeliveredSubscription;
+  StreamSubscription? _groupUploadCompleteSubscription;
 
   bool _isKeyboardOpen = false;
   bool _isFirstLoad = true;
@@ -191,6 +192,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ LOAD MORE MESSAGES
   DateTime _oldestMessageTime = DateTime.now();
   bool _hasMoreMessages = true;
+
+  // ✅ MULTIPLE IMAGES UPLOAD TRACKING
+  final Map<String, List<String>> _groupUploads = {};
+  final Map<String, int> _groupUploadProgress = {};
 
   @override
   void initState() {
@@ -307,6 +312,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _messageDeliveredSubscription = ChatService.onMessageDelivered.listen((messageId) {
       if (mounted) {
         _needsRefresh = true;
+      }
+    });
+
+    _groupUploadCompleteSubscription = ChatService.onGroupUploadComplete.listen((data) {
+      if (mounted) {
+        final groupId = data['group_id'];
+        final uploadedImages = data['uploaded_images'];
+        final totalImages = data['total_images'];
+
+        print("🎉 Group upload completed: $groupId ($uploadedImages/$totalImages)");
+
+        // Update UI to show all images are uploaded
+        setState(() {
+          _groupUploadProgress[groupId] = 100;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("✅ $uploadedImages images sent successfully")),
+        );
       }
     });
 
@@ -460,6 +484,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _newMessageSubscription?.cancel();
     _uploadProgressSubscription?.cancel();
     _messageDeliveredSubscription?.cancel();
+    _groupUploadCompleteSubscription?.cancel();
     _updateTimer?.cancel();
 
     _loadTimers.forEach((key, timer) => timer.cancel());
@@ -472,6 +497,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _uploadProgress.clear();
     _imageLoadStages.clear();
     _fullyLoadedMessages.clear();
+    _groupUploads.clear();
+    _groupUploadProgress.clear();
     super.dispose();
   }
 
@@ -934,6 +961,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       bool isForwarded = data["is_forwarded"] == true || data["is_forwarded"] == 1;
       String? forwardedFrom = data["forwarded_from"]?.toString();
 
+      // ✅ EXTRACT GROUP DATA FOR MULTIPLE IMAGES
+      final String? groupId = data["group_id"]?.toString();
+      final int imageIndex = data["image_index"] ?? 0;
+      final int totalImages = data["total_images"] ?? 1;
+
       mediaUrl = _convertToFullUrl(mediaUrl);
       lowQualityUrl = _convertToFullUrl(lowQualityUrl);
       highQualityUrl = _convertToFullUrl(highQualityUrl);
@@ -959,6 +991,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
         forwardedFrom: forwardedFrom,
+        // ✅ STORE GROUP DATA FOR MULTIPLE IMAGES
+        extraData: groupId != null ? {
+          'groupId': groupId,
+          'imageIndex': imageIndex,
+          'totalImages': totalImages,
+        } : null,
       );
 
       await ChatService.saveMessageLocal(msg);
@@ -1412,7 +1450,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ MULTIPLE IMAGE PICKER
+  // ✅ MULTIPLE IMAGE PICKER - UPDATED FOR NEW API
   Future<void> _pickMultipleImages() async {
     try {
       final List<File>? selectedImages = await Navigator.push(
@@ -1427,7 +1465,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
 
       if (selectedImages != null && selectedImages.isNotEmpty) {
-        await _sendMultipleImages(selectedImages);
+        await _sendMultipleImagesWithNewAPI(selectedImages);
       }
     } catch (e) {
       print("Error in multiple image picker: $e");
@@ -1437,69 +1475,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: Send multiple images with proper data structure
-  Future<void> _sendMultipleImages(List<File> imageFiles) async {
+  // ✅ FIXED: Send multiple images using new API
+  Future<void> _sendMultipleImagesWithNewAPI(List<File> imageFiles) async {
     setState(() {
       _isSending = true;
       _shouldScrollToBottom = true;
     });
 
     try {
-      // ✅ CREATE A GROUP ID FOR MULTIPLE IMAGES
-      final groupId = 'group_${DateTime.now().millisecondsSinceEpoch}';
-
-      // Send each image with same group ID
-      for (int i = 0; i < imageFiles.length; i++) {
-        final file = imageFiles[i];
-
-        // Create temporary message with group ID
-        final tempId = '${groupId}_$i';
-        final groupData = {
-          'groupId': groupId,
-          'imageIndex': i,
-          'totalImages': imageFiles.length
-        };
-
-        final tempMsg = Message(
-          messageId: tempId,
-          chatId: widget.chatId,
-          senderId: LocalAuthService.getUserId() ?? 0,
-          receiverId: widget.otherUserId,
-          messageContent: file.path,
-          messageType: 'media',
-          isRead: 0,
-          isDelivered: 0,
-          timestamp: DateTime.now(),
-          senderName: _authBox.get('userName') ?? 'You',
-          receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
-          extraData: groupData,
-        );
-
-        await ChatService.saveMessageLocal(tempMsg);
-
-        // Send via service
-        await ChatService.sendMediaMessage(
-          chatId: widget.chatId,
-          receiverId: widget.otherUserId,
-          mediaPath: file.path,
-          senderName: _authBox.get('userName'),
-          receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
-          senderPhoneNumber: _authBox.get('userPhone'),
-          receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
-        );
-
-        // Small delay between consecutive uploads
-        if (i < imageFiles.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ Sent ${imageFiles.length} images')),
+      // ✅ USE THE NEW MULTIPLE IMAGES API
+      await ChatService.sendMultipleMediaMessages(
+        chatId: widget.chatId,
+        receiverId: widget.otherUserId,
+        mediaPaths: imageFiles.map((file) => file.path).toList(),
+        senderName: _authBox.get('userName'),
+        receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
+        senderPhoneNumber: _authBox.get('userPhone'),
+        receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
       );
 
+      print("✅ Multiple images sent via new API: ${imageFiles.length} images");
+
     } catch (e) {
-      print("Error sending multiple images: $e");
+      print("❌ Error sending multiple images: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to send some images')),
       );

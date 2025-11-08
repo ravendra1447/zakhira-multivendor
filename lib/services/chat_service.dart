@@ -40,8 +40,9 @@ class ChatService {
   static Stream<Map<String, dynamic>> get onTypingStatus =>
       _typingStatusController.stream;
 
+  // ✅ CRITICAL FIX: SYNC STREAM FOR INSTANT UI UPDATES
   static final StreamController<Message> _newMessageController =
-  StreamController<Message>.broadcast();
+  StreamController<Message>.broadcast(sync: true);
   static Stream<Message> get onNewMessage => _newMessageController.stream;
 
   static final StreamController<Map<String, dynamic>> _userStatusController =
@@ -86,7 +87,7 @@ class ChatService {
   static final Set<String> _processedMessageIds = {};
   static final Set<String> _uploadingMediaIds = {};
   static final Set<String> _blockedUsers = {};
-  static final Map<String, List<String>> _groupUploads = {}; // Track group uploads
+  static final Map<String, List<String>> _groupUploads = {};
 
   // ✅ Track connected state to prevent multiple connections
   static bool _isConnecting = false;
@@ -105,13 +106,11 @@ class ChatService {
   }
 
   static void initSocket() {
-    // ✅ STRONG CHECK: Prevent multiple socket initializations
     if (_isConnecting) {
       print("⚠️ Socket connection already in progress, skipping...");
       return;
     }
 
-    // ✅ PREVENT RAPID RE-INITIALIZATION (min 5 seconds between attempts)
     if (_lastSocketInitTime != null &&
         DateTime.now().difference(_lastSocketInitTime!).inSeconds < 5) {
       print("⚠️ Too soon for socket re-initialization, skipping...");
@@ -200,7 +199,6 @@ class ChatService {
     }
   }
 
-  // ✅ SEPARATE FUNCTION TO CLEANUP OLD LISTENERS
   static void _cleanupSocketListeners() {
     if (_socket != null) {
       _socket!.off("connect");
@@ -228,7 +226,6 @@ class ChatService {
     print("✅ Cleaned up old socket listeners");
   }
 
-  // ✅ SEPARATE FUNCTION FOR HEARTBEAT
   static void _setupHeartbeat() {
     // Clean up old timers
     _pingTimer?.cancel();
@@ -261,7 +258,6 @@ class ChatService {
     });
   }
 
-  // ✅ SEPARATE FUNCTION FOR JOINING CHAT ROOMS
   static void _joinChatRooms() {
     final chatIds = _messageBox.values.map((m) => m.chatId).toSet();
     for (final id in chatIds) {
@@ -271,7 +267,6 @@ class ChatService {
     print("✅ Joined ${chatIds.length} chat rooms");
   }
 
-  // ✅ SEPARATE FUNCTION FOR MESSAGE LISTENERS
   static void _setupMessageListeners() {
     // ✅ NEW MESSAGE LISTENER with STRONG duplicate protection
     _socket!.on("new_message", (data) async {
@@ -587,7 +582,6 @@ class ChatService {
     print("✅ All socket listeners setup completed");
   }
 
-  // ✅ ADD THIS METHOD TO ChatService CLASS
   static Future<void> _clearChatLocal(int chatId, int userId) async {
     try {
       final messages = _messageBox.values.where((m) => m.chatId == chatId).toList();
@@ -607,7 +601,7 @@ class ChatService {
     }
   }
 
-  // ------------------- MULTIPLE IMAGES SUPPORT - COMPLETE IMPLEMENTATION -------------------
+  // ------------------- MULTIPLE IMAGES SUPPORT - PARALLEL UPLOADING -------------------
 
   /// ✅ INITIALIZE MULTIPLE IMAGES UPLOAD
   static Future<Map<String, dynamic>?> initializeMultipleImagesUpload({
@@ -653,7 +647,7 @@ class ChatService {
     }
   }
 
-  /// ✅ SEND MULTIPLE MEDIA MESSAGES - COMPLETE METHOD
+  /// ✅ PARALLEL UPLOADING FOR MULTIPLE IMAGES - FAST LIKE WHATSAPP
   static Future<void> sendMultipleMediaMessages({
     required int chatId,
     required int receiverId,
@@ -672,7 +666,7 @@ class ChatService {
     if (userId == null) throw Exception("User ID not found");
 
     try {
-      print("🔄 Starting to send ${mediaPaths.length} images...");
+      print("🚀 Starting PARALLEL upload of ${mediaPaths.length} images...");
 
       // ✅ STEP 1: Initialize group upload
       final initResult = await initializeMultipleImagesUpload(
@@ -688,22 +682,20 @@ class ChatService {
       final String groupUploadId = initResult['group_upload_id'];
       final String groupId = initResult['group_id'];
 
-      print("🎯 Group upload started: $groupUploadId");
+      print("🎯 Parallel group upload started: $groupUploadId");
 
-      // ✅ STEP 2: Send each image individually with group info
+      // ✅ STEP 2: Create ALL temporary messages FIRST for instant UI
+      final List<String> tempIds = [];
       for (int i = 0; i < mediaPaths.length; i++) {
-        final mediaPath = mediaPaths[i];
-        final tempId = '${groupId}_$i'; // Unique temp ID for each image
+        final tempId = '${groupId}_$i';
+        tempIds.add(tempId);
 
-        print("📤 Sending image ${i + 1}/${mediaPaths.length}: $mediaPath");
-
-        // ✅ Create temporary message for instant UI
         final tempMsg = Message(
           messageId: tempId,
           chatId: chatId,
           senderId: userId,
           receiverId: receiverId,
-          messageContent: mediaPath,
+          messageContent: mediaPaths[i], // Local path for instant display
           messageType: 'media',
           isRead: 0,
           isDelivered: 0,
@@ -713,25 +705,32 @@ class ChatService {
           senderPhoneNumber: senderPhoneNumber,
           receiverPhoneNumber: receiverPhoneNumber,
           replyToMessageId: replyToMessageId,
-          // ✅ ADD GROUP INFORMATION
           extraData: {
             'groupId': groupId,
             'groupUploadId': groupUploadId,
             'imageIndex': i,
             'totalImages': mediaPaths.length,
             'isMultiple': true,
+            'isUploading': true, // ✅ NEW: Track upload state
           },
         );
 
+        // ✅ CRITICAL: Save and IMMEDIATELY update UI
         await saveMessageLocal(tempMsg);
-        _newMessageController.add(tempMsg);
+        print("✅ Temporary message created and UI updated: $tempId");
+      }
 
-        // ✅ Process and upload this image with group data
-        await _uploadSingleImageInGroup(
-          mediaPath: mediaPath,
+      print("✅ All ${mediaPaths.length} temporary messages created instantly");
+
+      // ✅ STEP 3: PARALLEL UPLOAD - All images simultaneously
+      final List<Future<void>> uploadFutures = [];
+
+      for (int i = 0; i < mediaPaths.length; i++) {
+        final uploadFuture = _uploadSingleImageInGroupParallel(
+          mediaPath: mediaPaths[i],
           chatId: chatId,
           receiverId: receiverId,
-          tempId: tempId,
+          tempId: tempIds[i],
           userId: userId,
           senderName: senderName,
           receiverName: receiverName,
@@ -744,25 +743,25 @@ class ChatService {
           totalImages: mediaPaths.length,
         );
 
-        // ✅ Small delay between images to avoid overload
-        if (i < mediaPaths.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 1000));
-        }
+        uploadFutures.add(uploadFuture);
       }
 
-      // ✅ STEP 3: Complete group upload
+      // ✅ Wait for ALL uploads to complete
+      await Future.wait(uploadFutures, eagerError: false);
+
+      // ✅ STEP 4: Complete group upload
       await _completeGroupUpload(groupUploadId);
 
-      print("✅ All ${mediaPaths.length} images uploaded successfully in group: $groupId");
+      print("✅ All ${mediaPaths.length} images uploaded PARALLEL successfully in group: $groupId");
 
     } catch (e) {
-      print("❌ Error in sendMultipleMediaMessages: $e");
+      print("❌ Error in parallel sendMultipleMediaMessages: $e");
       rethrow;
     }
   }
 
-  /// ✅ UPLOAD SINGLE IMAGE IN GROUP
-  static Future<void> _uploadSingleImageInGroup({
+  /// ✅ OPTIMIZED PARALLEL UPLOAD FUNCTION
+  static Future<void> _uploadSingleImageInGroupParallel({
     required String mediaPath,
     required int chatId,
     required int receiverId,
@@ -789,27 +788,38 @@ class ChatService {
     Uint8List? fileBytes;
 
     try {
-      // ✅ STEP 1: Generate thumbnail and blur hash
+      // ✅ UPDATE: Mark as uploading in local storage
+      final existingTempMsg = _messageBox.get(tempId) as Message?;
+      if (existingTempMsg != null) {
+        existingTempMsg.extraData?['isUploading'] = true;
+        await _messageBox.put(tempId, existingTempMsg);
+
+        // ✅ IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(existingTempMsg);
+        }
+      }
+
+      // ✅ STEP 1: Quick thumbnail generation (non-blocking)
       final ext = mediaPath.split('.').last.toLowerCase();
       if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
         final compressedThumbnail = await FlutterImageCompress.compressWithFile(
           mediaPath,
-          quality: 30,
-          minWidth: 100,
-          minHeight: 100,
+          quality: 20, // Lower quality for faster generation
+          minWidth: 80,
+          minHeight: 80,
         );
         if (compressedThumbnail != null) {
           thumbnailBase64 = base64Encode(compressedThumbnail);
-          blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I";
-          print("✅ Generated thumbnail for group image $imageIndex");
+          blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Quick placeholder
         }
       }
 
-      // ✅ STEP 2: Compress image
+      // ✅ STEP 2: Optimized compression
       if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
         final compressedBytes = await FlutterImageCompress.compressWithFile(
           mediaPath,
-          quality: 80, // Higher quality for multiple images
+          quality: 70, // Balanced quality vs speed
           minWidth: 1200,
           minHeight: 1200,
         );
@@ -820,12 +830,12 @@ class ChatService {
 
       final originalName = path.basename(mediaPath);
 
-      print("📦 Uploading group image $imageIndex: $originalName (${fileBytes.length} bytes)");
+      print("🚀 Parallel uploading image $imageIndex: $originalName (${fileBytes.length} bytes)");
 
-      // ✅ STEP 3: Upload using multipart form for multiple images
+      // ✅ STEP 3: Upload with timeout
       final FormData formData = FormData.fromMap({
         "image": await MultipartFile.fromBytes(
-          fileBytes,
+          fileBytes!,
           filename: originalName,
         ),
         "group_upload_id": groupUploadId,
@@ -837,6 +847,10 @@ class ChatService {
       final response = await _dio.post(
         "${Config.baseNodeApiUrl}/multi/images/upload",
         data: formData,
+        options: Options(
+          sendTimeout: const Duration(seconds: 30), // 30 seconds timeout
+          receiveTimeout: const Duration(seconds: 30),
+        ),
         onSendProgress: (sent, total) {
           if (total > 0) {
             final progress = (sent / total) * 100;
@@ -846,10 +860,9 @@ class ChatService {
               'groupUploadId': groupUploadId,
               'imageIndex': imageIndex,
             });
-            print("📤 Group upload progress: $progress% for image $imageIndex");
           }
         },
-      );
+      ).timeout(const Duration(seconds: 45)); // Overall timeout
 
       if (response.statusCode == 200 && response.data['success'] == true) {
         final data = response.data['data'];
@@ -863,31 +876,39 @@ class ChatService {
           existingTempMsg.highQualityUrl = data['high_quality_url'];
           existingTempMsg.blurHash = data['blur_hash'];
           existingTempMsg.thumbnailBase64 = data['thumbnail_data'];
+          existingTempMsg.extraData?['isUploading'] = false; // ✅ Upload complete
 
           await _messageBox.put(tempId, existingTempMsg);
-          _newMessageController.add(existingTempMsg);
+
+          // ✅ CRITICAL: UPDATE UI IMMEDIATELY
+          if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+            _newMessageController.add(existingTempMsg);
+          }
         }
 
         // ✅ Track successful upload in group
         _groupUploads[groupUploadId]?.add(tempId);
 
-        print("✅ Group image $imageIndex uploaded successfully");
-
-        // ✅ Send push notification for each image
-        await _sendPushNotification(
-            receiverId,
-            '📷 Image ${imageIndex + 1}/$totalImages',
-            chatId,
-            userId,
-            senderName ?? 'User'
-        );
+        print("✅ Parallel image $imageIndex uploaded successfully");
 
       } else {
         throw Exception("Upload failed: ${response.data}");
       }
 
     } catch (e) {
-      print("❌ Group image upload error for index $imageIndex: $e");
+      print("❌ Parallel image upload error for index $imageIndex: $e");
+
+      // ✅ EVEN ON ERROR, UPDATE UI
+      final existingTempMsg = _messageBox.get(tempId) as Message?;
+      if (existingTempMsg != null) {
+        existingTempMsg.extraData?['uploadError'] = e.toString();
+        await _messageBox.put(tempId, existingTempMsg);
+
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(existingTempMsg);
+        }
+      }
+
       _uploadProgressController.sink.add({
         'tempId': tempId,
         'progress': -1.0,
@@ -1359,7 +1380,7 @@ class ChatService {
         print("✅ Updated existing message with new media data");
 
         // Emit update event
-        if (_newMessageController.hasListener) {
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
           _newMessageController.add(finalExistingCheck);
           print("📢 Stream event emitted for updated message: ${finalExistingCheck.messageId}");
         }
@@ -1409,14 +1430,12 @@ class ChatService {
       print("   - Is Forwarded: ${msg.isForwarded}");
       print("   - Group Data: ${msg.extraData != null ? 'Available' : 'Not Available'}");
 
-      // ✅ DELAYED STREAM EVENT
-      Future.delayed(const Duration(milliseconds: 100), () {
-        final finalCheck = _messageBox.get(idToProcess);
-        if (finalCheck != null && _newMessageController.hasListener) {
-          _newMessageController.add(msg);
-          print("📢 Stream event emitted for NEW message: $idToProcess");
-        }
-      });
+      // ✅ CRITICAL FIX: IMMEDIATE STREAM EVENT - NO DELAY
+      final finalCheck = _messageBox.get(idToProcess);
+      if (finalCheck != null && _newMessageController.hasListener && !_newMessageController.isClosed) {
+        _newMessageController.add(msg);
+        print("📢 IMMEDIATE Stream event emitted for NEW message: $idToProcess");
+      }
 
       // ✅ STEP 6: Send delivery confirmation
       final isForCurrentUser = currentUserId.toString() != data["sender_id"].toString();
@@ -1481,7 +1500,10 @@ class ChatService {
 
         print("✅ TempId $tempId replaced with $newMessageId (status=$status)");
 
-        _newMessageController.add(msg);
+        // ✅ CRITICAL: IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(msg);
+        }
       } else {
         print("⚠️ No message found with tempId=$tempId");
       }
@@ -1498,7 +1520,10 @@ class ChatService {
         await _messageBox.put(messageId, msg);
         print("✅ Delivery status updated for $messageId = $status");
 
-        _newMessageController.add(msg);
+        // ✅ CRITICAL: IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(msg);
+        }
         _messageDeliveredController.sink.add(messageId);
       } else {
         print("⚠️ No message found with ID $messageId");
@@ -1508,6 +1533,7 @@ class ChatService {
     }
   }
 
+  // ✅ CRITICAL FIX: BETTER saveMessageLocal WITH INSTANT UI UPDATES
   static Future<void> saveMessageLocal(Message message) async {
     try {
       // ✅ FINAL SAFETY CHECK before saving
@@ -1526,8 +1552,16 @@ class ChatService {
         return;
       }
 
+      // ✅ SAVE TO HIVE
       await _messageBox.put(message.messageId, message);
       print("💾 Message saved to local storage: ${message.messageId}");
+
+      // ✅ CRITICAL FIX: IMMEDIATELY NOTIFY UI - NO DELAY
+      if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+        _newMessageController.add(message);
+        print("📢 IMMEDIATE UI UPDATE from saveMessageLocal: ${message.messageId}");
+      }
+
     } catch (e) {
       print("❌ Error saving message locally: $e");
     }
@@ -1541,7 +1575,10 @@ class ChatService {
         await _messageBox.put(messageId, msg);
         print("💾 Local Hive updated as read: $messageId");
 
-        _newMessageController.add(msg);
+        // ✅ CRITICAL: IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(msg);
+        }
       } else {
         print("⚠️ No message found in Hive with ID $messageId");
       }
@@ -1684,7 +1721,11 @@ class ChatService {
       for (final msg in messages) {
         msg.isDelivered = 1;
         await _messageBox.put(msg.messageId, msg);
-        _newMessageController.add(msg);
+
+        // ✅ CRITICAL: IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(msg);
+        }
 
         messageIds.add(msg.messageId as int);
       }
@@ -1772,7 +1813,10 @@ class ChatService {
           print("✅ Message marked as deleted by $role locally: $messageId");
         }
 
-        _newMessageController.add(msg);
+        // ✅ CRITICAL: IMMEDIATE UI UPDATE
+        if (_newMessageController.hasListener && !_newMessageController.isClosed) {
+          _newMessageController.add(msg);
+        }
       }
     } catch (e) {
       print("❌ Error updating local deletion status: $e");
@@ -2000,6 +2044,11 @@ class ChatService {
     _processedMessageIds.clear();
     _uploadingMediaIds.clear();
     _groupUploads.clear();
+
+    // ✅ CLOSE STREAM CONTROLLERS
+    if (!_newMessageController.isClosed) {
+      _newMessageController.close();
+    }
 
     print("🔌 Socket completely disposed");
   }

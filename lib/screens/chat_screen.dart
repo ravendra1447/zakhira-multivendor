@@ -17,7 +17,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:image/image.dart' as img;
 
-// Import the necessary models and services
 import '../config.dart';
 import '../models/chat_model.dart';
 import '../services/chat_service.dart';
@@ -29,7 +28,7 @@ import 'media_viewer_screen.dart';
 
 // ✅ THUMBNAIL CACHE MANAGEMENT
 Future<String> getThumbnailCachePath(String imagePath) async {
-  final cacheDir = await getTemporaryDirectory(); // WhatsApp-like cache
+  final cacheDir = await getTemporaryDirectory();
   final thumbsDir = Directory(p.join(cacheDir.path, "thumbs"));
   if (!thumbsDir.existsSync()) thumbsDir.createSync(recursive: true);
 
@@ -43,15 +42,12 @@ Future<Uint8List> generateSenderThumbnail(String imagePath) async {
     final file = File(imagePath);
     if (!file.existsSync()) return Uint8List(0);
 
-    // 🔹 Check cache first
     final cachePath = await getThumbnailCachePath(imagePath);
     final cachedFile = File(cachePath);
     if (cachedFile.existsSync()) {
-      print("⚡ Using cached thumbnail for $imagePath");
       return await cachedFile.readAsBytes();
     }
 
-    // 🔹 Generate new thumbnail
     final bytes = await file.readAsBytes();
     final original = img.decodeImage(bytes);
     if (original == null) return bytes;
@@ -59,28 +55,10 @@ Future<Uint8List> generateSenderThumbnail(String imagePath) async {
     final thumbnail = img.copyResize(original, width: 200);
     final compressedBytes = Uint8List.fromList(img.encodeJpg(thumbnail, quality: 50));
 
-    // 🔹 Save to cache
     await cachedFile.writeAsBytes(compressedBytes);
-    print("🧩 Cached new thumbnail: $cachePath");
-
     return compressedBytes;
   } catch (e) {
-    print("⚠️ Thumbnail generation failed: $e");
     return Uint8List(0);
-  }
-}
-
-// ✅ CLEAR OLD THUMBNAILS PERIODICALLY
-Future<void> clearOldThumbnails() async {
-  final dir = await getTemporaryDirectory();
-  final thumbDir = Directory(p.join(dir.path, "thumbs"));
-  if (thumbDir.existsSync()) {
-    thumbDir.listSync().forEach((f) {
-      final file = File(f.path);
-      if (DateTime.now().difference(file.lastModifiedSync()).inDays > 15) {
-        file.deleteSync();
-      }
-    });
   }
 }
 
@@ -197,6 +175,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final Map<String, List<String>> _groupUploads = {};
   final Map<String, int> _groupUploadProgress = {};
 
+  // ✅ CRITICAL FIX: FORCE UI REFRESH COUNTER
+  int _forceRefreshCounter = 0;
+
   @override
   void initState() {
     super.initState();
@@ -208,14 +189,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _initializeChat();
     _restoreScrollPosition();
-
-    // ✅ CLEAR OLD THUMBNAILS ON START
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      clearOldThumbnails();
-    });
   }
 
+  // ✅ CRITICAL FIX: BETTER CHAT INITIALIZATION
   void _initializeChat() {
+    print("🚀 INITIALIZING CHAT SCREEN FOR CHAT ID: ${widget.chatId}");
+
     ChatService.initSocket();
     ChatService.ensureConnected();
 
@@ -233,35 +212,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _shouldScrollToBottom) {
-        _scrollToBottomSmooth();
-      }
-    });
+    // ✅ CRITICAL FIX: BETTER NEW MESSAGE LISTENER
+    _newMessageSubscription = ChatService.onNewMessage.listen((Message msg) {
+      print("📨 NEW MESSAGE RECEIVED IN CHATSCREEN: ${msg.messageId} for chat: ${msg.chatId}");
 
-    Future.delayed(const Duration(milliseconds: 50), () async {
-      ChatService.joinRoom(widget.chatId);
+      if (!mounted) return;
 
-      if (!_areMessagesLoaded) {
-        await _fetchMessages();
-      } else {
-        if (mounted) setState(() {});
-      }
+      // ✅ ONLY PROCESS MESSAGES FOR CURRENT CHAT
+      if (msg.chatId == widget.chatId) {
+        print("✅ PROCESSING MESSAGE FOR CURRENT CHAT: ${msg.messageId}");
 
-      await _resolveHeader();
-
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _scrollToBottomSmooth();
-          _isFirstLoad = false;
-        }
-      });
-      _hasInitialScrollDone = true;
-    });
-
-    _newMessageSubscription = ChatService.onNewMessage.listen((msg) async {
-      if (mounted && msg.chatId == widget.chatId) {
         if (_processedMessageIds.contains(msg.messageId)) {
+          print("⚠️ DUPLICATE MESSAGE BLOCKED: ${msg.messageId}");
           return;
         }
 
@@ -270,35 +232,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _processedMessageIds.remove(msg.messageId);
         });
 
-        final existingMessage = _messageBox.values.firstWhereOrNull(
-              (existingMsg) => existingMsg.messageId == msg.messageId && existingMsg.chatId == widget.chatId,
-        );
+        // ✅ CRITICAL FIX: FORCE UI REFRESH IMMEDIATELY
+        _forceUIRefresh();
 
-        if (existingMessage == null) {
-          if (_isAtBottom) {
-            _scrollToBottomSmooth();
-            HapticFeedback.selectionClick();
-          } else {
-            _showNewMessageToast();
-          }
+        // ✅ AUTO SCROLL TO BOTTOM FOR NEW MESSAGES
+        if (_isAtBottom) {
+          _scrollToBottomSmooth();
+        }
 
-          await _resolveHeader();
+        // ✅ RESOLVE HEADER IF NEEDED
+        _resolveHeader();
 
-          if ((msg.messageType == 'media' || msg.messageType == 'encrypted_media') &&
-              !_fullyLoadedMessages.contains(msg.messageId)) {
-            _startProgressiveLoading(msg);
-          }
-
-          _needsRefresh = true;
+        // ✅ START PROGRESSIVE LOADING FOR MEDIA
+        if ((msg.messageType == 'media' || msg.messageType == 'encrypted_media') &&
+            !_fullyLoadedMessages.contains(msg.messageId)) {
+          _startProgressiveLoading(msg);
         }
       }
     });
 
+    // ✅ UPLOAD PROGRESS LISTENER
     _uploadProgressSubscription = ChatService.onUploadProgress.listen((progressData) {
+      if (!mounted) return;
+
       final tempId = progressData['tempId'];
       final progress = progressData['progress'];
 
-      if (mounted && tempId != null) {
+      if (tempId != null) {
         setState(() {
           if (progress >= 0) {
             _uploadProgress[tempId] = progress;
@@ -309,41 +269,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
+    // ✅ MESSAGE DELIVERED LISTENER
     _messageDeliveredSubscription = ChatService.onMessageDelivered.listen((messageId) {
-      if (mounted) {
-        _needsRefresh = true;
-      }
+      if (!mounted) return;
+      _forceUIRefresh();
     });
 
+    // ✅ GROUP UPLOAD COMPLETE LISTENER
     _groupUploadCompleteSubscription = ChatService.onGroupUploadComplete.listen((data) {
-      if (mounted) {
-        final groupId = data['group_id'];
-        final uploadedImages = data['uploaded_images'];
-        final totalImages = data['total_images'];
+      if (!mounted) return;
 
-        print("🎉 Group upload completed: $groupId ($uploadedImages/$totalImages)");
+      final groupId = data['group_id'];
+      final uploadedImages = data['uploaded_images'];
+      final totalImages = data['total_images'];
 
-        // Update UI to show all images are uploaded
-        setState(() {
-          _groupUploadProgress[groupId] = 100;
-        });
+      print("🎉 Group upload completed: $groupId ($uploadedImages/$totalImages)");
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ $uploadedImages images sent successfully")),
-        );
-      }
+      setState(() {
+        _groupUploadProgress[groupId] = 100;
+      });
     });
 
+    // ✅ TYPING STATUS LISTENER
     _typingSubscription = ChatService.onTypingStatus.listen((typingInfo) {
-      if (mounted && typingInfo['chatId'] == widget.chatId && typingInfo['userId'] != LocalAuthService.getUserId()) {
+      if (!mounted) return;
+
+      if (typingInfo['chatId'] == widget.chatId && typingInfo['userId'] != LocalAuthService.getUserId()) {
         setState(() {
           _isOtherUserTyping = typingInfo['isTyping'] ?? false;
         });
       }
     });
 
+    // ✅ USER STATUS LISTENER
     _statusSubscription = ChatService.onUserStatus.listen((statusInfo) {
-      if (mounted && statusInfo['userId'] == widget.otherUserId.toString()) {
+      if (!mounted) return;
+
+      if (statusInfo['userId'] == widget.otherUserId.toString()) {
         setState(() {
           _userStatus = statusInfo['status'] ?? "offline";
         });
@@ -351,6 +313,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     _focusNode.addListener(() {
+      if (!mounted) return;
+
       if (_focusNode.hasFocus) {
         setState(() {
           _isKeyboardOpen = true;
@@ -364,6 +328,47 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       }
     });
+
+    // ✅ INITIAL DATA LOAD
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadInitialData();
+      }
+    });
+  }
+
+  // ✅ CRITICAL FIX: BETTER INITIAL DATA LOADING
+  void _loadInitialData() async {
+    print("🔄 LOADING INITIAL DATA FOR CHAT...");
+
+    ChatService.joinRoom(widget.chatId);
+
+    if (!_areMessagesLoaded) {
+      await _fetchMessages();
+    } else {
+      if (mounted) setState(() {});
+    }
+
+    await _resolveHeader();
+
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _scrollToBottomSmooth();
+        _isFirstLoad = false;
+        _hasInitialScrollDone = true;
+      }
+    });
+  }
+
+  // ✅ CRITICAL FIX: FORCE UI REFRESH METHOD
+  void _forceUIRefresh() {
+    if (!mounted) return;
+
+    print("🔄 FORCING UI REFRESH...");
+    setState(() {
+      _needsRefresh = true;
+      _forceRefreshCounter++; // This forces ValueListenableBuilder to rebuild
+    });
   }
 
   bool get _areMessagesLoaded {
@@ -374,22 +379,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _authBox.put('messages_loaded_${widget.chatId}', value);
   }
 
+  // ✅ CRITICAL FIX: BETTER MESSAGE FETCHING
   List<Message> _getOptimizedMessages() {
-    if (!_needsRefresh && _cachedMessages.isNotEmpty) {
-      return _cachedMessages;
+    // ✅ ALWAYS REFRESH IF NEEDED
+    if (_needsRefresh || _cachedMessages.isEmpty) {
+      final messages = _messageBox.values
+          .where((msg) => msg.chatId == widget.chatId)
+          .where((msg) => !msg.messageId.toString().startsWith('temp_') ||
+          (msg.messageId.toString().startsWith('temp_') && msg.messageType == 'media'))
+          .toList();
+
+      messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      _cachedMessages = messages;
+      _needsRefresh = false;
+
+      print("📊 MESSAGES LOADED: ${_cachedMessages.length} messages");
     }
 
-    final messages = _messageBox.values
-        .where((msg) => msg.chatId == widget.chatId)
-        .where((msg) => !msg.messageId.toString().startsWith('temp_') ||
-        (msg.messageId.toString().startsWith('temp_') && msg.messageType == 'media'))
-        .toList();
-
-    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    _cachedMessages = messages;
-    _needsRefresh = false;
-
-    return messages;
+    return _cachedMessages;
   }
 
   void _scrollToBottomSmooth() {
@@ -434,19 +441,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _showNewMessageToast() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('New message'),
-        duration: const Duration(seconds: 2),
-        action: SnackBarAction(
-          label: 'Scroll',
-          onPressed: _scrollToBottom,
-        ),
-      ),
-    );
-  }
-
   void _updateScrollToBottomPreference() {
     if (!_scrollController.hasClients) return;
 
@@ -474,11 +468,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    print("🔌 DISPOSING CHAT SCREEN...");
     WidgetsBinding.instance.removeObserver(this);
     _stopTyping();
     _focusNode.unfocus();
     _focusNode.dispose();
     _typingTimer?.cancel();
+
+    // ✅ CRITICAL FIX: PROPER STREAM CLEANUP
     _typingSubscription?.cancel();
     _statusSubscription?.cancel();
     _newMessageSubscription?.cancel();
@@ -774,7 +771,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("No text messages selected to copy"),
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -788,7 +785,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Message copied"),
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
           backgroundColor: Color(0xFF075E54),
         ),
       );
@@ -796,7 +793,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Cannot copy media messages"),
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -873,10 +870,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ CRITICAL FIX: BETTER MESSAGE FETCHING
   Future<void> _fetchMessages() async {
     try {
-      final url = Uri.parse("${Config.baseNodeApiUrl}/messages/combined/${widget.chatId}");
+      print("🔄 FETCHING MESSAGES FOR CHAT ${widget.chatId}...");
 
+      final url = Uri.parse("${Config.baseNodeApiUrl}/messages/combined/${widget.chatId}");
       final res = await http.get(url);
 
       if (res.statusCode == 200) {
@@ -930,6 +929,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ CRITICAL FIX: BETTER INCOMING DATA HANDLING
   Future<void> _handleIncomingData(dynamic data) async {
     try {
       final messageId = data["message_id"]?.toString();
@@ -991,7 +991,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
         forwardedFrom: forwardedFrom,
-        // ✅ STORE GROUP DATA FOR MULTIPLE IMAGES
         extraData: groupId != null ? {
           'groupId': groupId,
           'imageIndex': imageIndex,
@@ -1005,7 +1004,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _startProgressiveLoading(msg);
       }
 
-      _needsRefresh = true;
+      // ✅ CRITICAL FIX: FORCE UI REFRESH AFTER SAVING
+      _forceUIRefresh();
 
     } catch (e) {
       print("❌ Error handling incoming data: $e");
@@ -1153,7 +1153,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final cachedFile = File(thumbPath);
 
     if (cachedFile.existsSync()) {
-      // ⚡ Already available thumbnail → directly load
       return ClipRRect(
         borderRadius: borderRadius,
         child: Container(
@@ -1163,7 +1162,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     } else {
-      // ❌ Thumbnail nahi hai → abhi generate karo
       final newThumb = await generateSenderThumbnail(imagePath);
       await cachedFile.writeAsBytes(newThumb);
       return ClipRRect(
@@ -1189,7 +1187,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     return GestureDetector(
       onTap: () {
-        // Open first image in full screen with original URLs
         if (imageUrls.isNotEmpty) {
           _openImageFullScreen(msg);
         }
@@ -1201,7 +1198,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            // 🖼️ Collage layout based on number of images
             if (totalImages == 1)
               _collageItem(imageUrls[0], msg)
             else if (totalImages == 2)
@@ -1215,7 +1211,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
             const SizedBox(height: 6),
 
-            // 🕒 Time + status
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -1245,7 +1240,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🟩 2 Image Collage with thumbnail support
   Widget _buildTwoImageCollage(List<String> urls, Message msg) {
     return Row(
       children: [
@@ -1260,15 +1254,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🟩 3 Image Collage (WhatsApp Style) with thumbnail support
   Widget _buildThreeImageCollage(List<String> urls, Message msg) {
     return Column(
       children: [
-        // First image - top (full width)
         _collageItem(urls[0], msg, heightFactor: 0.6),
-
         const SizedBox(height: 2),
-        // Bottom two images
         Row(
           children: [
             Expanded(
@@ -1284,7 +1274,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🟩 4 Image Collage (2x2 Grid) with thumbnail support
   Widget _buildFourImageCollage(List<String> urls, Message msg) {
     return Column(
       children: [
@@ -1315,7 +1304,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🟩 5+ Image Grid Collage with thumbnail support
   Widget _buildGridCollage(List<String> urls, Message msg) {
     final totalImages = urls.length;
     final displayImages = urls.take(4).toList();
@@ -1368,7 +1356,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🧱 Reusable collage image with thumbnail support
   Widget _collageItem(String url, Message msg, {double heightFactor = 1.0}) {
     return AspectRatio(
       aspectRatio: heightFactor,
@@ -1379,7 +1366,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ CACHED IMAGE BUILDER WITH THUMBNAIL SUPPORT
   Widget _buildCachedImage(String imageUrl, Message msg) {
     final isLocalFile = imageUrl.startsWith('/') ||
         imageUrl.startsWith('file://') ||
@@ -1400,7 +1386,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ⚠️ Error placeholder
   Widget _imageErrorPlaceholder() {
     return Container(
       color: Colors.grey[300],
@@ -1408,7 +1393,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // 🔄 Loading placeholder
   Widget _imageLoadingPlaceholder() {
     return Container(
       color: Colors.grey[300],
@@ -1418,7 +1402,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ NETWORK IMAGE BUILDER
   Widget _buildNetworkImage(String imageUrl) {
     return CachedNetworkImage(
       imageUrl: imageUrl,
@@ -1475,7 +1458,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: Send multiple images using new API
+  // ✅ CRITICAL FIX: BETTER MULTIPLE IMAGES SENDING
   Future<void> _sendMultipleImagesWithNewAPI(List<File> imageFiles) async {
     setState(() {
       _isSending = true;
@@ -1483,7 +1466,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      // ✅ USE THE NEW MULTIPLE IMAGES API
+      // ✅ CRITICAL: FORCE UI REFRESH BEFORE SENDING
+      _forceUIRefresh();
+
       await ChatService.sendMultipleMediaMessages(
         chatId: widget.chatId,
         receiverId: widget.otherUserId,
@@ -1494,13 +1479,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
       );
 
-      print("✅ Multiple images sent via new API: ${imageFiles.length} images");
+      print("✅ Multiple images sent via PARALLEL API: ${imageFiles.length} images");
+
+      // ✅ CRITICAL: FORCE UI REFRESH AFTER SENDING
+      _forceUIRefresh();
 
     } catch (e) {
       print("❌ Error sending multiple images: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send some images')),
-      );
     } finally {
       if (mounted) {
         setState(() => _isSending = false);
@@ -1530,6 +1515,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ CRITICAL FIX: BETTER SEND MESSAGE WITH INSTANT UI UPDATE
   Future<void> _sendMessage() async {
     if (_isSending) {
       return;
@@ -1549,6 +1535,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (_imageFile != null) {
         _jumpToBottom();
 
+        // ✅ CRITICAL: FORCE UI REFRESH BEFORE SENDING
+        _forceUIRefresh();
+
         await ChatService.sendMediaMessage(
           chatId: widget.chatId,
           receiverId: widget.otherUserId,
@@ -1565,6 +1554,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _replyingToMessage = null;
         });
       } else {
+        // ✅ CRITICAL: FORCE UI REFRESH BEFORE SENDING TEXT
+        _forceUIRefresh();
+
         await ChatService.sendMessage(
           chatId: widget.chatId,
           receiverId: widget.otherUserId,
@@ -1584,7 +1576,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
 
       _resolveHeader();
-      _needsRefresh = true;
+
+      // ✅ CRITICAL: FORCE FINAL UI REFRESH
+      _forceUIRefresh();
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToBottom();
@@ -1800,7 +1794,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final uploadProgress = _uploadProgress[tempId];
     final isUploading = uploadProgress != null && uploadProgress < 100;
 
-    // ✅ PROPER LOCAL FILE DETECTION FOR SINGLE IMAGES TOO
     final isLocalFile = mediaUrl.startsWith('/') ||
         mediaUrl.startsWith('file://') ||
         mediaUrl.contains('cache/') ||
@@ -1891,19 +1884,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ COMPLETE MULTIPLE IMAGES DETECTION
   List<String> _getImageUrlsFromMessage(Message msg) {
-    // Check if this message is part of a group
     final groupData = _getMessageGroupData(msg);
     if (groupData != null) {
       return _getGroupImageUrls(groupData['groupId'], groupData['totalImages']);
     }
 
-    // Check for consecutive image messages
     final consecutiveGroup = _getConsecutiveImageGroup(msg);
     if (consecutiveGroup.length > 1) {
       return consecutiveGroup.map((m) => m.messageContent).toList();
     }
 
-    // Single image
     return [msg.messageContent];
   }
 
@@ -1911,7 +1901,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return _getImageUrlsFromMessage(msg).length > 1;
   }
 
-  // Get group data from message
   Map<String, dynamic>? _getMessageGroupData(Message msg) {
     if (msg.extraData != null && msg.extraData!.isNotEmpty) {
       try {
@@ -1930,7 +1919,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return null;
   }
 
-  // Get all images from a group
   List<String> _getGroupImageUrls(String groupId, int totalImages) {
     final messages = _getOptimizedMessages();
     final List<String> urls = [];
@@ -1946,7 +1934,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return urls;
   }
 
-  // Get consecutive image messages (fallback method)
   List<Message> _getConsecutiveImageGroup(Message currentMsg) {
     final messages = _getOptimizedMessages();
     final currentIndex = messages.indexOf(currentMsg);
@@ -1954,7 +1941,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     if (currentIndex == -1) return group;
 
-    // Check previous messages (max 5 minutes gap)
     for (int i = currentIndex - 1; i >= 0; i--) {
       final prevMsg = messages[i];
       if (_isImageMessage(prevMsg) &&
@@ -1966,7 +1952,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
 
-    // Check next messages (max 5 minutes gap)
     for (int i = currentIndex + 1; i < messages.length; i++) {
       final nextMsg = messages[i];
       if (_isImageMessage(nextMsg) &&
@@ -1996,7 +1981,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final group = _getConsecutiveImageGroup(msg);
     if (group.isEmpty) return true;
 
-    // Show only the first message in the group
     return group.first.messageId == msg.messageId;
   }
 
@@ -2230,7 +2214,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ OPTIMIZED WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET
   Widget _buildWhatsAppStyleImage(Message msg, String mediaUrl) {
-    // ✅ ONLY FOR NETWORK IMAGES
     final isNetworkImage = mediaUrl.startsWith('http');
 
     if (!isNetworkImage) {
@@ -2825,7 +2808,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     child: ValueListenableBuilder<Box<Message>>(
                       valueListenable: _messageBox.listenable(),
                       builder: (context, box, child) {
+                        // ✅ CRITICAL FIX: USE FORCE REFRESH COUNTER TO TRIGGER REBUILDS
                         final messages = _getOptimizedMessages();
+
+                        print("🔄 VALUE LISTENABLE BUILDER REBUILDING: ${messages.length} messages, counter: $_forceRefreshCounter");
 
                         if (messages.isEmpty) {
                           return const Center(child: Text("Say hi to start the conversation!"));
@@ -2859,7 +2845,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             }
 
                             final adjustedIndex = _isLoadingMore ? index - 1 : index;
-                            if (adjustedIndex >= messages.length) return null;
+                            if (adjustedIndex >= messages.length) return const SizedBox.shrink();
 
                             final msg = messages[adjustedIndex];
                             final previousMsg = adjustedIndex > 0 ? messages[adjustedIndex - 1] : null;

@@ -771,7 +771,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("No text messages selected to copy"),
-          duration: const Duration(seconds: 2),
+          duration: Duration(seconds: 2),
         ),
       );
     }
@@ -785,7 +785,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Message copied"),
-          duration: const Duration(seconds: 2),
+          duration: Duration(seconds: 2),
           backgroundColor: Color(0xFF075E54),
         ),
       );
@@ -793,7 +793,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Cannot copy media messages"),
-          duration: const Duration(seconds: 2),
+          duration: Duration(seconds: 2),
         ),
       );
     }
@@ -1411,7 +1411,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ SINGLE IMAGE PICKER
+  // ✅ SINGLE IMAGE PICKER - MODIFIED: DIRECT SEND
   Future<void> _pickSingleImage() async {
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
@@ -1422,14 +1422,64 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
 
       if (pickedFile != null) {
-        setState(() {
-          _imageFile = File(pickedFile.path);
-          _focusNode.unfocus();
-        });
-        _sendMessage();
+        // ✅ DIRECTLY SEND THE IMAGE WITHOUT SHOWING PREVIEW
+        await _sendSingleImageDirectly(File(pickedFile.path));
       }
     } catch (e) {
       print("Error picking single image: $e");
+    }
+  }
+
+  // ✅ NEW METHOD: DIRECT SINGLE IMAGE SENDING
+  Future<void> _sendSingleImageDirectly(File imageFile) async {
+    if (_isSending) return;
+
+    setState(() {
+      _isSending = true;
+      _shouldScrollToBottom = true;
+    });
+
+    try {
+      _jumpToBottom();
+
+      // ✅ CRITICAL: FORCE UI REFRESH BEFORE SENDING
+      _forceUIRefresh();
+
+      await ChatService.sendMediaMessage(
+        chatId: widget.chatId,
+        receiverId: widget.otherUserId,
+        mediaPath: imageFile.path,
+        senderName: _authBox.get('userName'),
+        receiverName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
+        senderPhoneNumber: _authBox.get('userPhone'),
+        receiverPhoneNumber: _otherUserPhone ?? _authBox.get('otherUserPhone'),
+        replyToMessageId: _replyingToMessage?.messageId,
+      );
+
+      setState(() {
+        _replyingToMessage = null;
+      });
+
+      _resolveHeader();
+
+      // ✅ CRITICAL: FORCE FINAL UI REFRESH
+      _forceUIRefresh();
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _jumpToBottom();
+      });
+
+    } catch (e) {
+      print("Error sending single image directly: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send image')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
     }
   }
 
@@ -1493,7 +1543,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ TAKE PHOTO FROM CAMERA
+  // ✅ TAKE PHOTO FROM CAMERA - MODIFIED: DIRECT SEND
   Future<void> _takePhoto() async {
     try {
       final XFile? pickedFile = await ImagePicker().pickImage(
@@ -1504,11 +1554,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
 
       if (pickedFile != null) {
-        setState(() {
-          _imageFile = File(pickedFile.path);
-          _focusNode.unfocus();
-        });
-        _sendMessage();
+        // ✅ DIRECTLY SEND THE PHOTO WITHOUT SHOWING PREVIEW
+        await _sendSingleImageDirectly(File(pickedFile.path));
       }
     } catch (e) {
       print("Error taking photo: $e");
@@ -2411,38 +2458,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ❌ REMOVED IMAGE PREVIEW WIDGET SINCE WE DON'T NEED IT ANYMORE
   Widget _buildImagePreview() {
-    if (_imageFile == null) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.all(8),
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              _imageFile!,
-              width: 100,
-              height: 100,
-              fit: BoxFit.cover,
-            ),
-          ),
-          Positioned(
-            top: 0,
-            right: 0,
-            child: GestureDetector(
-              onTap: () => setState(() => _imageFile = null),
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, color: Colors.white, size: 20),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    return const SizedBox.shrink(); // Always return empty widget
   }
 
   // ✅ UPDATED INPUT AREA WITH MULTIPLE IMAGE OPTIONS
@@ -2498,7 +2516,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           if (value == 'gallery_multiple') {
                             _pickMultipleImages();
                           } else if (value == 'gallery_single') {
-                            _pickSingleImage();
+                            _pickSingleImage(); // This will now directly send the image
                           }
                         },
                         itemBuilder: (context) => [
@@ -2880,7 +2898,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       },
                     ),
                   ),
-                  _buildImagePreview(),
+                  _buildImagePreview(), // This will always return SizedBox.shrink() now
                   if (!_selectionMode) _buildInputArea(),
                 ],
               ),

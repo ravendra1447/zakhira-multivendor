@@ -287,7 +287,7 @@ class _ChatsTabState extends State<ChatsTab> {
       if (userId == null) return;
 
       // Use ChatService to clear chat (this will notify server and other user)
-      await ChatService.clearChat(chatId);
+      //await ChatService.clearChat(chatId);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Cleared chat with $contactName")),
@@ -349,7 +349,7 @@ class _ChatsTabState extends State<ChatsTab> {
       final otherUserId = message.senderId == userId ? message.receiverId : message.senderId;
 
       // Use ChatService to block user
-      await ChatService.blockUser(otherUserId);
+      //await ChatService.blockUser(otherUserId);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Blocked $contactName")),

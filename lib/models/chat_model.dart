@@ -33,6 +33,19 @@ class Message extends HiveObject {
   @HiveField(8)
   int isDelivered;
 
+  // Optional fields
+  @HiveField(9)
+  String? senderName;
+
+  @HiveField(10)
+  String? receiverName;
+
+  @HiveField(11)
+  String? senderPhoneNumber;
+
+  @HiveField(12)
+  String? receiverPhoneNumber;
+
   // Deletion Status
   @HiveField(13)
   int isDeletedSender;
@@ -83,18 +96,25 @@ class Message extends HiveObject {
   @HiveField(26)
   String? forwardedFrom;
 
-  // Optional fields
-  @HiveField(9)
-  String? senderName;
+  // ✅ NEW FIELDS FOR MULTIPLE IMAGES GROUP UPLOAD
+  @HiveField(27)
+  String? groupId;
 
-  @HiveField(10)
-  String? receiverName;
+  @HiveField(28)
+  int? imageIndex;
 
-  @HiveField(11)
-  String? senderPhoneNumber;
+  @HiveField(29)
+  int? totalImages;
 
-  @HiveField(12)
-  String? receiverPhoneNumber;
+  // ✅ NEW FIELDS FOR MULTIPLE IMAGE URLS
+  @HiveField(30)
+  List<String>? mediaUrls;
+
+  @HiveField(31)
+  List<String>? lowQualityUrls;
+
+  @HiveField(32)
+  List<String>? highQualityUrls;
 
   Message({
     required this.messageId,
@@ -124,7 +144,20 @@ class Message extends HiveObject {
     this.replyToMessageId,
     this.isForwarded = false,
     this.forwardedFrom,
+    // ✅ NEW GROUP UPLOAD FIELDS
+    this.groupId,
+    this.imageIndex,
+    this.totalImages,
+    // ✅ NEW MULTIPLE IMAGE URLS
+    this.mediaUrls,
+    this.lowQualityUrls,
+    this.highQualityUrls,
   });
+
+  // ✅ GETTERS FOR MULTIPLE IMAGE URLS
+  bool get hasMediaUrls => mediaUrls != null && mediaUrls!.isNotEmpty;
+  bool get hasLowQualityUrls => lowQualityUrls != null && lowQualityUrls!.isNotEmpty;
+  bool get hasHighQualityUrls => highQualityUrls != null && highQualityUrls!.isNotEmpty;
 
   // ✅ PROGRESSIVE LOADING GETTERS AND SETTERS
   int get imageLoadStage => _imageLoadStage;
@@ -149,6 +182,12 @@ class Message extends HiveObject {
     return _imageLoadStage == 2 && highQualityUrl != null;
   }
 
+  // ✅ GROUP UPLOAD GETTERS
+  bool get isPartOfGroup => groupId != null && groupId!.isNotEmpty;
+  bool get isFirstInGroup => isPartOfGroup && imageIndex == 0;
+  bool get isLastInGroup => isPartOfGroup && imageIndex == (totalImages! - 1);
+  bool get hasGroupData => groupId != null && imageIndex != null && totalImages != null;
+
   // ✅ FROM JSON FACTORY METHOD - UPDATED WITH NEW FIELDS
   factory Message.fromJson(Map<String, dynamic> json) {
     try {
@@ -170,6 +209,11 @@ class Message extends HiveObject {
       String? mediaUrl = json['media_url']?.toString() ?? json['mediaUrl']?.toString();
       String? lowQualityUrl = json['low_quality_url']?.toString() ?? json['lowQualityUrl']?.toString();
       String? highQualityUrl = json['high_quality_url']?.toString() ?? json['highQualityUrl']?.toString();
+
+      // ✅ MULTIPLE IMAGE URLS
+      final mediaUrls = json["media_urls"] != null ? List<String>.from(json["media_urls"]) : null;
+      final lowQualityUrls = json["low_quality_urls"] != null ? List<String>.from(json["low_quality_urls"]) : null;
+      final highQualityUrls = json["high_quality_urls"] != null ? List<String>.from(json["high_quality_urls"]) : null;
 
       // ✅ AUTO-RESOLVE MEDIA URLS IF NULL
       if (mediaUrl != null && mediaUrl.isNotEmpty) {
@@ -222,6 +266,11 @@ class Message extends HiveObject {
       final bool isForwarded = json['is_forwarded'] == true || json['is_forwarded'] == 1;
       final String? forwardedFrom = json['forwarded_from']?.toString();
 
+      // ✅ HANDLE GROUP UPLOAD FIELDS
+      final String? groupId = json['group_id']?.toString();
+      final int? imageIndex = json['image_index'] != null ? _safeParseInt(json['image_index']) : null;
+      final int? totalImages = json['total_images'] != null ? _safeParseInt(json['total_images']) : null;
+
       DateTime parsedTimestamp;
       final dynamic timestampData = json['timestamp'];
       if (timestampData is int) {
@@ -259,6 +308,14 @@ class Message extends HiveObject {
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
         forwardedFrom: forwardedFrom,
+        // ✅ NEW GROUP UPLOAD FIELDS
+        groupId: groupId,
+        imageIndex: imageIndex,
+        totalImages: totalImages,
+        // ✅ NEW MULTIPLE IMAGE URLS
+        mediaUrls: mediaUrls,
+        lowQualityUrls: lowQualityUrls,
+        highQualityUrls: highQualityUrls,
         extraData: json['extra_data'] != null
             ? Map<String, dynamic>.from(json['extra_data'])
             : null,
@@ -325,6 +382,14 @@ class Message extends HiveObject {
       'reply_to_message_id': replyToMessageId,
       'is_forwarded': isForwarded,
       'forwarded_from': forwardedFrom,
+      // ✅ NEW GROUP UPLOAD FIELDS
+      'group_id': groupId,
+      'image_index': imageIndex,
+      'total_images': totalImages,
+      // ✅ NEW MULTIPLE IMAGE URLS
+      'media_urls': mediaUrls,
+      'low_quality_urls': lowQualityUrls,
+      'high_quality_urls': highQualityUrls,
       'extra_data': extraData,
     };
   }
@@ -358,6 +423,14 @@ class Message extends HiveObject {
     String? replyToMessageId,
     bool? isForwarded,
     String? forwardedFrom,
+    // ✅ NEW GROUP UPLOAD FIELDS
+    String? groupId,
+    int? imageIndex,
+    int? totalImages,
+    // ✅ NEW MULTIPLE IMAGE URLS
+    List<String>? mediaUrls,
+    List<String>? lowQualityUrls,
+    List<String>? highQualityUrls,
   }) {
     return Message(
       messageId: messageId ?? this.messageId,
@@ -386,6 +459,14 @@ class Message extends HiveObject {
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       isForwarded: isForwarded ?? this.isForwarded,
       forwardedFrom: forwardedFrom ?? this.forwardedFrom,
+      // ✅ NEW GROUP UPLOAD FIELDS
+      groupId: groupId ?? this.groupId,
+      imageIndex: imageIndex ?? this.imageIndex,
+      totalImages: totalImages ?? this.totalImages,
+      // ✅ NEW MULTIPLE IMAGE URLS
+      mediaUrls: mediaUrls ?? this.mediaUrls,
+      lowQualityUrls: lowQualityUrls ?? this.lowQualityUrls,
+      highQualityUrls: highQualityUrls ?? this.highQualityUrls,
       extraData: extraData ?? this.extraData,
     );
   }
@@ -407,9 +488,15 @@ class Message extends HiveObject {
   bool get hasReply => replyToMessageId != null && replyToMessageId!.isNotEmpty;
   bool get isForwardedMessage => isForwarded;
 
+  // ✅ NEW GETTERS FOR GROUP UPLOAD
+  bool get isGroupImage => groupId != null && groupId!.isNotEmpty;
+  bool get hasGroupInfo => groupId != null && imageIndex != null && totalImages != null;
+  String get groupPositionInfo => hasGroupInfo ? '${(imageIndex! + 1)}/$totalImages' : '';
+
   String get displayContent {
     if (messageType == 'media' || messageType == 'encrypted_media') {
       if (!isImageLoaded && hasBlurHash) return '🔄 Loading...';
+      if (isGroupImage) return '📷 ${groupPositionInfo}';
       return hasThumbnail ? '📷 Image' : '📷 Media';
     }
     return messageContent;
@@ -497,6 +584,12 @@ class Message extends HiveObject {
         'thumbnailBase64: ${thumbnailBase64 != null ? "${thumbnailBase64?.length} chars" : "none"}, '
         'replyTo: ${replyToMessageId ?? "none"}, '
         'forwarded: $isForwarded, '
+        'groupId: ${groupId ?? "none"}, '
+        'imageIndex: ${imageIndex ?? "none"}, '
+        'totalImages: ${totalImages ?? "none"}, '
+        'mediaUrls: ${mediaUrls?.length ?? 0}, '
+        'lowQualityUrls: ${lowQualityUrls?.length ?? 0}, '
+        'highQualityUrls: ${highQualityUrls?.length ?? 0}, '
         'loaded: $isImageLoaded)';
   }
 }

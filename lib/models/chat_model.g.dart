@@ -43,13 +43,19 @@ class MessageAdapter extends TypeAdapter<Message> {
       replyToMessageId: fields[24] as String?,
       isForwarded: fields[25] as bool,
       forwardedFrom: fields[26] as String?,
+      groupId: fields[27] as String?,
+      imageIndex: fields[28] as int?,
+      totalImages: fields[29] as int?,
+      mediaUrls: (fields[30] as List?)?.cast<String>(),
+      lowQualityUrls: (fields[31] as List?)?.cast<String>(),
+      highQualityUrls: (fields[32] as List?)?.cast<String>(),
     ).._imageLoadStage = fields[23] as int;
   }
 
   @override
   void write(BinaryWriter writer, Message obj) {
     writer
-      ..writeByte(27)
+      ..writeByte(33)
       ..writeByte(0)
       ..write(obj.messageId)
       ..writeByte(1)
@@ -68,6 +74,14 @@ class MessageAdapter extends TypeAdapter<Message> {
       ..write(obj.timestamp)
       ..writeByte(8)
       ..write(obj.isDelivered)
+      ..writeByte(9)
+      ..write(obj.senderName)
+      ..writeByte(10)
+      ..write(obj.receiverName)
+      ..writeByte(11)
+      ..write(obj.senderPhoneNumber)
+      ..writeByte(12)
+      ..write(obj.receiverPhoneNumber)
       ..writeByte(13)
       ..write(obj.isDeletedSender)
       ..writeByte(14)
@@ -96,14 +110,18 @@ class MessageAdapter extends TypeAdapter<Message> {
       ..write(obj.isForwarded)
       ..writeByte(26)
       ..write(obj.forwardedFrom)
-      ..writeByte(9)
-      ..write(obj.senderName)
-      ..writeByte(10)
-      ..write(obj.receiverName)
-      ..writeByte(11)
-      ..write(obj.senderPhoneNumber)
-      ..writeByte(12)
-      ..write(obj.receiverPhoneNumber);
+      ..writeByte(27)
+      ..write(obj.groupId)
+      ..writeByte(28)
+      ..write(obj.imageIndex)
+      ..writeByte(29)
+      ..write(obj.totalImages)
+      ..writeByte(30)
+      ..write(obj.mediaUrls)
+      ..writeByte(31)
+      ..write(obj.lowQualityUrls)
+      ..writeByte(32)
+      ..write(obj.highQualityUrls);
   }
 
   @override

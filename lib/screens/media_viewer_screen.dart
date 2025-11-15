@@ -5,13 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:hive/hive.dart';
+import 'package:intl/intl.dart';
 import '../models/chat_model.dart';
+import 'message_info_screen.dart';
 
 class MediaViewerScreen extends StatefulWidget {
   final String mediaUrl;
   final String messageId;
   final bool isLocalFile;
   final int chatId;
+  final String? otherUserName; // ✅ FIX: Add otherUserName parameter
 
   const MediaViewerScreen({
     Key? key,
@@ -19,6 +22,7 @@ class MediaViewerScreen extends StatefulWidget {
     required this.messageId,
     required this.isLocalFile,
     required this.chatId,
+    this.otherUserName,
   }) : super(key: key);
 
   @override
@@ -151,6 +155,7 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
         return GestureDetector(
           onVerticalDragUpdate: isCurrentImage ? _onVerticalDragUpdate : null,
           onVerticalDragEnd: isCurrentImage ? _onVerticalDragEnd : null,
+          onLongPress: isCurrentImage ? () => _showImageOptions(context, message) : null, // ✅ FIX: Long press for info
           child: Transform.translate(
             offset: Offset(0, isCurrentImage ? _verticalDragOffset : 0),
             child: Opacity(
@@ -172,6 +177,7 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
         return GestureDetector(
           onVerticalDragUpdate: isCurrentImage ? _onVerticalDragUpdate : null,
           onVerticalDragEnd: isCurrentImage ? _onVerticalDragEnd : null,
+          onLongPress: isCurrentImage ? () => _showImageOptions(context, message) : null, // ✅ FIX: Long press for info
           child: Transform.translate(
             offset: Offset(0, isCurrentImage ? _verticalDragOffset : 0),
             child: Opacity(
@@ -334,6 +340,62 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                 ),
               ),
 
+            // ✅ FIX: Timestamp display at bottom (WhatsApp style)
+            if (_mediaMessages.isNotEmpty)
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime(_mediaMessages[_currentIndex].timestamp),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          // ✅ FIX: Show delivery/seen status
+                          if (_mediaMessages[_currentIndex].isDelivered == 1)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(width: 4),
+                                Icon(
+                                  _mediaMessages[_currentIndex].isRead == 1
+                                      ? Icons.done_all
+                                      : Icons.done_all,
+                                  size: 12,
+                                  color: _mediaMessages[_currentIndex].isRead == 1
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _mediaMessages[_currentIndex].isRead == 1 ? 'Seen' : 'Delivered',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             // SWIPE GESTURE DETECTORS FOR SINGLE IMAGE
             if (_mediaMessages.length == 1)
               Positioned.fill(
@@ -484,5 +546,68 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
         ),
       );
     }
+  }
+
+  // ✅ FIX: Format time for display
+  String _formatTime(DateTime timestamp) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
+    
+    final timeStr = DateFormat('h:mm a').format(timestamp);
+    
+    if (messageDate == today) {
+      return 'Today, $timeStr';
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday, $timeStr';
+    } else {
+      return DateFormat('dd/MM/yyyy, h:mm a').format(timestamp);
+    }
+  }
+
+  // ✅ FIX: Show image options on long press (WhatsApp style)
+  void _showImageOptions(BuildContext context, Message message) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Info'),
+              onTap: () {
+                Navigator.pop(context); // Close bottom sheet
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MessageInfoScreen(
+                      message: message,
+                      otherUserName: widget.otherUserName ?? 'User',
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share),
+              title: const Text('Share'),
+              onTap: () {
+                Navigator.pop(context);
+                // Add share functionality if needed
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: const Text('Save'),
+              onTap: () {
+                Navigator.pop(context);
+                // Add save functionality if needed
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

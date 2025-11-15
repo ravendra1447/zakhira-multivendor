@@ -1502,12 +1502,20 @@ class ChatService {
       tempMessages.add(tempMsg);
     }
 
-    // ✅ FIX: Notify UI ONCE with all messages for instant display (no fluctuation)
+    // ✅ FIX: Notify UI ONCE with all messages for INSTANT display (no delay, no fluctuation)
+    // Send all at once for instant UI update
     for (final tempMsg in tempMessages) {
       _newMessageController.add(tempMsg);
       _messageSentController.sink.add(tempMsg.messageId);
     }
     SoundUtils.playSendSound();
+    
+    // ✅ FIX: Force immediate UI refresh for instant display
+    Future.microtask(() {
+      for (final tempMsg in tempMessages) {
+        _newMessageController.add(tempMsg);
+      }
+    });
 
     // ✅ FIX: Send all media in PARALLEL (like WhatsApp)
     final List<Future<void>> uploadFutures = [];

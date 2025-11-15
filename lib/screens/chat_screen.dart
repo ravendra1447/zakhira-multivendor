@@ -23,6 +23,7 @@ import '../services/contact_service.dart';
 import 'new_chat_page.dart';
 import 'media_viewer_screen.dart';
 import 'multi_image_picker_screen.dart';
+import 'message_info_screen.dart';
 
 // Helper function to format date headers
 String formatDateHeader(DateTime date) {
@@ -332,20 +333,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final messages = _messageBox.values
         .where((msg) => msg.chatId == widget.chatId)
         .where((msg) {
-          // ✅ FIX: Completely hide ALL temp_ messages (no dot bubbles at all)
+          // ✅ FIX: Completely hide ALL temp_ messages on receiver side (no dot bubbles)
           final isTemp = msg.messageId.toString().startsWith('temp_');
+          final userId = LocalAuthService.getUserId();
+          final isSender = msg.senderId == userId;
+          
           if (isTemp) {
-            // ✅ FIX: Only show temp media if it has thumbnail AND is uploading
-            if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
+            // ✅ FIX: Only show temp messages on sender side if uploading
+            if (isSender && (msg.messageType == 'media' || msg.messageType == 'encrypted_media')) {
               final tempId = msg.messageId.toString();
               final hasThumbnail = msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty;
               final uploadProgress = _uploadProgress[tempId];
               final isUploading = uploadProgress != null && uploadProgress < 100;
               
-              // Only show if has thumbnail AND is uploading (no empty dot bubbles)
+              // Only show on sender side if has thumbnail AND is uploading
               return hasThumbnail && isUploading;
             }
-            // Hide all temp text messages completely
+            // ✅ FIX: Hide ALL temp messages on receiver side completely (no dot bubbles)
             return false;
           }
           
@@ -375,34 +379,63 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     
     final deduplicatedMessages = uniqueMessages.values.toList();
     
-    // ✅ DEDUPE GROUPED MEDIA: show only anchor (smallest imageIndex present)
-    final Map<String, int> groupAnchors = {};
+    // ✅ FIX: STRONG DEDUPE GROUPED MEDIA - Only ONE collage per groupId
+    final Map<String, Message> groupAnchors = {}; // Store anchor message, not just index
+    final Set<String> processedGroupIds = {}; // Track processed groups
+    
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid != null && gid.isNotEmpty) {
         final idx = m.imageIndex ?? 0;
-        if (!groupAnchors.containsKey(gid) || idx < groupAnchors[gid]!) {
-          groupAnchors[gid] = idx;
+        
+        // ✅ FIX: Only keep ONE anchor message per group (smallest imageIndex)
+        if (!groupAnchors.containsKey(gid)) {
+          groupAnchors[gid] = m;
+        } else {
+          final existingAnchor = groupAnchors[gid]!;
+          final existingIdx = existingAnchor.imageIndex ?? 0;
+          if (idx < existingIdx) {
+            groupAnchors[gid] = m; // Update to smaller index
+          }
         }
       }
     }
 
     if (groupAnchors.isNotEmpty) {
       try {
-        final anchorsLog = groupAnchors.entries.map((e) => '${e.key}:${e.value}').join(', ');
+        final anchorsLog = groupAnchors.entries.map((e) => '${e.key}:${e.value.imageIndex}').join(', ');
         print('🧩 Group anchors computed: $anchorsLog');
       } catch (_) {}
     }
 
+    // ✅ FIX: Filter messages - only show anchor for groups, hide all others
     final filtered = <Message>[];
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid == null || gid.isEmpty) {
+        // ✅ FIX: Non-group messages - check if they're part of a cluster
+        final cluster = _getContiguousMediaCluster(m);
+        if (cluster.length >= 2) {
+          // ✅ FIX: Only show if it's the first message in cluster (to prevent duplicates)
+          cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+          if (m.messageId != cluster.first.messageId) {
+            continue; // Skip non-anchor messages in cluster
+          }
+        }
         filtered.add(m);
       } else {
-        final anchor = groupAnchors[gid] ?? 0;
-        if ((m.imageIndex ?? 0) == anchor) {
-          filtered.add(m);
+        // ✅ FIX: Group messages - only show anchor (ONE collage per group)
+        final anchor = groupAnchors[gid];
+        if (anchor != null && m.messageId == anchor.messageId) {
+          // ✅ FIX: Only add if not already processed
+          if (!processedGroupIds.contains(gid)) {
+            filtered.add(m);
+            processedGroupIds.add(gid);
+            print('✅ Added anchor for group $gid: ${m.messageId}');
+          }
+        } else {
+          // ✅ FIX: Hide all non-anchor messages in group (no bubbles)
+          print('🚫 Hiding non-anchor message ${m.messageId} from group $gid');
         }
       }
     }
@@ -1077,6 +1110,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       //lowQualityUrl = _convertToFullUrl(lowQualityUrl);
       //highQualityUrl = _convertToFullUrl(highQualityUrl);
 
+      // ✅ FIX: STRONG duplicate check before creating message
+      final existingMsg = _messageBox.values.firstWhereOrNull(
+        (m) => m.messageId == idToProcess && m.chatId == widget.chatId,
+      );
+      
+      if (existingMsg != null) {
+        // ✅ FIX: Update existing message if needed (prevent duplication)
+        bool needsUpdate = false;
+        if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty &&
+            (existingMsg.thumbnailBase64 == null || existingMsg.thumbnailBase64!.isEmpty)) {
+          existingMsg.thumbnailBase64 = thumbnailBase64;
+          needsUpdate = true;
+        }
+        if (existingMsg.isDelivered == 0 && int.tryParse(data["is_delivered"]?.toString() ?? "0") == 1) {
+          existingMsg.isDelivered = 1;
+          needsUpdate = true;
+        }
+        if (existingMsg.isRead == 0 && int.tryParse(data["is_read"]?.toString() ?? "0") == 1) {
+          existingMsg.isRead = 1;
+          needsUpdate = true;
+        }
+        if (needsUpdate) {
+          await ChatService.saveMessageLocal(existingMsg);
+          _needsRefresh = true;
+          if (mounted) setState(() {});
+        }
+        return; // ✅ FIX: Don't create duplicate
+      }
+
       final msg = Message(
         messageId: idToProcess,
         chatId: int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0,
@@ -1091,9 +1153,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         receiverName: data["receiver_name"]?.toString(),
         senderPhoneNumber: data["sender_phone"]?.toString(),
         receiverPhoneNumber: data["receiver_phone"]?.toString(),
-        //lowQualityUrl: lowQualityUrl,
-        //highQualityUrl: highQualityUrl,
-        //blurHash: blurHash,
         thumbnailBase64: thumbnailBase64,
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
@@ -1109,7 +1168,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _startProgressiveLoading(msg);
       }
 
+      // ✅ FIX: Instant UI refresh for receiver side
       _needsRefresh = true;
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() {});
+        });
+      }
 
     } catch (e) {
       print("❌ Error handling incoming data: $e");
@@ -1248,6 +1313,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           messageId: message.messageId,
           isLocalFile: isLocalFile,
           chatId: widget.chatId,
+          otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName, // ✅ FIX: Pass otherUserName
         ),
       ),
     );
@@ -1493,7 +1559,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (_selectionMode) {
                 _toggleSelection(msgId);
               } else {
-                _enterSelectionMode(msgId);
+                _showMessageOptions(msg); // ✅ FIX: Show options on long press
               }
             },
             child: Container(
@@ -1722,11 +1788,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _showDeleteConfirmation(msg.messageId);
               },
             ),
+            // ✅ FIX: Add Info option (WhatsApp style) - Navigate to full screen
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Info'),
+              onTap: () {
+                Navigator.pop(context); // Close bottom sheet
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MessageInfoScreen(
+                      message: msg,
+                      otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
+                    ),
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
     );
   }
+
 
   // ✅ MEDIA MESSAGE BUBBLE WITH PERSISTENT LOADING - SAME SIZE MAINTAINED
   Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
@@ -1754,7 +1838,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (_selectionMode) {
               _toggleSelection(msg.messageId);
             } else {
-              _enterSelectionMode(msg.messageId);
+              _showMessageOptions(msg); // ✅ FIX: Show options on long press
             }
           },
           child: Container(
@@ -1876,19 +1960,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
     } else {
-      final cluster = _getContiguousMediaCluster(msg);
-      print('🧩 Fallback cluster for ${msg.messageId}: size=${cluster.length}');
-      if (cluster.length >= 2) {
-        cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        final Message anchor = cluster.first;
-        print('🧩 Fallback anchor=${anchor.messageId} for msg=${msg.messageId}');
-        if (msg.messageId == anchor.messageId) {
-          print('🧩 Rendering fallback collage for anchor ${anchor.messageId}');
-          return _buildCollageForMessages(cluster, anchor);
-        } else {
-          return const SizedBox.shrink();
-        }
-      }
+      // ✅ FIX: Remove fallback cluster - only use groupId for grouping
+      // This prevents duplicate collages
+      print('🧩 No groupId for ${msg.messageId}, showing as single image');
     }
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
@@ -2076,46 +2150,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final bool isRemote = url.startsWith('http');
       final bool isLocal = !isRemote;
+      
+      // ✅ FIX: Proper image fit - width full, height can be cut (like WhatsApp)
       Widget imageWidget = isLocal
           ? Image.file(
               File(url),
-              fit: BoxFit.cover,
-              cacheWidth: 600, // ✅ FIX: Better quality thumbnail
-              cacheHeight: 600,
+              fit: BoxFit.cover, // ✅ FIX: Cover to fill width, height can be cut
+              width: double.infinity,
+              height: double.infinity,
+              cacheWidth: 400,
+              cacheHeight: 400,
             )
           : CachedNetworkImage(
               imageUrl: url,
-              fit: BoxFit.cover,
-              memCacheWidth: 400, // ✅ FIX: Optimized cache size
+              fit: BoxFit.cover, // ✅ FIX: Cover to fill width properly
+              width: double.infinity,
+              height: double.infinity,
+              memCacheWidth: 400,
               memCacheHeight: 400,
               maxWidthDiskCache: 800,
               maxHeightDiskCache: 800,
               placeholder: (context, url) {
-                // ✅ FIX: Show thumbnail immediately, no grey placeholder
                 if (thumb != null && thumb.isNotEmpty) {
                   try {
                     final bytes = base64Decode(thumb);
                     return Image.memory(
                       bytes,
                       fit: BoxFit.cover,
-                      gaplessPlayback: true, // ✅ FIX: Prevent flicker
-                      cacheWidth: 200, // ✅ FIX: Optimized for performance
+                      width: double.infinity,
+                      height: double.infinity,
+                      gaplessPlayback: true,
+                      cacheWidth: 200,
                       cacheHeight: 200,
                     );
                   } catch (_) {}
                 }
-                // ✅ FIX: Transparent instead of grey
                 return Container(color: Colors.transparent);
               },
               errorWidget: (context, url, error) {
-                // ✅ FIX: Show thumbnail on error
                 if (thumb != null && thumb.isNotEmpty) {
                   try {
                     final bytes = base64Decode(thumb);
                     return Image.memory(
                       bytes,
                       fit: BoxFit.cover,
-                      gaplessPlayback: true,
+                      width: double.infinity,
+                      height: double.infinity,
                       cacheWidth: 200,
                       cacheHeight: 200,
                     );
@@ -2126,10 +2206,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             );
       
       return GestureDetector(
-        onTap: onTap ?? () => _openImageFullScreen(m), // ✅ FIX: Open specific image on tap
+        onTap: onTap ?? () => _openImageFullScreen(m),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: imageWidget,
+          child: Container(
+            width: double.infinity,
+            height: double.infinity,
+            child: imageWidget, // ✅ FIX: Proper fit inside container
+          ),
         ),
       );
     }
@@ -2266,6 +2350,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: grid,
               ),
             ),
+            // ✅ FIX: Timestamp on right side (WhatsApp style)
             Positioned(
               bottom: 6,
               right: 6,
@@ -2279,7 +2364,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      time,
+                      _formatTime(anchor.timestamp), // ✅ FIX: Use formatTime
                       style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w400),
                     ),
                     if (isMe) const SizedBox(width: 4),
@@ -2379,6 +2464,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               messageId: 'local_preview',
               isLocalFile: true,
               chatId: widget.chatId,
+              otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName, // ✅ FIX: Pass otherUserName
             ),
           ),
         );

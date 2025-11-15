@@ -3,7 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:blurhash_dart/blurhash_dart.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
 import 'package:path/path.dart' as path;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -77,16 +81,15 @@ class ChatService {
   static Stream<Map<String, dynamic>> get onUserBlocked =>
       _userBlockedController.stream;
 
-  static final StreamController<Map<String, dynamic>> _groupUploadCompleteController =
+  static final StreamController<Map<String, dynamic>> _thumbnailReadyController =
   StreamController.broadcast();
-  static Stream<Map<String, dynamic>> get onGroupUploadComplete =>
-      _groupUploadCompleteController.stream;
+  static Stream<Map<String, dynamic>> get onThumbnailReady =>
+      _thumbnailReadyController.stream;
 
   static final _cryptoManager = CryptoManager();
   static final Set<String> _processedMessageIds = {};
   static final Set<String> _uploadingMediaIds = {};
   static final Set<String> _blockedUsers = {};
-  static final Map<String, List<String>> _groupUploads = {}; // Track group uploads
 
   // ✅ Track connected state to prevent multiple connections
   static bool _isConnecting = false;
@@ -223,7 +226,7 @@ class ChatService {
       _socket!.off("user_unblocked");
       _socket!.off("user_blocked_by");
       _socket!.off("user_unblocked_by");
-      _socket!.off("group_upload_complete");
+      _socket!.off("message_thumbnail_ready"); // ✅ Added thumbnail ready cleanup
     }
     print("✅ Cleaned up old socket listeners");
   }
@@ -349,28 +352,21 @@ class ChatService {
       }
     });
 
-    // ✅ GROUP UPLOAD COMPLETE LISTENER
-    _socket!.on("group_upload_complete", (data) {
-      print("🎉 [group_upload_complete] event received");
+    // ✅ MESSAGE THUMBNAIL READY LISTENER - NEW EVENT HANDLER
+    _socket!.on("message_thumbnail_ready", (data) async {
+      print("🖼️ [message_thumbnail_ready] event received");
       try {
-        final groupId = data["group_id"]?.toString();
-        final chatId = data["chat_id"]?.toString();
-        final totalImages = data["total_images"]?.toString();
-        final uploadedImages = data["uploaded_images"]?.toString();
+        final tempId = data["temp_id"]?.toString();
+        final thumbnailBase64 = data["thumbnail_data"]?.toString();
 
-        if (groupId != null && chatId != null) {
-          _groupUploadCompleteController.sink.add({
-            "group_id": groupId,
-            "chat_id": chatId,
-            "total_images": totalImages,
-            "uploaded_images": uploadedImages,
-            "completed_at": data["completed_at"]?.toString(),
-            "message_ids": data["message_ids"] ?? []
-          });
-          print("✅ Group upload complete: $groupId ($uploadedImages/$totalImages images)");
+        if (tempId != null && thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+          await _updateThumbnail(tempId, thumbnailBase64);
+          print("✅ Thumbnail updated for tempId: $tempId");
+        } else {
+          print("❌ [message_thumbnail_ready] Invalid data: tempId=$tempId, thumbnail=${thumbnailBase64 != null ? 'available' : 'null'}");
         }
       } catch (e) {
-        print("❌ [group_upload_complete] Error: $e");
+        print("❌ [message_thumbnail_ready] Error: $e");
       }
     });
 
@@ -587,182 +583,576 @@ class ChatService {
     print("✅ All socket listeners setup completed");
   }
 
-  // ✅ ADD THIS METHOD TO ChatService CLASS
-  static Future<void> _clearChatLocal(int chatId, int userId) async {
+  // ✅ NEW FUNCTION: UPDATE THUMBNAIL FOR MESSAGE
+  static Future<void> _updateThumbnail(String tempId, String thumbnailBase64) async {
     try {
-      final messages = _messageBox.values.where((m) => m.chatId == chatId).toList();
-      int clearedCount = 0;
-
-      for (final msg in messages) {
-        if (msg.receiverId == userId) {
-          msg.isDeletedReceiver = 1;
-          await _messageBox.put(msg.messageId, msg);
-          clearedCount++;
-        }
+      // ✅ CLEAN THUMBNAIL BASE64 - Remove data URI prefix if present
+      String cleanedThumbnail = thumbnailBase64.trim();
+      if (cleanedThumbnail.contains(',')) {
+        cleanedThumbnail = cleanedThumbnail.split(',').last.trim();
       }
 
-      print("✅ Cleared $clearedCount messages locally for chat $chatId");
-    } catch (e) {
-      print("❌ Error clearing chat locally: $e");
-    }
-  }
+      print("🖼️ Updating thumbnail for tempId: $tempId, length: ${cleanedThumbnail.length} chars");
 
-  // ------------------- MULTIPLE IMAGES SUPPORT - COMPLETE IMPLEMENTATION -------------------
+      // Find message by tempId
+      final msg = _messageBox.get(tempId) as Message?;
+      if (msg != null) {
+        // Update thumbnail with cleaned value
+        msg.thumbnailBase64 = cleanedThumbnail;
+        await _messageBox.put(tempId, msg);
 
-  /// ✅ INITIALIZE MULTIPLE IMAGES UPLOAD
-  static Future<Map<String, dynamic>?> initializeMultipleImagesUpload({
-    required int chatId,
-    required int receiverId,
-    required int totalImages,
-  }) async {
-    try {
-      final userId = _authBox.get('userId');
-      if (userId == null) throw Exception("User ID not found");
+        // Notify UI about thumbnail update
+        _thumbnailReadyController.sink.add({
+          "tempId": tempId,
+          "thumbnailBase64": cleanedThumbnail,
+          "message": msg
+        });
 
-      print("🔄 Initializing multiple images upload for $totalImages images...");
+        // Also notify via new message controller for UI refresh
+        _newMessageController.add(msg);
 
-      final response = await _dio.post(
-        "${Config.baseNodeApiUrl}/multi/images/init",
-        data: {
-          "chat_id": chatId,
-          "sender_id": userId,
-          "receiver_id": receiverId,
-          "total_images": totalImages,
-        },
-      );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final groupUploadId = response.data['group_upload_id'];
-        final groupId = response.data['group_id'];
-
-        // Initialize group tracking
-        _groupUploads[groupUploadId] = [];
-
-        print("✅ Multiple images upload initialized: $groupUploadId");
-        return {
-          'group_upload_id': groupUploadId,
-          'group_id': groupId,
-          'total_images': totalImages,
-        };
+        print("✅ Thumbnail updated for message: $tempId");
       } else {
-        throw Exception("Failed to initialize multiple images upload: ${response.data}");
+        // ✅ Also try to find by messageId if tempId not found
+        final allMessages = _messageBox.values.where((m) => m.messageId.toString() == tempId).toList();
+        if (allMessages.isNotEmpty) {
+          final msg = allMessages.first;
+          msg.thumbnailBase64 = cleanedThumbnail;
+          await _messageBox.put(msg.messageId, msg);
+
+          _thumbnailReadyController.sink.add({
+            "tempId": tempId,
+            "thumbnailBase64": cleanedThumbnail,
+            "message": msg
+          });
+
+          _newMessageController.add(msg);
+          print("✅ Thumbnail updated for message by messageId: $tempId");
+        } else {
+          print("⚠️ No message found with tempId: $tempId");
+        }
       }
     } catch (e) {
-      print("❌ Error initializing multiple images upload: $e");
-      return null;
+      print("❌ Error updating thumbnail: $e");
     }
   }
 
-  /// ✅ SEND MULTIPLE MEDIA MESSAGES - COMPLETE METHOD
-  static Future<void> sendMultipleMediaMessages({
-    required int chatId,
-    required int receiverId,
-    required List<String> mediaPaths,
-    String? senderName,
-    String? receiverName,
-    String? senderPhoneNumber,
-    String? receiverPhoneNumber,
-    String? replyToMessageId,
-  }) async {
-    if (!_isInitialized) {
-      throw Exception("ChatService not initialized");
-    }
-
-    final userId = _authBox.get('userId');
-    if (userId == null) throw Exception("User ID not found");
-
+  // ✅ IMPROVED THUMBNAIL GENERATION FUNCTION
+  static Future<Map<String, String?>> _generateThumbnail(String mediaPath) async {
     try {
-      print("🔄 Starting to send ${mediaPaths.length} images...");
+      final ext = mediaPath.split('.').last.toLowerCase();
+      String? thumbnailBase64;
 
-      // ✅ STEP 1: Initialize group upload
-      final initResult = await initializeMultipleImagesUpload(
-        chatId: chatId,
-        receiverId: receiverId,
-        totalImages: mediaPaths.length,
-      );
+      print("🎨 Generating thumbnail for: $mediaPath");
 
-      if (initResult == null) {
-        throw Exception("Failed to initialize multiple images upload");
-      }
-
-      final String groupUploadId = initResult['group_upload_id'];
-      final String groupId = initResult['group_id'];
-
-      print("🎯 Group upload started: $groupUploadId");
-
-      // ✅ STEP 2: Send each image individually with group info
-      for (int i = 0; i < mediaPaths.length; i++) {
-        final mediaPath = mediaPaths[i];
-        final tempId = '${groupId}_$i'; // Unique temp ID for each image
-
-        print("📤 Sending image ${i + 1}/${mediaPaths.length}: $mediaPath");
-
-        // ✅ Create temporary message for instant UI
-        final tempMsg = Message(
-          messageId: tempId,
-          chatId: chatId,
-          senderId: userId,
-          receiverId: receiverId,
-          messageContent: mediaPath,
-          messageType: 'media',
-          isRead: 0,
-          isDelivered: 0,
-          timestamp: DateTime.now(),
-          senderName: senderName,
-          receiverName: receiverName,
-          senderPhoneNumber: senderPhoneNumber,
-          receiverPhoneNumber: receiverPhoneNumber,
-          replyToMessageId: replyToMessageId,
-          // ✅ ADD GROUP INFORMATION
-          extraData: {
-            'groupId': groupId,
-            'groupUploadId': groupUploadId,
-            'imageIndex': i,
-            'totalImages': mediaPaths.length,
-            'isMultiple': true,
-          },
+      if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+        // ✅ FIX: Generate small thumbnail (5-10 KB) - 80x80, quality 40
+        final compressedThumbnail = await FlutterImageCompress.compressWithFile(
+          mediaPath,
+          quality: 40, // ✅ Reduced to 40 for 5-10 KB size
+          minWidth: 80, // ✅ Reduced to 80 for smaller file size
+          minHeight: 80, // ✅ Reduced to 80 for smaller file size
         );
 
-        await saveMessageLocal(tempMsg);
-        _newMessageController.add(tempMsg);
-
-        // ✅ Process and upload this image with group data
-        await _uploadSingleImageInGroup(
-          mediaPath: mediaPath,
-          chatId: chatId,
-          receiverId: receiverId,
-          tempId: tempId,
-          userId: userId,
-          senderName: senderName,
-          receiverName: receiverName,
-          senderPhoneNumber: senderPhoneNumber,
-          receiverPhoneNumber: receiverPhoneNumber,
-          replyToMessageId: replyToMessageId,
-          groupUploadId: groupUploadId,
-          groupId: groupId,
-          imageIndex: i,
-          totalImages: mediaPaths.length,
-        );
-
-        // ✅ Small delay between images to avoid overload
-        if (i < mediaPaths.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 1000));
+        if (compressedThumbnail != null) {
+          // ✅ Additional check: if still too large, compress further
+          var finalThumbnail = compressedThumbnail;
+          var sizeKB = (compressedThumbnail.length / 1024);
+          
+          if (sizeKB > 10) {
+            // Recompress with even lower quality if still too large
+            final furtherCompressed = await FlutterImageCompress.compressWithList(
+              compressedThumbnail,
+              quality: 30,
+              minWidth: 60,
+              minHeight: 60,
+            );
+            if (furtherCompressed != null) {
+              finalThumbnail = furtherCompressed;
+              sizeKB = (furtherCompressed.length / 1024);
+            }
+          }
+          
+          thumbnailBase64 = base64Encode(finalThumbnail);
+          print("✅ Generated image thumbnail: ${sizeKB.toStringAsFixed(2)} KB (${finalThumbnail.length} bytes)");
+        }
+      } else if (['mp4', 'mov', 'avi', 'mkv'].contains(ext)) {
+        // ✅ FIX: Generate small video thumbnail
+        try {
+          final thumbnailFile = await VideoCompress.getFileThumbnail(
+            mediaPath,
+            quality: 50, // ✅ Reduced from 85 to 50
+          );
+          final thumbnailBytes = await thumbnailFile.readAsBytes();
+          
+          // ✅ FIX: Further compress video thumbnail to 5-10 KB
+          var compressedVideoThumbnail = await FlutterImageCompress.compressWithList(
+            thumbnailBytes,
+            quality: 40,
+            minWidth: 80,
+            minHeight: 80,
+          );
+          
+          // ✅ Additional compression if still too large
+          if (compressedVideoThumbnail != null) {
+            var sizeKB = (compressedVideoThumbnail.length / 1024);
+            if (sizeKB > 10) {
+              final furtherCompressed = await FlutterImageCompress.compressWithList(
+                compressedVideoThumbnail,
+                quality: 30,
+                minWidth: 60,
+                minHeight: 60,
+              );
+              if (furtherCompressed != null) {
+                compressedVideoThumbnail = furtherCompressed;
+                sizeKB = (furtherCompressed.length / 1024);
+              }
+            }
+            
+            thumbnailBase64 = base64Encode(compressedVideoThumbnail);
+            print("✅ Generated video thumbnail: ${sizeKB.toStringAsFixed(2)} KB");
+          } else {
+            thumbnailBase64 = base64Encode(thumbnailBytes);
+            final sizeKB = (thumbnailBytes.length / 1024).toStringAsFixed(2);
+            print("✅ Generated video thumbnail (fallback): ${sizeKB} KB");
+          }
+        } catch (e) {
+          print("❌ Video thumbnail error: $e");
         }
       }
 
-      // ✅ STEP 3: Complete group upload
-      await _completeGroupUpload(groupUploadId);
-
-      print("✅ All ${mediaPaths.length} images uploaded successfully in group: $groupId");
-
+      return {
+        'thumbnailBase64': thumbnailBase64,
+      };
     } catch (e) {
-      print("❌ Error in sendMultipleMediaMessages: $e");
-      rethrow;
+      print("❌ Error in thumbnail generation: $e");
+      return {
+        'thumbnailBase64': null,
+      };
     }
   }
 
-  /// ✅ UPLOAD SINGLE IMAGE IN GROUP
-  static Future<void> _uploadSingleImageInGroup({
+  // ✅ THUMBNAIL WIDGET BUILDER
+  static Widget buildThumbnail(Message msg) {
+    if (msg.messageType == 'media') {
+      if (msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty) {
+        try {
+          final bytes = base64Decode(msg.thumbnailBase64!);
+          return Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            width: 150,
+            height: 150,
+            errorBuilder: (context, error, stackTrace) {
+              return _buildThumbnailPlaceholder();
+            },
+          );
+        } catch (e) {
+          return _buildThumbnailPlaceholder();
+        }
+      } else {
+        return _buildThumbnailPlaceholder();
+      }
+    } else {
+      // For text messages, show the message content
+      return Text(
+        msg.messageContent,
+        style: const TextStyle(fontSize: 16),
+      );
+    }
+  }
+
+  static Widget _buildThumbnailPlaceholder() {
+    return Container(
+      width: 150,
+      height: 150,
+      color: Colors.grey[300],
+      child: const Icon(
+        Icons.image,
+        color: Colors.grey,
+        size: 50,
+      ),
+    );
+  }
+
+  // ✅ FIXED INCOMING MESSAGE HANDLER WITH THUMBNAIL SUPPORT
+  static Future<void> _handleIncomingData(dynamic data,
+      {String source = "", bool forceDelivered = false}) async {
+    String? idToProcess;
+
+    try {
+      final currentUserId = _authBox.get('userId');
+      if (currentUserId == null) {
+        print("❌ User ID not found in authBox");
+        return;
+      }
+
+      final messageId = data["message_id"]?.toString();
+      final tempId = data["temp_id"]?.toString();
+      idToProcess = messageId ?? tempId;
+
+      if (idToProcess == null) {
+        print("❌ Incoming data has no valid message_id or temp_id. Ignoring.");
+        return;
+      }
+
+      print("📥 Processing message from $source: $idToProcess");
+
+      // ✅ STEP 1: STRONG DUPLICATE CHECK
+      if (_processedMessageIds.contains(idToProcess)) {
+        print("⚠️ Message already being processed: $idToProcess");
+        return;
+      }
+      _processedMessageIds.add(idToProcess);
+
+      // Auto-remove from processed set after 10 seconds
+      Future.delayed(const Duration(seconds: 10), () {
+        _processedMessageIds.remove(idToProcess!);
+      });
+
+      // ✅ STEP 2: Check if message already exists in database
+      final existingMessage = _messageBox.values.firstWhereOrNull(
+            (msg) => msg.messageId == idToProcess,
+      );
+
+      if (existingMessage != null) {
+        print("⚠️ Message already exists in database: $idToProcess");
+
+        // Update delivery status if needed
+        if (forceDelivered && existingMessage.isDelivered == 0) {
+          existingMessage.isDelivered = 1;
+          await _messageBox.put(idToProcess, existingMessage);
+          _newMessageController.add(existingMessage);
+          print("✅ Updated delivery status for existing message: $idToProcess");
+        }
+        return;
+      }
+
+      // ✅ STEP 3: Handle tempId to messageId conversion
+      if (tempId != null && messageId != null) {
+        await updateMessageId(tempId, messageId, forceDelivered ? 1 : 0);
+        print("✅ TempId converted: $tempId -> $messageId");
+        idToProcess = messageId;
+
+        // Check again after conversion
+        final existingWithNewId = _messageBox.values.firstWhereOrNull(
+              (msg) => msg.messageId == messageId,
+        );
+
+        if (existingWithNewId != null) {
+          print("⚠️ Message already exists with new ID: $messageId");
+          return;
+        }
+      }
+
+      // ✅ STEP 4: EXTRACT AND PROCESS MESSAGE DATA
+      String? thumbnailBase64 = data["thumbnail_data"]?.toString() ??
+          data["thumbnail"]?.toString() ??
+          data["thumbnail_base64"]?.toString();
+
+      // ✅ CLEAN THUMBNAIL BASE64 - Remove data URI prefix if present
+      if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+        // Remove "data:image/jpeg;base64," or similar prefixes
+        if (thumbnailBase64.contains(',')) {
+          thumbnailBase64 = thumbnailBase64.split(',').last;
+        }
+        thumbnailBase64 = thumbnailBase64.trim();
+        print("🖼️ Thumbnail extracted from server: ${thumbnailBase64.length} chars");
+      }
+
+      String encryptedContent = data["message_text"]?.toString() ?? "";
+      String messageType = data["message_type"]?.toString() ?? "text";
+      final replyToMessageId = data["reply_to_message_id"]?.toString();
+      final mediaUrl = data["media_url"]?.toString();
+
+      print("🔍 RAW DATA FROM SERVER:");
+      print("   - Source: $source");
+      print("   - Message Type: $messageType");
+      print("   - Thumbnail: ${thumbnailBase64 != null && thumbnailBase64.isNotEmpty ? 'Available (${thumbnailBase64.length} chars)' : 'Not Available'}");
+      print("   - Media URL: ${mediaUrl ?? 'Not Available'}");
+      print("   - Encrypted Content Length: ${encryptedContent.length}");
+
+      // ✅ STEP 5: DECRYPT AND EXTRACT CONTENT BASED ON MESSAGE TYPE
+      String finalContent = "";
+      String finalMessageType = "text";
+      String? finalThumbnailBase64 = thumbnailBase64;
+      String? finalMediaUrl = mediaUrl;
+
+      if (messageType == "encrypted" || messageType == "encrypted_media") {
+        print("🔓 Processing encrypted message: $messageType");
+
+        try {
+          Map<String, dynamic> decryptedData;
+
+          if (messageType == "encrypted_media") {
+            print("🎯 Using media-specific decryption");
+            decryptedData = await _cryptoManager.decryptMediaMessage(encryptedContent);
+          } else {
+            decryptedData = await _cryptoManager.decryptAndDecompress(encryptedContent);
+          }
+
+          print("🔍 Decrypted Result: $decryptedData");
+
+          finalMessageType = decryptedData["type"]?.toString() ?? "text";
+          finalContent = decryptedData["content"]?.toString() ?? "";
+
+          if (decryptedData.containsKey("thumbnail")) {
+            String? extractedThumbnail = decryptedData["thumbnail"]?.toString();
+            if (extractedThumbnail != null && extractedThumbnail.isNotEmpty) {
+              if (extractedThumbnail.contains(',')) {
+                extractedThumbnail = extractedThumbnail.split(',').last;
+              }
+              extractedThumbnail = extractedThumbnail.trim();
+              finalThumbnailBase64 = extractedThumbnail;
+              print("🖼️ Thumbnail extracted from decrypted data: ${finalThumbnailBase64.length} chars");
+            }
+          }
+
+          if (decryptedData.containsKey("media_url")) {
+            finalMediaUrl = decryptedData["media_url"]?.toString();
+          }
+          if (decryptedData.containsKey("high_quality_url") && finalMediaUrl == null) {
+            finalMediaUrl = decryptedData["high_quality_url"]?.toString();
+          }
+          if (decryptedData.containsKey("low_quality_url") && finalMediaUrl == null) {
+            finalMediaUrl = decryptedData["low_quality_url"]?.toString();
+          }
+
+          print("✅ DECRYPTION SUCCESSFUL:");
+          print("   - Final Type: $finalMessageType");
+          print("   - Final Content: '${finalContent.length > 50 ? finalContent.substring(0, 50) + '...' : finalContent}'");
+
+        } catch (e) {
+          print("❌ Decryption failed: $e");
+          // Fallback for decryption failure
+          finalContent = encryptedContent;
+          finalMessageType = messageType.replaceAll("encrypted_", "");
+        }
+      } else {
+        // ✅ UNENCRYPTED MESSAGES - direct processing
+        finalContent = encryptedContent;
+        finalMessageType = messageType;
+      }
+
+      // ✅ STEP 6: CONTENT CLEANUP AND VALIDATION
+      if (finalContent.startsWith('{') && finalContent.endsWith('}')) {
+        try {
+          final jsonParsed = jsonDecode(finalContent);
+          if (jsonParsed is Map<String, dynamic>) {
+            // Extract content from JSON structure if present
+            if (jsonParsed.containsKey('content')) {
+              finalContent = jsonParsed['content']?.toString() ?? finalContent;
+            }
+            if (jsonParsed.containsKey('media_url') && finalMediaUrl == null) {
+              finalMediaUrl = jsonParsed['media_url']?.toString();
+            }
+            if (jsonParsed.containsKey('thumbnail') && (finalThumbnailBase64 == null || finalThumbnailBase64!.isEmpty)) {
+              String? extractedThumbnail = jsonParsed['thumbnail']?.toString();
+              // ✅ Clean thumbnail from JSON too
+              if (extractedThumbnail != null && extractedThumbnail.isNotEmpty) {
+                if (extractedThumbnail.contains(',')) {
+                  extractedThumbnail = extractedThumbnail.split(',').last;
+                }
+                finalThumbnailBase64 = extractedThumbnail.trim();
+              }
+            }
+            print("✅ Cleaned JSON content");
+          }
+        } catch (e) {
+          print("⚠️ Content is not valid JSON, using as-is");
+        }
+      }
+
+      // ✅ STEP 7: AUTO-DETECT MEDIA TYPE FROM CONTENT
+      if (finalMessageType == "text" &&
+          (_isMediaContent(finalContent) || finalThumbnailBase64 != null || finalMediaUrl != null)) {
+        finalMessageType = "media";
+        print("🎯 Auto-detected as media from content/thumbnail/media_url");
+      }
+
+      // ✅ STEP 8: PREPARE MESSAGE METADATA
+      final messageTimestamp = DateTime.tryParse(data["timestamp"]?.toString() ?? "") ?? DateTime.now();
+      final chatId = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
+      final senderId = int.tryParse(data["sender_id"]?.toString() ?? "0") ?? 0;
+      final receiverId = int.tryParse(data["receiver_id"]?.toString() ?? "0") ?? 0;
+
+      // For media messages, use media URL as content if available
+      if (finalMessageType == "media" && finalMediaUrl != null) {
+        finalContent = finalMediaUrl;
+      }
+
+      // ✅ STEP 9: FINAL CONTENT-BASED DUPLICATE CHECK
+      final contentDuplicateCheck = _messageBox.values.firstWhereOrNull(
+            (msg) =>
+        msg.chatId == chatId &&
+            msg.senderId == senderId &&
+            msg.messageContent == finalContent &&
+            msg.timestamp.difference(messageTimestamp).inSeconds.abs() < 5,
+      );
+
+      if (contentDuplicateCheck != null) {
+        print("⚠️ CONTENT DUPLICATE - Similar message exists: ${contentDuplicateCheck.messageId}");
+
+        // ✅ UPDATE EXISTING MESSAGE with new data
+        if (forceDelivered && contentDuplicateCheck.isDelivered == 0) {
+          contentDuplicateCheck.isDelivered = 1;
+        }
+        if (finalThumbnailBase64 != null && finalThumbnailBase64.isNotEmpty) {
+          // ✅ Always update thumbnail if new one is available (even if old exists, update it)
+          contentDuplicateCheck.thumbnailBase64 = finalThumbnailBase64;
+          print("✅ Updated thumbnail for existing message: ${contentDuplicateCheck.messageId}");
+        }
+        if (replyToMessageId != null) {
+          contentDuplicateCheck.replyToMessageId = replyToMessageId;
+        }
+
+        final String? dupGroupId = data["group_id"]?.toString();
+        final int? dupImageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
+        final int? dupTotalImages = data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : null;
+        if (dupGroupId != null && dupGroupId.isNotEmpty) {
+          contentDuplicateCheck.groupId = dupGroupId;
+          contentDuplicateCheck.imageIndex = dupImageIndex;
+          contentDuplicateCheck.totalImages = dupTotalImages;
+        }
+
+        await _messageBox.put(contentDuplicateCheck.messageId, contentDuplicateCheck);
+
+        if (_newMessageController.hasListener) {
+          _newMessageController.add(contentDuplicateCheck);
+        }
+
+        print("✅ Updated existing message with new data: ${contentDuplicateCheck.messageId}");
+        return;
+      }
+
+      // ✅ STEP 10: CREATE AND SAVE NEW MESSAGE
+      // ✅ FIX: Properly extract group_id, image_index, and total_images with debug logging
+      final String? groupId = data["group_id"]?.toString();
+      
+      // ✅ FIX: Handle image_index extraction - can be int or string
+      int? imageIndex;
+      if (data["image_index"] != null) {
+        final imageIndexValue = data["image_index"];
+        if (imageIndexValue is int) {
+          imageIndex = imageIndexValue;
+        } else if (imageIndexValue is String) {
+          imageIndex = int.tryParse(imageIndexValue);
+        } else {
+          imageIndex = int.tryParse(imageIndexValue.toString());
+        }
+      }
+      
+      // ✅ FIX: Handle total_images extraction - can be int or string
+      int? totalImages;
+      if (data["total_images"] != null) {
+        final totalImagesValue = data["total_images"];
+        if (totalImagesValue is int) {
+          totalImages = totalImagesValue;
+        } else if (totalImagesValue is String) {
+          totalImages = int.tryParse(totalImagesValue);
+        } else {
+          totalImages = int.tryParse(totalImagesValue.toString());
+        }
+      }
+      
+      // ✅ DEBUG: Log extracted values
+      if (groupId != null || imageIndex != null || totalImages != null) {
+        print("🧩 GROUP DATA EXTRACTED: groupId=$groupId, imageIndex=$imageIndex, totalImages=$totalImages");
+        print("🧩 RAW DATA: group_id=${data["group_id"]}, image_index=${data["image_index"]} (type: ${data["image_index"]?.runtimeType}), total_images=${data["total_images"]}");
+      }
+      final msg = Message(
+        messageId: idToProcess,
+        chatId: chatId,
+        senderId: senderId,
+        receiverId: receiverId,
+        messageContent: finalContent,
+        messageType: finalMessageType,
+        isRead: 0,
+        isDelivered: forceDelivered ? 1 : 0,
+        timestamp: messageTimestamp,
+        senderName: data["sender_name"]?.toString(),
+        receiverName: data["receiver_name"]?.toString(),
+        senderPhoneNumber: data["sender_phone"]?.toString(),
+        receiverPhoneNumber: data["receiver_phone"]?.toString(),
+        thumbnailBase64: finalThumbnailBase64,
+        replyToMessageId: replyToMessageId,
+        isForwarded: data["is_forwarded"] == 1 ? true : false,
+        forwardedFrom: data["forwarded_from"]?.toString(),
+        groupId: groupId,
+        imageIndex: imageIndex,
+        totalImages: totalImages,
+      );
+
+      await saveMessageLocal(msg);
+
+      print("💾 NEW MESSAGE SAVED:");
+      print("   - ID: $idToProcess");
+      print("   - Type: $finalMessageType");
+      print("   - Content: '${finalContent.length > 30 ? finalContent.substring(0, 30) + '...' : finalContent}'");
+      print("   - Thumbnail: ${finalThumbnailBase64 != null && finalThumbnailBase64.isNotEmpty ? 'Available (${finalThumbnailBase64.length} chars)' : 'Not Available'}");
+      print("   - Thumbnail in Message Object: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty ? 'Available (${msg.thumbnailBase64!.length} chars)' : 'Not Available'}");
+      print("   - Chat: $chatId");
+      print("   - Sender: $senderId");
+      print("   - Timestamp: $messageTimestamp");
+
+      // ✅ STEP 11: NOTIFY UI
+      if (_newMessageController.hasListener) {
+        _newMessageController.add(msg);
+      }
+
+      // ✅ STEP 12: SEND DELIVERY CONFIRMATION (if message is for current user)
+      final isForCurrentUser = currentUserId.toString() != data["sender_id"].toString();
+      if (isForCurrentUser && _socket != null && _socket!.connected) {
+        _socket!.emit("message_delivered", {
+          "message_id": idToProcess,
+          "chat_id": chatId,
+          "receiver_id": currentUserId,
+        });
+        await updateDeliveryStatus(idToProcess, 1);
+        print("✅ Delivery confirmation sent for: $idToProcess");
+      }
+
+      // ✅ STEP 13: PLAY SOUND FOR INCOMING MESSAGES
+      if (isForCurrentUser && source == "new_message") {
+        SoundUtils.playReceiveSound();
+      }
+
+      print("✅ Message processing completed: $idToProcess");
+
+    } catch (e, st) {
+      print("❌ CRITICAL ERROR in _handleIncomingData: $e");
+      print("Stack trace: $st");
+      print("Problematic data: ${data.toString()}");
+    } finally {
+      if (idToProcess != null) {
+        _processedMessageIds.remove(idToProcess);
+      }
+    }
+  }
+
+// ✅ IMPROVED MEDIA CONTENT DETECTION
+  static bool _isMediaContent(String content) {
+    if (content.isEmpty) return false;
+
+    final lowerContent = content.toLowerCase();
+    return lowerContent.startsWith('http') ||
+        lowerContent.contains('/uploads/') ||
+        lowerContent.contains('/media/') ||
+        lowerContent.endsWith('.jpg') ||
+        lowerContent.endsWith('.jpeg') ||
+        lowerContent.endsWith('.png') ||
+        lowerContent.endsWith('.mp4') ||
+        lowerContent.endsWith('.mov') ||
+        lowerContent.endsWith('.gif') ||
+        lowerContent.endsWith('.webp') ||
+        lowerContent.endsWith('.avi') ||
+        lowerContent.endsWith('.mkv') ||
+        lowerContent.contains('image') ||
+        lowerContent.contains('video');
+  }
+
+  // ✅ FIXED MEDIA PROCESSING WITH THUMBNAIL
+  static Future<void> _processAndSendMedia({
     required String mediaPath,
     required int chatId,
     required int receiverId,
@@ -773,153 +1163,450 @@ class ChatService {
     String? senderPhoneNumber,
     String? receiverPhoneNumber,
     String? replyToMessageId,
-    required String groupUploadId,
-    required String groupId,
-    required int imageIndex,
-    required int totalImages,
+    String? groupId,
+    int? imageIndex,
+    int? totalImages,
   }) async {
     if (_uploadingMediaIds.contains(tempId)) {
+      print("⚠️ Media $tempId is already being uploaded");
       return;
     }
 
     _uploadingMediaIds.add(tempId);
 
-    String? blurHash;
-    String? thumbnailBase64;
-    Uint8List? fileBytes;
-
     try {
-      // ✅ STEP 1: Generate thumbnail and blur hash
-      final ext = mediaPath.split('.').last.toLowerCase();
-      if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
-        final compressedThumbnail = await FlutterImageCompress.compressWithFile(
-          mediaPath,
-          quality: 30,
-          minWidth: 100,
-          minHeight: 100,
-        );
-        if (compressedThumbnail != null) {
-          thumbnailBase64 = base64Encode(compressedThumbnail);
-          blurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I";
-          print("✅ Generated thumbnail for group image $imageIndex");
+      // ✅ STEP 1: Check if temp message exists
+      final existingTempMsg = _messageBox.get(tempId) as Message?;
+      if (existingTempMsg == null) {
+        print("❌ Temporary message not found");
+        return;
+      }
+
+      // ✅ FIX: Use existing thumbnail if already generated (for media groups)
+      String? thumbnailBase64 = existingTempMsg.thumbnailBase64;
+      
+      // ✅ STEP 2: GENERATE THUMBNAIL ONLY IF NOT ALREADY PRESENT
+      if (thumbnailBase64 == null || thumbnailBase64.isEmpty) {
+        print("🎨 Generating thumbnail...");
+        final mediaData = await _generateThumbnail(mediaPath);
+        thumbnailBase64 = mediaData['thumbnailBase64'];
+        
+        // ✅ FIX: Update temp message with thumbnail immediately
+        if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+          existingTempMsg.thumbnailBase64 = thumbnailBase64;
+          await _messageBox.put(tempId, existingTempMsg);
+          // ✅ FIX: Notify UI immediately with thumbnail
+          _thumbnailReadyController.sink.add({
+            'tempId': tempId,
+            'thumbnailBase64': thumbnailBase64,
+            'message': existingTempMsg,
+          });
         }
       }
 
-      // ✅ STEP 2: Compress image
+      print("✅ Media Data Generated:");
+      print("   - Thumbnail: ${thumbnailBase64 != null ? 'Available' : 'NULL'}");
+
+      // ✅ STEP 3: Compress media
+      Uint8List fileBytes;
+      final ext = mediaPath.split('.').last.toLowerCase();
+
       if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
         final compressedBytes = await FlutterImageCompress.compressWithFile(
           mediaPath,
-          quality: 80, // Higher quality for multiple images
+          quality: 85,
           minWidth: 1200,
           minHeight: 1200,
         );
         fileBytes = Uint8List.fromList(compressedBytes ?? await File(mediaPath).readAsBytes());
+      } else if (['mp4', 'mov', 'avi', 'mkv'].contains(ext)) {
+        final MediaInfo? info = await VideoCompress.compressVideo(
+          mediaPath,
+          quality: VideoQuality.MediumQuality,
+          deleteOrigin: false,
+          includeAudio: true,
+        );
+        if (info != null && info.file != null) {
+          fileBytes = await File(info.file!.path).readAsBytes();
+        } else {
+          fileBytes = await File(mediaPath).readAsBytes();
+        }
       } else {
         fileBytes = await File(mediaPath).readAsBytes();
       }
 
       final originalName = path.basename(mediaPath);
+      final totalSize = fileBytes.length;
 
-      print("📦 Uploading group image $imageIndex: $originalName (${fileBytes.length} bytes)");
+      print("📦 Prepared media for upload: $originalName ($totalSize bytes)");
 
-      // ✅ STEP 3: Upload using multipart form for multiple images
-      final FormData formData = FormData.fromMap({
-        "image": await MultipartFile.fromBytes(
+      // ✅ STEP 4: Upload using server's 3-step process
+      final String? mediaUrl = await _uploadMediaToServer(
           fileBytes,
-          filename: originalName,
-        ),
-        "group_upload_id": groupUploadId,
-        "image_index": imageIndex.toString(),
-        "temp_id": tempId,
-        if (replyToMessageId != null) "reply_to_message_id": replyToMessageId,
-      });
-
-      final response = await _dio.post(
-        "${Config.baseNodeApiUrl}/multi/images/upload",
-        data: formData,
-        onSendProgress: (sent, total) {
-          if (total > 0) {
-            final progress = (sent / total) * 100;
+          originalName,
+          totalSize,
+          tempId,
+          chatId: chatId,
+          senderId: userId,
+          receiverId: receiverId,
+          onProgress: (progress) {
             _uploadProgressController.sink.add({
               'tempId': tempId,
               'progress': progress,
-              'groupUploadId': groupUploadId,
-              'imageIndex': imageIndex,
             });
-            print("📤 Group upload progress: $progress% for image $imageIndex");
           }
-        },
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final data = response.data['data'];
-
-        // ✅ Update local message with server response
-        final existingTempMsg = _messageBox.get(tempId) as Message?;
-        if (existingTempMsg != null) {
-          existingTempMsg.isDelivered = 1;
-          existingTempMsg.messageContent = data['media_url'] ?? data['high_quality_url'];
-          existingTempMsg.lowQualityUrl = data['low_quality_url'];
-          existingTempMsg.highQualityUrl = data['high_quality_url'];
-          existingTempMsg.blurHash = data['blur_hash'];
-          existingTempMsg.thumbnailBase64 = data['thumbnail_data'];
-
-          await _messageBox.put(tempId, existingTempMsg);
-          _newMessageController.add(existingTempMsg);
-        }
-
-        // ✅ Track successful upload in group
-        _groupUploads[groupUploadId]?.add(tempId);
-
-        print("✅ Group image $imageIndex uploaded successfully");
-
-        // ✅ Send push notification for each image
-        await _sendPushNotification(
-            receiverId,
-            '📷 Image ${imageIndex + 1}/$totalImages',
-            chatId,
-            userId,
-            senderName ?? 'User'
-        );
-
-      } else {
-        throw Exception("Upload failed: ${response.data}");
+      if (mediaUrl == null) {
+        throw Exception("Failed to upload media to server.");
       }
 
+      print("✅ Media uploaded successfully: $mediaUrl");
+
+      // ✅ STEP 5: Send final media message via socket
+      final fileName = mediaUrl.split('/').last;
+      final fullMediaUrl = '${Config.baseNodeApiUrl}/media/file/$fileName';
+
+      // ✅ Prepare CLEAN media payload (NO TYPE SHOWN TO USER)
+      final encryptedData = await _cryptoManager.encryptMediaPayload(fullMediaUrl, thumbnailBase64);
+      final encryptedContent = encryptedData['content'];
+      final encryptedType = encryptedData['type'];
+
+      // ✅ Send via socket
+      if (_socket != null && _socket!.connected) {
+        _socket!.emit("send_message", {
+          "chat_id": chatId,
+          "sender_id": userId,
+          "receiver_id": receiverId,
+          "message_text": encryptedContent,
+          "message_type": encryptedType,
+          "temp_id": tempId,
+          "media_url": fullMediaUrl,
+          "thumbnail_data": thumbnailBase64 ?? "",
+          "sender_name": senderName,
+          "receiver_name": receiverName,
+          "sender_phone": senderPhoneNumber,
+          "receiver_phone": receiverPhoneNumber,
+          "reply_to_message_id": replyToMessageId,
+          "timestamp": DateTime.now().toIso8601String(),
+          if (groupId != null) "group_id": groupId,
+          if (imageIndex != null) "image_index": imageIndex,
+          if (totalImages != null) "total_images": totalImages,
+        });
+        print("📤 Emitted send_message for temp_id: $tempId");
+      }
+
+      // ✅ STEP 6: Update local temporary message ONLY ONCE
+      if (existingTempMsg.thumbnailBase64 == null) {
+        existingTempMsg.thumbnailBase64 = thumbnailBase64;
+      }
+      if (groupId != null) {
+        existingTempMsg.groupId = groupId;
+        existingTempMsg.imageIndex = imageIndex;
+        existingTempMsg.totalImages = totalImages;
+      }
+      existingTempMsg.isDelivered = 1;
+      await _messageBox.put(tempId, existingTempMsg);
+
+      // Notify UI of update
+      _newMessageController.add(existingTempMsg);
+
+      print("✅ Media message sent successfully");
+
+      // ✅ STEP 7: Send push notification
+      await _sendPushNotification(receiverId, '📷 Media', chatId, userId, senderName ?? 'User');
+
     } catch (e) {
-      print("❌ Group image upload error for index $imageIndex: $e");
+      print("❌ Media upload error: $e");
       _uploadProgressController.sink.add({
         'tempId': tempId,
         'progress': -1.0,
-        'groupUploadId': groupUploadId,
-        'imageIndex': imageIndex,
-        'error': e.toString(),
       });
     } finally {
       _uploadingMediaIds.remove(tempId);
     }
   }
 
-  /// ✅ COMPLETE GROUP UPLOAD
-  static Future<void> _completeGroupUpload(String groupUploadId) async {
+  // ✅ CORRECTED: Upload using server's 3-step API
+  static Future<String?> _uploadMediaToServer(
+      Uint8List fileBytes,
+      String fileName,
+      int totalSize,
+      String tempId, {
+        required int chatId,
+        required int senderId,
+        required int receiverId,
+        required Function(double) onProgress,
+      }) async {
     try {
-      final response = await _dio.post(
-        "${Config.baseNodeApiUrl}/multi/images/complete",
+      const int chunkSize = 512 * 1024;
+      final int totalChunks = (fileBytes.length / chunkSize).ceil();
+
+      print("📤 Uploading $fileName in $totalChunks chunks...");
+
+      // ✅ STEP 1: Initialize upload session
+      final initResponse = await _dio.post(
+        "${Config.baseNodeApiUrl}/media/init",
         data: {
-          "group_upload_id": groupUploadId,
+          "chat_id": chatId,
+          "sender_id": senderId,
+          "original_name": fileName,
+          "total_size": totalSize,
         },
       );
 
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        print("🎉 Group upload completed: $groupUploadId");
-
-        // Cleanup group tracking
-        _groupUploads.remove(groupUploadId);
-      } else {
-        print("⚠️ Group upload completion response: ${response.data}");
+      if (initResponse.statusCode != 200 || initResponse.data['success'] != true) {
+        throw Exception("Upload initialization failed: ${initResponse.data}");
       }
+
+      final String uploadId = initResponse.data['upload_id'];
+      print("✅ Upload session started: $uploadId");
+
+      // ✅ STEP 2: Upload chunks
+      int completedChunks = 0;
+      for (int i = 0; i < totalChunks; i++) {
+        final int start = i * chunkSize;
+        final int end = min(start + chunkSize, fileBytes.length);
+        final Uint8List chunkBytes = fileBytes.sublist(start, end);
+
+        int attempt = 0;
+        bool success = false;
+
+        while (attempt < 3 && !success) {
+          try {
+            final FormData form = FormData.fromMap({
+              "upload_id": uploadId,
+              "chunk": MultipartFile.fromBytes(chunkBytes, filename: "$fileName.part$i"),
+            });
+
+            final response = await _dio.post(
+                "${Config.baseNodeApiUrl}/media/chunk",
+                data: form
+            );
+
+            if (response.statusCode != 200 || response.data['success'] != true) {
+              throw Exception("Chunk upload failed: ${response.data}");
+            }
+
+            completedChunks++;
+            final double progress = (completedChunks / totalChunks) * 100;
+            onProgress(progress);
+
+            print("📦 Chunk ${i + 1}/$totalChunks uploaded ($progress%)");
+            success = true;
+          } catch (e) {
+            attempt++;
+            if (attempt < 3) {
+              print("⚠️ Retry chunk ${i + 1}, attempt $attempt");
+              await Future.delayed(const Duration(seconds: 2));
+            } else {
+              throw Exception("❌ Chunk ${i + 1} failed after 3 attempts: $e");
+            }
+          }
+        }
+      }
+
+      // ✅ STEP 3: Finalize upload
+      final finalizeResponse = await _dio.post(
+          "${Config.baseNodeApiUrl}/media/finalize",
+          data: {
+            "upload_id": uploadId,
+            "receiver_id": receiverId,
+            "temp_id": tempId,
+          }
+      );
+
+      if (finalizeResponse.statusCode == 200 && finalizeResponse.data['success'] == true) {
+        final String mediaUrl = finalizeResponse.data['data']['media_url'];
+        print("✅ Upload finalized: $mediaUrl");
+        onProgress(100);
+        return mediaUrl;
+      } else {
+        throw Exception("Finalize upload failed: ${finalizeResponse.data}");
+      }
+
     } catch (e) {
-      print("❌ Error completing group upload: $e");
+      print("❌ Upload failed for $fileName: $e");
+      onProgress(-1.0);
+      return null;
+    }
+  }
+
+  static Future<void> sendMediaGroup({
+    required int chatId,
+    required int receiverId,
+    required List<String> mediaPaths,
+    String? senderName,
+    String? receiverName,
+    String? senderPhoneNumber,
+    String? receiverPhoneNumber,
+    String? replyToMessageId,
+  }) async {
+    if (!_isInitialized) {
+      throw Exception("ChatService has not been initialized. Cannot send media group.");
+    }
+
+    if (_socket == null || !_socket!.connected) {
+      initSocket();
+      await Future.delayed(const Duration(seconds: 2));
+      if (_socket == null || !_socket!.connected) {
+        throw Exception("Socket not connected. Cannot send media group.");
+      }
+    }
+
+    final userId = _authBox.get('userId');
+    if (userId == null) throw Exception("User ID not found");
+
+    final String groupId = 'grp_${chatId}_${DateTime.now().microsecondsSinceEpoch}';
+    final int total = mediaPaths.length;
+    final baseTimestamp = DateTime.now();
+
+    // ✅ FIX: Generate thumbnails FIRST for instant UI display (parallel)
+    final List<Future<Map<String, dynamic>>> thumbnailFutures = [];
+    for (int i = 0; i < mediaPaths.length; i++) {
+      thumbnailFutures.add(_generateThumbnail(mediaPaths[i]));
+    }
+    
+    // ✅ FIX: Wait for all thumbnails in parallel
+    final thumbnailResults = await Future.wait(thumbnailFutures);
+
+    // ✅ FIX: Create all temp messages with thumbnails INSTANTLY (no delay)
+    final List<Message> tempMessages = [];
+    for (int i = 0; i < mediaPaths.length; i++) {
+      final String path = mediaPaths[i];
+      final String tempId = 'temp_${chatId}_${baseTimestamp.microsecondsSinceEpoch}_$i';
+      final thumbnailBase64 = thumbnailResults[i]['thumbnailBase64'];
+
+      final tempMsg = Message(
+        messageId: tempId,
+        chatId: chatId,
+        senderId: userId,
+        receiverId: receiverId,
+        messageContent: path,
+        messageType: 'media',
+        isRead: 0,
+        isDelivered: 0,
+        timestamp: baseTimestamp.add(Duration(milliseconds: i)), // ✅ FIX: Sequential timestamps
+        senderName: senderName,
+        receiverName: receiverName,
+        senderPhoneNumber: senderPhoneNumber,
+        receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
+        groupId: groupId,
+        imageIndex: i,
+        totalImages: total,
+        thumbnailBase64: thumbnailBase64, // ✅ FIX: Add thumbnail immediately
+      );
+
+      await saveMessageLocal(tempMsg);
+      tempMessages.add(tempMsg);
+    }
+
+    // ✅ FIX: Notify UI ONCE with all messages for instant display (no fluctuation)
+    for (final tempMsg in tempMessages) {
+      _newMessageController.add(tempMsg);
+      _messageSentController.sink.add(tempMsg.messageId);
+    }
+    SoundUtils.playSendSound();
+
+    // ✅ FIX: Send all media in PARALLEL (like WhatsApp)
+    final List<Future<void>> uploadFutures = [];
+    for (int i = 0; i < mediaPaths.length; i++) {
+      uploadFutures.add(_processAndSendMedia(
+        mediaPath: mediaPaths[i],
+        chatId: chatId,
+        receiverId: receiverId,
+        tempId: tempMessages[i].messageId,
+        userId: userId,
+        senderName: senderName,
+        receiverName: receiverName,
+        senderPhoneNumber: senderPhoneNumber,
+        receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
+        groupId: groupId,
+        imageIndex: i,
+        totalImages: total,
+      ));
+    }
+    
+    // ✅ FIX: Process all uploads in parallel (don't wait)
+    unawaited(Future.wait(uploadFutures));
+  }
+
+  // ------------------- MEDIA UPLOAD FUNCTIONS -------------------
+
+  /// Send media message using server's 3-step upload process
+  static Future<void> sendMediaMessage({
+    required int chatId,
+    required int receiverId,
+    required String mediaPath,
+    String? senderName,
+    String? receiverName,
+    String? senderPhoneNumber,
+    String? receiverPhoneNumber,
+    String? replyToMessageId,
+  }) async {
+    final tempId = 'temp_${chatId}_${DateTime.now().microsecondsSinceEpoch}';
+    if (!_isInitialized) {
+      throw Exception("ChatService has not been initialized. Cannot send media message.");
+    }
+
+    if (_socket == null || !_socket!.connected) {
+      print("❌ Socket not connected. Attempting to reconnect...");
+      initSocket();
+      await Future.delayed(const Duration(seconds: 2));
+      if (_socket == null || !_socket!.connected) {
+        throw Exception("Socket not connected. Cannot send media message.");
+      }
+    }
+
+    final userId = _authBox.get('userId');
+    if (userId == null) throw Exception("User ID not found");
+
+    try {
+      // ✅ STEP 1: Create immediate temporary message for instant UI update
+      final tempMsg = Message(
+        messageId: tempId,
+        chatId: chatId,
+        senderId: userId,
+        receiverId: receiverId,
+        messageContent: mediaPath,
+        messageType: 'media',
+        isRead: 0,
+        isDelivered: 0,
+        timestamp: DateTime.now(),
+        senderName: senderName,
+        receiverName: receiverName,
+        senderPhoneNumber: senderPhoneNumber,
+        receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
+      );
+
+      await saveMessageLocal(tempMsg);
+      print("💾 Saved temporary media message with instant preview: $tempId");
+
+      // ✅ Notify UI immediately
+      _newMessageController.add(tempMsg);
+      _messageSentController.sink.add(tempId);
+      SoundUtils.playSendSound();
+
+      // ✅ STEP 2: Process and upload media in background WITH THUMBNAIL
+      _processAndSendMedia(
+        mediaPath: mediaPath,
+        chatId: chatId,
+        receiverId: receiverId,
+        tempId: tempId,
+        userId: userId,
+        senderName: senderName,
+        receiverName: receiverName,
+        senderPhoneNumber: senderPhoneNumber,
+        receiverPhoneNumber: receiverPhoneNumber,
+        replyToMessageId: replyToMessageId,
+      );
+
+    } catch (e) {
+      print("❌ Initial media message setup error: $e");
+      rethrow;
     }
   }
 
@@ -1038,419 +1725,30 @@ class ChatService {
     }
   }
 
-  // ------------------- DELETE MESSAGE FUNCTION -------------------
-  static Future<void> deleteMessage({
-    required String messageId,
-    required int userId,
-    required String role, // 'sender' or 'receiver'
-  }) async {
+  /// Send push notification for media
+  static Future<void> _sendPushNotification(int receiverId, String messageText, int chatId, int senderId, String senderName) async {
     try {
-      const apiUrl = "${Config.baseNodeApiUrl}/delete_message";
-
-      final res = await http.post(
+      const apiUrl = 'http://184.168.126.71:3000/api/send-notification';
+      final response = await http.post(
         Uri.parse(apiUrl),
-        headers: {"Content-Type": "application/json"},
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          "messageId": messageId,
-          "userId": userId,
-          "role": role,
+          'receiverId': receiverId,
+          'messageText': messageText,
+          'chatId': chatId,
+          'senderId': senderId,
+          'senderName': senderName,
+          'type': 'media'
         }),
       );
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data["success"] == true) {
-          print("✅ Message deletion processed successfully on server: $messageId");
-
-          await _updateMessageDeletionStatusLocal(messageId, role);
-
-        } else {
-          print("❌ Server reported failure in deletion: ${data['error']}");
-        }
+      if (response.statusCode == 200) {
+        print('✅ Media notification sent successfully!');
       } else {
-        print("❌ HTTP Error during message deletion: ${res.statusCode}");
+        print('❌ Failed to send media notification: ${response.body}');
       }
     } catch (e) {
-      print("❌ Error deleting message: $e");
-    }
-  }
-
-  // ------------------- FORWARD MESSAGES FUNCTION -------------------
-  static Future<void> forwardMessages({
-    required Set<int> originalMessageIds,
-    required int targetChatId,
-  }) async {
-    if (!_isInitialized) {
-      throw Exception("ChatService has not been initialized.");
-    }
-
-    final List<Message> messagesToForward = originalMessageIds
-        .map((id) => _messageBox.get(id.toString()))
-        .whereType<Message>()
-        .toList();
-
-    print("DEBUG: Forwarding ${messagesToForward.length} messages to chatId=$targetChatId");
-
-    for (final msg in messagesToForward) {
-      await _forwardMessage(
-        originalMessage: msg,
-        targetChatId: targetChatId,
-      );
-    }
-  }
-
-  static Future<void> _forwardMessage({
-    required Message originalMessage,
-    required int targetChatId,
-  }) async {
-    final myUserId = _authBox.get('userId');
-    if (myUserId == null) return;
-
-    final chat = _chatBox.get(targetChatId) as Chat?;
-    final receiverId = chat?.contactId;
-
-    if (receiverId == null) {
-      print("⚠️ Forward failed: receiverId is null for chatId=$targetChatId");
-      return;
-    }
-
-    print(
-        "➡️ Forwarding messageId=${originalMessage.messageId} from userId=$myUserId to receiverId=$receiverId for chatId=$targetChatId");
-
-    _socket?.emit("forward_messages", {
-      "original_message_id": originalMessage.messageId,
-      "forwarded_by_id": myUserId,
-      "to_chat_id": targetChatId,
-      "to_user_id": receiverId,
-    });
-  }
-
-  // ------------------- SINGLE IMAGE UPLOAD (BACKWARD COMPATIBLE) -------------------
-
-  /// Send single media message (backward compatible)
-  static Future<void> sendMediaMessage({
-    required int chatId,
-    required int receiverId,
-    required String mediaPath,
-    String? senderName,
-    String? receiverName,
-    String? senderPhoneNumber,
-    String? receiverPhoneNumber,
-    String? replyToMessageId,
-  }) async {
-    // For single image, use the multiple images system with count=1
-    await sendMultipleMediaMessages(
-      chatId: chatId,
-      receiverId: receiverId,
-      mediaPaths: [mediaPath],
-      senderName: senderName,
-      receiverName: receiverName,
-      senderPhoneNumber: senderPhoneNumber,
-      receiverPhoneNumber: receiverPhoneNumber,
-      replyToMessageId: replyToMessageId,
-    );
-  }
-
-  // ------------------- HANDLE INCOMING DATA - COMPLETELY FIXED -------------------
-  static Future<void> _handleIncomingData(dynamic data,
-      {String source = "", bool forceDelivered = false}) async {
-    String? idToProcess;
-
-    try {
-      final currentUserId = _authBox.get('userId');
-      if (currentUserId == null) {
-        print("❌ User ID not found in authBox");
-        return;
-      }
-
-      final messageId = data["message_id"]?.toString();
-      final tempId = data["temp_id"]?.toString();
-      idToProcess = messageId ?? tempId;
-
-      if (idToProcess == null) {
-        print("❌ Incoming data has no valid message_id or temp_id. Ignoring.");
-        return;
-      }
-
-      print("📥 Processing message from $source: $idToProcess");
-
-      // ✅ STEP 1: STRONG DUPLICATE CHECK - Check by ID (FIRST THING)
-      final existingById = _messageBox.values.firstWhereOrNull(
-            (msg) => msg.messageId == idToProcess,
-      );
-
-      if (existingById != null) {
-        print("⚠️ Message already exists in database: $idToProcess");
-        print("   - Existing Content: ${existingById.messageContent}");
-        print("   - Existing Type: ${existingById.messageType}");
-        return;
-      }
-
-      // ✅ STEP 2: Handle tempId to messageId conversion
-      if (tempId != null && messageId != null) {
-        await updateMessageId(tempId, messageId, forceDelivered ? 1 : 0);
-        print("✅ TempId converted: $tempId -> $messageId");
-
-        // Check if message already exists with new ID
-        final existingWithNewId = _messageBox.values.firstWhereOrNull(
-              (msg) => msg.messageId == messageId,
-        );
-
-        if (existingWithNewId != null) {
-          print("⚠️ Message already exists with new ID: $messageId");
-          return;
-        }
-
-        // Update idToProcess to new messageId
-        idToProcess = messageId;
-      }
-
-      // ✅ STRONG DUPLICATE PROTECTION - Multiple layers
-      if (_processedMessageIds.contains(idToProcess)) {
-        print("⚠️ Message already being processed: $idToProcess");
-        return;
-      }
-      _processedMessageIds.add(idToProcess);
-
-      // Auto-clean after 10 seconds
-      Future.delayed(const Duration(seconds: 10), () {
-        _processedMessageIds.remove(idToProcess!);
-      });
-
-      // ✅ EXTRACT ALL DATA
-      final blurHash = data["blur_hash"]?.toString();
-      final thumbnailBase64 = data["thumbnail_data"]?.toString();
-      final lowQualityUrl = data["low_quality_url"]?.toString();
-      final highQualityUrl = data["high_quality_url"]?.toString();
-      final mediaUrl = data["media_url"]?.toString();
-      final messageContent = data["message_text"]?.toString() ?? "";
-      final messageType = data["message_type"]?.toString() ?? "text";
-      final replyToMessageId = data["reply_to_message_id"]?.toString();
-
-      // ✅ EXTRACT GROUP DATA FOR MULTIPLE IMAGES
-      final groupId = data["group_id"]?.toString();
-      final imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : 0;
-      final totalImages = data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : 1;
-
-      print("🔍 RAW DATA FROM SERVER:");
-      print("   - Message Type: $messageType");
-      print("   - Blur Hash: $blurHash");
-      print("   - Thumbnail Base64: ${thumbnailBase64 != null ? 'Available' : 'Not Available'}");
-      print("   - Low Quality URL: $lowQualityUrl");
-      print("   - High Quality URL: $highQualityUrl");
-      print("   - Media URL: $mediaUrl");
-      print("   - Reply To: $replyToMessageId");
-      print("   - Group Data: ${groupId != null ? 'Available ($imageIndex/$totalImages)' : 'Not Available'}");
-
-      // ✅ SMART MEDIA DATA EXTRACTION
-      String finalContent = messageContent;
-      String finalMessageType = messageType;
-      String? finalLowQualityUrl = lowQualityUrl;
-      String? finalHighQualityUrl = highQualityUrl;
-      String? finalBlurHash = blurHash;
-      String? finalThumbnailBase64 = thumbnailBase64;
-
-      final messageTimestamp = DateTime.tryParse(data["timestamp"]?.toString() ?? "") ?? DateTime.now();
-      final chatId = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
-      final senderId = int.tryParse(data["sender_id"]?.toString() ?? "0") ?? 0;
-
-      print("🔄 Processing Strategy:");
-      print("   - Incoming Type: $messageType");
-      print("   - Has Media URL: ${mediaUrl != null && mediaUrl.isNotEmpty}");
-
-      // ✅ STEP 3: Handle MEDIA messages specially
-      if (messageType == "media" ||
-          (messageType == "encrypted" && mediaUrl != null && mediaUrl.isNotEmpty)) {
-
-        print("🎯 PROCESSING MEDIA MESSAGE");
-
-        // ✅ USE SERVER-PROVIDED MEDIA DATA DIRECTLY
-        if (mediaUrl != null && mediaUrl.isNotEmpty) {
-          finalContent = mediaUrl;
-          finalMessageType = "media";
-
-          // ✅ PRESERVE ALL SERVER-PROVIDED MEDIA DATA
-          if (lowQualityUrl != null && lowQualityUrl.isNotEmpty) {
-            finalLowQualityUrl = _resolveMediaUrl(lowQualityUrl);
-            print("✅ Using server low quality URL: $finalLowQualityUrl");
-          } else {
-            finalLowQualityUrl = _resolveMediaUrl(mediaUrl);
-            print("🔄 Using media URL as low quality: $finalLowQualityUrl");
-          }
-
-          if (highQualityUrl != null && highQualityUrl.isNotEmpty) {
-            finalHighQualityUrl = _resolveMediaUrl(highQualityUrl);
-            print("✅ Using server high quality URL: $finalHighQualityUrl");
-          } else {
-            finalHighQualityUrl = _resolveMediaUrl(mediaUrl);
-            print("🔄 Using media URL as high quality: $finalHighQualityUrl");
-          }
-
-          if (blurHash != null && blurHash.isNotEmpty) {
-            finalBlurHash = blurHash;
-            print("✅ Using server blur hash: ${blurHash.substring(0, 20)}...");
-          } else {
-            finalBlurHash = "L5H2EC=PM+yV0g-mq.wG9c010J}I"; // Fallback
-            print("🔄 Using fallback blur hash");
-          }
-
-          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
-            finalThumbnailBase64 = thumbnailBase64;
-            print("✅ Using server thumbnail base64");
-          }
-
-          print("🎉 FINAL MEDIA CONFIG:");
-          print("   - Content: $finalContent");
-          print("   - Type: $finalMessageType");
-          print("   - Low Quality: $finalLowQualityUrl");
-          print("   - High Quality: $finalHighQualityUrl");
-          print("   - Blur Hash: ${finalBlurHash != null ? 'Available' : 'Not Available'}");
-          print("   - Thumbnail: ${finalThumbnailBase64 != null ? 'Available' : 'Not Available'}");
-        }
-      } else if (messageType == "encrypted") {
-        // Handle encrypted text messages
-        try {
-          final decryptedData = await _cryptoManager.decryptAndDecompress(messageContent);
-          final decodedData = jsonDecode(decryptedData['content']);
-          finalContent = decodedData['content'] ?? "[Decryption Failed]";
-          finalMessageType = decodedData['type'] ?? "text";
-          print("✅ Decrypted text message: $finalContent");
-        } catch (e) {
-          print("❌ Decryption failed: $e");
-          finalContent = "[Decryption Failed]";
-          finalMessageType = "text";
-        }
-      }
-
-      // ✅ STEP 4: FINAL CONTENT-BASED DUPLICATE CHECK (RELAXED)
-      final finalExistingCheck = _messageBox.values.firstWhereOrNull(
-            (msg) =>
-        msg.chatId == chatId &&
-            msg.senderId == senderId &&
-            msg.messageContent == finalContent &&
-            msg.timestamp.difference(messageTimestamp).inSeconds.abs() < 10, // Increased to 10 seconds
-      );
-
-      if (finalExistingCheck != null) {
-        print("⚠️ CONTENT DUPLICATE CHECK - Similar message exists:");
-        print("   - Existing ID: ${finalExistingCheck.messageId}");
-        print("   - Existing Content: ${finalExistingCheck.messageContent}");
-        print("   - New Content: $finalContent");
-
-        // ✅ UPDATE EXISTING MESSAGE INSTEAD OF CREATING NEW ONE
-        finalExistingCheck.isDelivered = forceDelivered ? 1 : 0;
-        if (finalLowQualityUrl != null) finalExistingCheck.lowQualityUrl = finalLowQualityUrl;
-        if (finalHighQualityUrl != null) finalExistingCheck.highQualityUrl = finalHighQualityUrl;
-        if (finalBlurHash != null) finalExistingCheck.blurHash = finalBlurHash;
-        if (finalThumbnailBase64 != null) finalExistingCheck.thumbnailBase64 = finalThumbnailBase64;
-        if (replyToMessageId != null) finalExistingCheck.replyToMessageId = replyToMessageId;
-
-        // ✅ UPDATE GROUP DATA IF AVAILABLE
-        if (groupId != null) {
-          finalExistingCheck.extraData = {
-            'groupId': groupId,
-            'imageIndex': imageIndex,
-            'totalImages': totalImages,
-            'isMultiple': true,
-          };
-        }
-
-        await _messageBox.put(finalExistingCheck.messageId, finalExistingCheck);
-        print("✅ Updated existing message with new media data");
-
-        // Emit update event
-        if (_newMessageController.hasListener) {
-          _newMessageController.add(finalExistingCheck);
-          print("📢 Stream event emitted for updated message: ${finalExistingCheck.messageId}");
-        }
-
-        return;
-      }
-
-      // ✅ STEP 5: Create and save NEW message
-      final msg = Message(
-        messageId: idToProcess,
-        chatId: chatId,
-        senderId: senderId,
-        receiverId: int.tryParse(data["receiver_id"]?.toString() ?? "0") ?? 0,
-        messageContent: finalContent,
-        messageType: finalMessageType,
-        isRead: 0,
-        isDelivered: forceDelivered ? 1 : 0,
-        timestamp: messageTimestamp,
-        senderName: data["sender_name"]?.toString(),
-        receiverName: data["receiver_name"]?.toString(),
-        senderPhoneNumber: data["sender_phone"]?.toString(),
-        receiverPhoneNumber: data["receiver_phone"]?.toString(),
-        lowQualityUrl: finalLowQualityUrl,
-        highQualityUrl: finalHighQualityUrl,
-        blurHash: finalBlurHash,
-        thumbnailBase64: finalThumbnailBase64,
-        replyToMessageId: replyToMessageId,
-        isForwarded: data["is_forwarded"] == 1 ? true : false,
-        forwardedFrom: data["forwarded_from"]?.toString(),
-        // ✅ STORE GROUP DATA FOR MULTIPLE IMAGES
-        extraData: groupId != null ? {
-          'groupId': groupId,
-          'imageIndex': imageIndex,
-          'totalImages': totalImages,
-          'isMultiple': true,
-        } : null,
-      );
-
-      await saveMessageLocal(msg);
-      print("💾 NEW Message saved successfully: $idToProcess");
-      print("💾 Media Data Saved:");
-      print("   - Low Quality: ${msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty}");
-      print("   - High Quality: ${msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty}");
-      print("   - Blur Hash: ${msg.blurHash != null && msg.blurHash!.isNotEmpty}");
-      print("   - Thumbnail: ${msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty}");
-      print("   - Reply To: ${msg.replyToMessageId}");
-      print("   - Is Forwarded: ${msg.isForwarded}");
-      print("   - Group Data: ${msg.extraData != null ? 'Available' : 'Not Available'}");
-
-      // ✅ DELAYED STREAM EVENT
-      Future.delayed(const Duration(milliseconds: 100), () {
-        final finalCheck = _messageBox.get(idToProcess);
-        if (finalCheck != null && _newMessageController.hasListener) {
-          _newMessageController.add(msg);
-          print("📢 Stream event emitted for NEW message: $idToProcess");
-        }
-      });
-
-      // ✅ STEP 6: Send delivery confirmation
-      final isForCurrentUser = currentUserId.toString() != data["sender_id"].toString();
-      if (isForCurrentUser && _socket != null && _socket!.connected) {
-        _socket!.emit("message_delivered", {
-          "message_id": idToProcess,
-          "chat_id": msg.chatId,
-          "receiver_id": currentUserId,
-        });
-        await updateDeliveryStatus(idToProcess, 1);
-        print("📤 Delivery confirmed: $idToProcess");
-      }
-
-      print("✅ Message processing completed successfully: $idToProcess");
-
-    } catch (e, st) {
-      print("❌ Error in _handleIncomingData: $e");
-      print("Stack: $st");
-    } finally {
-      if (idToProcess != null) {
-        _processedMessageIds.remove(idToProcess);
-      }
-    }
-  }
-
-  // ✅ URL RESOLUTION HELPER
-  static String _resolveMediaUrl(String url) {
-    if (url.startsWith('http')) {
-      return url;
-    } else if (url.startsWith('/uploads/')) {
-      final fileName = url.split('/').last;
-      return '${Config.baseNodeApiUrl}/media/file/$fileName';
-    } else {
-      return '${Config.baseNodeApiUrl}$url';
+      print('❌ Error sending media notification: $e');
     }
   }
 
@@ -1779,7 +2077,7 @@ class ChatService {
     }
   }
 
-  // ------------------- ADDITIONAL UTILITY METHODS -------------------
+  // ------------------- NEW API COMPATIBLE FUNCTIONS -------------------
 
   // ✅ CLEAR CHAT FUNCTION
   static Future<void> clearChat(int chatId) async {
@@ -1917,6 +2215,113 @@ class ChatService {
     return getLocalMessages(chatId);
   }
 
+  // ✅ FORWARD MESSAGES (UPDATED FOR NEW API)
+  static Future<void> forwardMessages({
+    required Set<int> originalMessageIds,
+    required int targetChatId,
+  }) async {
+    if (!_isInitialized) {
+      throw Exception("ChatService has not been initialized.");
+    }
+
+    final List<Message> messagesToForward = originalMessageIds
+        .map((id) => _messageBox.get(id.toString()))
+        .whereType<Message>()
+        .toList();
+
+    print("DEBUG: Forwarding ${messagesToForward.length} messages to chatId=$targetChatId");
+
+    for (final msg in messagesToForward) {
+      await _forwardMessage(
+        originalMessage: msg,
+        targetChatId: targetChatId,
+      );
+    }
+  }
+
+  static Future<void> _forwardMessage({
+    required Message originalMessage,
+    required int targetChatId,
+  }) async {
+    final myUserId = _authBox.get('userId');
+    if (myUserId == null) return;
+
+    final chat = _chatBox.get(targetChatId) as Chat?;
+    final receiverId = chat?.contactId;
+
+    if (receiverId == null) {
+      print("⚠️ Forward failed: receiverId is null for chatId=$targetChatId");
+      return;
+    }
+
+    print(
+        "➡️ Forwarding messageId=${originalMessage.messageId} from userId=$myUserId to receiverId=$receiverId for chatId=$targetChatId");
+
+    _socket?.emit("forward_messages", {
+      "original_message_id": originalMessage.messageId,
+      "forwarded_by_id": myUserId,
+      "to_chat_id": targetChatId,
+      "to_user_id": receiverId,
+    });
+  }
+
+  // ✅ DELETE MESSAGE (UPDATED FOR NEW API)
+  static Future<void> deleteMessage({
+    required String messageId,
+    required int userId,
+    required String role, // 'sender' or 'receiver'
+  }) async {
+    try {
+      const apiUrl = "${Config.baseNodeApiUrl}/delete_message";
+
+      final res = await http.post(
+        Uri.parse(apiUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "messageId": messageId,
+          "userId": userId,
+          "role": role,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data["success"] == true) {
+          print("✅ Message deletion processed successfully on server: $messageId");
+
+          await _updateMessageDeletionStatusLocal(messageId, role);
+
+        } else {
+          print("❌ Server reported failure in deletion: ${data['error']}");
+        }
+      } else {
+        print("❌ HTTP Error during message deletion: ${res.statusCode}");
+      }
+    } catch (e) {
+      print("❌ Error deleting message: $e");
+    }
+  }
+
+  // ✅ LOCAL CHAT CLEARANCE
+  static Future<void> _clearChatLocal(int chatId, int userId) async {
+    try {
+      final messages = _messageBox.values.where((m) => m.chatId == chatId).toList();
+      int clearedCount = 0;
+
+      for (final msg in messages) {
+        if (msg.receiverId == userId) {
+          msg.isDeletedReceiver = 1;
+          await _messageBox.put(msg.messageId, msg);
+          clearedCount++;
+        }
+      }
+
+      print("✅ Cleared $clearedCount messages locally for chat $chatId");
+    } catch (e) {
+      print("❌ Error clearing chat locally: $e");
+    }
+  }
+
   // ------------------- UTILITY METHODS -------------------
   static bool get isInitialized => _isInitialized;
 
@@ -1937,33 +2342,6 @@ class ChatService {
       return '${Config.baseNodeApiUrl}/media/file/$fileName';
     } else {
       return mediaPath;
-    }
-  }
-
-  // ✅ Send push notification for media
-  static Future<void> _sendPushNotification(int receiverId, String messageText, int chatId, int senderId, String senderName) async {
-    try {
-      const apiUrl = 'http://184.168.126.71:3000/api/send-notification';
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'receiverId': receiverId,
-          'messageText': messageText,
-          'chatId': chatId,
-          'senderId': senderId,
-          'senderName': senderName,
-          'type': 'media'
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        print('✅ Media notification sent successfully!');
-      } else {
-        print('❌ Failed to send media notification: ${response.body}');
-      }
-    } catch (e) {
-      print('❌ Error sending media notification: $e');
     }
   }
 
@@ -1999,7 +2377,18 @@ class ChatService {
     // ✅ CLEAR PROCESSED MESSAGE IDs
     _processedMessageIds.clear();
     _uploadingMediaIds.clear();
-    _groupUploads.clear();
+
+    // ✅ CLOSE ALL STREAM CONTROLLERS
+    _typingStatusController.close();
+    _newMessageController.close();
+    _userStatusController.close();
+    _messageDeliveredController.close();
+    _messageSentController.close();
+    _uploadProgressController.close();
+    _messageDeletedController.close();
+    _chatClearedController.close();
+    _userBlockedController.close();
+    _thumbnailReadyController.close(); // ✅ Added thumbnail controller cleanup
 
     print("🔌 Socket completely disposed");
   }

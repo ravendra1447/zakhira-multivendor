@@ -184,9 +184,36 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                   minScale: PhotoViewComputedScale.contained * 0.8,
                   maxScale: PhotoViewComputedScale.covered * 4.0,
                   initialScale: PhotoViewComputedScale.contained,
-                  loadingBuilder: (context, event) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
+                  // ✅ FIX: Show loading indicator while image loads
+                  loadingBuilder: (context, event) {
+                    if (event == null) {
+                      // Image is loaded, don't show loading
+                      return Container(color: Colors.black);
+                    }
+                    final progress = event.cumulativeBytesLoaded / (event.expectedTotalBytes ?? 1);
+                    return Stack(
+                      children: [
+                        Container(color: Colors.black),
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: progress,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                '${(progress * 100).toStringAsFixed(0)}%',
+                                style: const TextStyle(color: Colors.white, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                   errorBuilder: (context, error, stackTrace) => Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -398,9 +425,36 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                   minScale: PhotoViewComputedScale.contained * 0.8,
                   maxScale: PhotoViewComputedScale.covered * 4.0,
                   initialScale: PhotoViewComputedScale.contained,
-                  loadingBuilder: (context, event) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
+                  // ✅ FIX: Show loading indicator while image loads
+                  loadingBuilder: (context, event) {
+                    if (event == null) {
+                      // Image is loaded, don't show loading
+                      return Container(color: Colors.black);
+                    }
+                    final progress = event.cumulativeBytesLoaded / (event.expectedTotalBytes ?? 1);
+                    return Stack(
+                      children: [
+                        Container(color: Colors.black),
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: progress,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                '${(progress * 100).toStringAsFixed(0)}%',
+                                style: const TextStyle(color: Colors.white, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),

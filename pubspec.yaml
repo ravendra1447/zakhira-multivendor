@@ -8,6 +8,7 @@ environment:
   sdk: ^3.8.1
 
 dependencies:
+  blurhash_dart: ^1.1.0
 
   flutter_slidable: ^3.0.1
   flutter_blurhash: ^0.9.1

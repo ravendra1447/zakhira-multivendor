@@ -289,23 +289,23 @@ class ChatService {
           return;
         }
 
-      // ✅ STRONG DUPLICATE CHECK (improved)
-      if (_processedMessageIds.contains(idToProcess)) {
-        print("⚠️ [new_message] Duplicate blocked: $idToProcess");
-        return;
-      }
-      
-      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
-      final existingInDb = _messageBox.values.firstWhereOrNull(
-        (msg) => msg.messageId == idToProcess,
-      );
-      if (existingInDb != null) {
-        print("⚠️ [new_message] Message already exists in DB: $idToProcess");
-        return;
-      }
+        // ✅ STRONG DUPLICATE CHECK (improved)
+        if (_processedMessageIds.contains(idToProcess)) {
+          print("⚠️ [new_message] Duplicate blocked: $idToProcess");
+          return;
+        }
 
-      await _handleIncomingData(data, source: "new_message");
-      SoundUtils.playReceiveSound();
+        // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+        final existingInDb = _messageBox.values.firstWhereOrNull(
+              (msg) => msg.messageId == idToProcess,
+        );
+        if (existingInDb != null) {
+          print("⚠️ [new_message] Message already exists in DB: $idToProcess");
+          return;
+        }
+
+        await _handleIncomingData(data, source: "new_message");
+        SoundUtils.playReceiveSound();
       } catch (e) {
         print("❌ [new_message] Error: $e");
       }
@@ -324,22 +324,22 @@ class ChatService {
           return;
         }
 
-      // ✅ STRONG DUPLICATE CHECK (improved)
-      if (_processedMessageIds.contains(idToProcess)) {
-        print("⚠️ [receive_message] Duplicate blocked: $idToProcess");
-        return;
-      }
-      
-      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
-      final existingInDb = _messageBox.values.firstWhereOrNull(
-        (msg) => msg.messageId == idToProcess,
-      );
-      if (existingInDb != null) {
-        print("⚠️ [receive_message] Message already exists in DB: $idToProcess");
-        return;
-      }
+        // ✅ STRONG DUPLICATE CHECK (improved)
+        if (_processedMessageIds.contains(idToProcess)) {
+          print("⚠️ [receive_message] Duplicate blocked: $idToProcess");
+          return;
+        }
 
-      await _handleIncomingData(data, source: "receive_message", forceDelivered: true);
+        // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+        final existingInDb = _messageBox.values.firstWhereOrNull(
+              (msg) => msg.messageId == idToProcess,
+        );
+        if (existingInDb != null) {
+          print("⚠️ [receive_message] Message already exists in DB: $idToProcess");
+          return;
+        }
+
+        await _handleIncomingData(data, source: "receive_message", forceDelivered: true);
       } catch (e) {
         print("❌ [receive_message] Error: $e");
       }
@@ -358,22 +358,22 @@ class ChatService {
           return;
         }
 
-      // ✅ STRONG DUPLICATE CHECK (improved)
-      if (_processedMessageIds.contains(idToProcess)) {
-        print("⚠️ [media_message_ready] Duplicate blocked: $idToProcess");
-        return;
-      }
-      
-      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
-      final existingInDb = _messageBox.values.firstWhereOrNull(
-        (msg) => msg.messageId == idToProcess,
-      );
-      if (existingInDb != null) {
-        print("⚠️ [media_message_ready] Message already exists in DB: $idToProcess");
-        return;
-      }
+        // ✅ STRONG DUPLICATE CHECK (improved)
+        if (_processedMessageIds.contains(idToProcess)) {
+          print("⚠️ [media_message_ready] Duplicate blocked: $idToProcess");
+          return;
+        }
 
-      await _handleIncomingData(data, source: "media_message_ready", forceDelivered: true);
+        // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+        final existingInDb = _messageBox.values.firstWhereOrNull(
+              (msg) => msg.messageId == idToProcess,
+        );
+        if (existingInDb != null) {
+          print("⚠️ [media_message_ready] Message already exists in DB: $idToProcess");
+          return;
+        }
+
+        await _handleIncomingData(data, source: "media_message_ready", forceDelivered: true);
       } catch (e) {
         print("❌ [media_message_ready] Error: $e");
       }
@@ -720,16 +720,16 @@ class ChatService {
             minHeight: 60, // ✅ Reduced for faster processing
           );
 
-            // ✅ Additional compression if still too large (target 3-5 KB)
-            if (compressedVideoThumbnail != null) {
-              var sizeKB = (compressedVideoThumbnail.length / 1024);
-              if (sizeKB > 5) {
-                final furtherCompressed = await FlutterImageCompress.compressWithList(
-                  compressedVideoThumbnail,
-                  quality: 20, // ✅ Further reduced for faster processing
-                  minWidth: 50,
-                  minHeight: 50,
-                );
+          // ✅ Additional compression if still too large (target 3-5 KB)
+          if (compressedVideoThumbnail != null) {
+            var sizeKB = (compressedVideoThumbnail.length / 1024);
+            if (sizeKB > 5) {
+              final furtherCompressed = await FlutterImageCompress.compressWithList(
+                compressedVideoThumbnail,
+                quality: 20, // ✅ Further reduced for faster processing
+                minWidth: 50,
+                minHeight: 50,
+              );
               if (furtherCompressed != null) {
                 compressedVideoThumbnail = furtherCompressed;
                 sizeKB = (furtherCompressed.length / 1024);
@@ -860,7 +860,7 @@ class ChatService {
       var imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
       if (groupId != null && groupId.isNotEmpty && imageIndex != null) {
         final existingGroupMessage = _messageBox.values.firstWhereOrNull(
-          (msg) => msg.groupId == groupId &&
+              (msg) => msg.groupId == groupId &&
               msg.imageIndex == imageIndex &&
               msg.chatId == int.tryParse(data["chat_id"]?.toString() ?? "0") &&
               msg.senderId == int.tryParse(data["sender_id"]?.toString() ?? "0"),
@@ -1559,17 +1559,17 @@ class ChatService {
         final i = entry.key;
         final path = entry.value;
         final tempMsg = tempMessages[i];
-        
+
         try {
           // Generate thumbnail
           final thumbnailResult = await _generateThumbnail(path);
           final thumbnailBase64 = thumbnailResult['thumbnailBase64'];
-          
+
           if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
             // Update message with thumbnail
             tempMsg.thumbnailBase64 = thumbnailBase64;
             _messageBox.put(tempMsg.messageId, tempMsg); // ✅ Sync update
-            
+
             // ✅ Notify UI about thumbnail update
             _thumbnailReadyController.sink.add({
               'tempId': tempMsg.messageId,
@@ -1577,7 +1577,7 @@ class ChatService {
               'message': tempMsg,
             });
             _newMessageController.add(tempMsg); // ✅ Refresh UI with thumbnail
-            
+
             print("✅ Thumbnail $i/$total generated and updated: ${tempMsg.messageId}");
           }
         } catch (e) {
@@ -1679,7 +1679,7 @@ class ChatService {
         try {
           final thumbnailResult = await _generateThumbnail(mediaPath);
           final thumbnailBase64 = thumbnailResult['thumbnailBase64'];
-          
+
           if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
             tempMsg.thumbnailBase64 = thumbnailBase64;
             _messageBox.put(tempMsg.messageId, tempMsg);
@@ -1916,7 +1916,7 @@ class ChatService {
     try {
       // ✅ FIX: Skip duplicate check for temp messages (for instant display)
       final isTemp = message.messageId.toString().startsWith('temp_');
-      
+
       if (!isTemp) {
         // ✅ FINAL SAFETY CHECK before saving (only for non-temp messages)
         final existingMessage = _messageBox.values.firstWhereOrNull(
@@ -1937,7 +1937,7 @@ class ChatService {
 
       // ✅ CRITICAL FIX: Save IMMEDIATELY and SYNCHRONOUSLY (no await for instant display)
       _messageBox.put(message.messageId, message);
-      
+
       // ✅ CRITICAL: For temp messages, notify UI IMMEDIATELY (WhatsApp style)
       if (isTemp) {
         // ✅ Direct notification for instant display - don't wait

@@ -118,7 +118,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Message> _cachedMessages = [];
   bool _needsRefresh = true;
   Timer? _updateTimer;
-  
+
   // ✅ CRITICAL: In-memory temp messages for INSTANT display (WhatsApp style)
   // This ensures temp messages appear instantly before Hive sync completes
   final Map<String, Message> _pendingTempMessages = {};
@@ -237,7 +237,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               }
             });
           }
-          
+
           // ✅ Only haptic feedback for non-temp messages (prevent flickering)
           if (!msg.messageId.toString().startsWith('temp_')) {
             HapticFeedback.selectionClick();
@@ -254,41 +254,73 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
         // ✅ CRITICAL FIX: Instant refresh for temp messages (WhatsApp style)
         final isTemp = msg.messageId.toString().startsWith('temp_');
-        _needsRefresh = true;
         
-        // ✅ CRITICAL: Clean up pending temp messages if we got a real message ID
-        // (This happens when server confirms temp message with real ID)
+        // ✅ FIX: Check if real message already exists to prevent duplication
         if (!isTemp) {
+          // Check if this real message already exists in Hive
+          final existingMsg = _messageBox.get(msg.messageId);
+          if (existingMsg != null) {
+            // Message already exists, just update it if needed
+            if (msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty && 
+                (existingMsg.thumbnailBase64 == null || existingMsg.thumbnailBase64!.isEmpty)) {
+              existingMsg.thumbnailBase64 = msg.thumbnailBase64;
+              await _messageBox.put(msg.messageId, existingMsg);
+            }
+            // Clean up any matching temp messages
+            _pendingTempMessages.removeWhere((tempId, tempMsg) {
+              if (tempMsg.chatId == msg.chatId &&
+                  tempMsg.messageType == msg.messageType &&
+                  tempMsg.timestamp.difference(msg.timestamp).inSeconds.abs() < 10) {
+                print("🧹 Cleaned up pending temp message: $tempId (replaced by ${msg.messageId})");
+                return true;
+              }
+              return false;
+            });
+            _needsRefresh = true;
+            if (mounted) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() {});
+              });
+            }
+            return; // Don't process duplicate
+          }
+          
           // Check if this real message might be replacing a pending temp message
-          // (by checking timestamp and content match)
           _pendingTempMessages.removeWhere((tempId, tempMsg) {
-            // If real message matches temp message, remove the temp one
+            // If real message matches temp message (by content, type, timestamp), remove temp
             if (tempMsg.chatId == msg.chatId &&
                 tempMsg.messageType == msg.messageType &&
-                tempMsg.timestamp.difference(msg.timestamp).inSeconds.abs() < 5) {
-              print("🧹 Cleaned up pending temp message: $tempId (replaced by ${msg.messageId})");
-              return true;
+                tempMsg.timestamp.difference(msg.timestamp).inSeconds.abs() < 10) {
+              // Also check groupId match for media messages
+              if (msg.groupId != null && msg.groupId!.isNotEmpty) {
+                if (tempMsg.groupId == msg.groupId && tempMsg.imageIndex == msg.imageIndex) {
+                  print("🧹 Cleaned up pending temp message: $tempId (replaced by ${msg.messageId})");
+                  return true;
+                }
+              } else {
+                print("🧹 Cleaned up pending temp message: $tempId (replaced by ${msg.messageId})");
+                return true;
+              }
             }
             return false;
           });
         }
-        
+
+        _needsRefresh = true;
+
         if (mounted) {
           if (isTemp) {
             // ✅ CRITICAL: Store in-memory for instant display (before Hive sync)
             _pendingTempMessages[msg.messageId] = msg;
-            // ✅ CRITICAL: Force IMMEDIATE synchronous setState (no callback delay - WhatsApp style)
-            // Use direct setState instead of scheduleFrameCallback for true instant display
-            if (mounted) {
-              setState(() {
-                _cachedMessages.clear(); // ✅ Force cache clear for instant update
-              });
-              print("⚡ INSTANT UI refresh (synchronous) for temp message: ${msg.messageId}");
-              // ✅ Also schedule a frame callback for thumbnail updates
-              WidgetsBinding.instance.scheduleFrameCallback((_) {
-                if (mounted) setState(() {});
-              });
-            }
+            // ✅ FIX: Reduced setState calls to prevent flickering
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() {
+                  // Don't clear cache unnecessarily - causes flickering
+                });
+              }
+            });
+            print("⚡ INSTANT UI refresh for temp message: ${msg.messageId}");
           } else {
             // ✅ Batch refresh for non-temp messages (prevent fluctuation)
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -340,20 +372,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _pendingTempMessages[tempId] = message;
           }
 
-
           if (thumbnailBase64 != null && thumbnailBase64.toString().isNotEmpty) {
-            print("🖼️ Thumbnail ready for message: $tempId, refreshing UI INSTANTLY");
+            print("🖼️ Thumbnail ready for message: $tempId");
           } else {
-            print("⚡ Temp message notification (no thumbnail yet): $tempId, refreshing UI INSTANTLY");
+            print("⚡ Temp message notification (no thumbnail yet): $tempId");
           }
-          // ✅ CRITICAL: Force immediate frame rebuild (no delay)
-          WidgetsBinding.instance.scheduleFrameCallback((_) {
+          // ✅ FIX: Reduced setState to prevent flickering
+          _needsRefresh = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               setState(() {
-                _needsRefresh = true;
-                _cachedMessages.clear(); // ✅ Force cache clear for instant update
+                // Don't clear cache - causes flickering
               });
-              print("✅ UI refreshed INSTANTLY for message: $tempId");
             }
           });
         }
@@ -401,16 +431,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           .where((msg) => msg.chatId == widget.chatId)
           .where((msg) => !_cachedMessages.any((m) => m.messageId == msg.messageId))
           .where((msg) {
-            final isTemp = msg.messageId.toString().startsWith('temp_');
-            if (isTemp) {
-              return msg.messageType == 'media' || msg.messageType == 'encrypted_media';
-            }
-            return false;
-          })
+        final isTemp = msg.messageId.toString().startsWith('temp_');
+        if (isTemp) {
+          return msg.messageType == 'media' || msg.messageType == 'encrypted_media';
+        }
+        return false;
+      })
           .toList();
-      
+
       if (pendingToAdd.isNotEmpty) {
-        final combined = [..._cachedMessages, ...pendingToAdd];
+        // ✅ FIX: Filter out non-anchor messages from pending temp messages
+        final filteredPending = <Message>[];
+        final processedGroups = <String>{};
+        final allMessages = [..._cachedMessages, ...pendingToAdd];
+        
+        for (final msg in pendingToAdd) {
+          if ((msg.groupId ?? '').isEmpty) {
+            filteredPending.add(msg);
+          } else {
+            final gid = msg.groupId!;
+            if (!processedGroups.contains(gid)) {
+              // Find anchor for this group from all messages
+              final allInGroup = allMessages.where((m) => m.groupId == gid).toList();
+              if (allInGroup.isNotEmpty) {
+                final anchorIndex = allInGroup
+                    .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
+                    .map((m) => m.imageIndex!)
+                    .fold(9999, (a, b) => a < b ? a : b);
+                final actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
+                
+                if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
+                  filteredPending.add(msg);
+                  processedGroups.add(gid);
+                }
+              }
+            }
+          }
+        }
+        
+        final combined = [..._cachedMessages, ...filteredPending];
         combined.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         return combined;
       }
@@ -421,15 +480,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final hiveMessages = _messageBox.values
         .where((msg) => msg.chatId == widget.chatId)
         .toList();
-    
+
     // ✅ Add pending temp messages that aren't in Hive yet (for instant display)
     final pendingMessages = _pendingTempMessages.values
         .where((msg) => msg.chatId == widget.chatId)
         .where((msg) => !hiveMessages.any((m) => m.messageId == msg.messageId))
         .toList();
-    
+
     final allMessages = [...hiveMessages, ...pendingMessages];
-    
+
     final messages = allMessages.where((msg) {
       // ✅ CRITICAL FIX: Show temp messages INSTANTLY (WhatsApp style - even without thumbnails)
       final isTemp = msg.messageId.toString().startsWith('temp_');
@@ -458,10 +517,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final msgId = m.messageId.toString();
       // ✅ CRITICAL: If message is in Hive (real ID), remove from pending (already synced)
       if (!m.messageId.toString().startsWith('temp_')) {
-        _pendingTempMessages.removeWhere((key, value) => 
-          value.chatId == m.chatId &&
-          value.messageType == m.messageType &&
-          value.timestamp.difference(m.timestamp).inSeconds.abs() < 5
+        _pendingTempMessages.removeWhere((key, value) =>
+        value.chatId == m.chatId &&
+            value.messageType == m.messageType &&
+            value.timestamp.difference(m.timestamp).inSeconds.abs() < 5
         );
       } else if (_pendingTempMessages.containsKey(msgId)) {
         // ✅ If temp message is in Hive, prefer Hive version if it has more data
@@ -476,7 +535,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           continue;
         }
       }
-      
+
       if (!uniqueMessages.containsKey(msgId)) {
         uniqueMessages[msgId] = m;
       } else {
@@ -488,7 +547,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
     }
-    
+
     // ✅ CRITICAL: Add back pending temp messages that aren't in Hive yet (for instant display)
     for (final entry in _pendingTempMessages.entries) {
       if (!uniqueMessages.containsKey(entry.key)) {
@@ -518,15 +577,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final filtered = <Message>[];
+    // ✅ FIX: Track processed groupIds to prevent showing multiple collages
+    final processedGroups = <String>{};
+    
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid == null || gid.isEmpty) {
         filtered.add(m);
       } else {
-        final anchor = groupAnchors[gid] ?? 0;
-        if ((m.imageIndex ?? 0) == anchor) {
-          filtered.add(m);
+        // ✅ FIX: Only show one message per group (the anchor)
+        if (!processedGroups.contains(gid)) {
+          final anchor = groupAnchors[gid] ?? 0;
+          // Find the anchor message for this group
+          final anchorMessage = deduplicatedMessages.firstWhere(
+            (msg) => msg.groupId == gid && (msg.imageIndex ?? 0) == anchor,
+            orElse: () => m,
+          );
+          if ((m.imageIndex ?? 0) == anchor && m.messageId == anchorMessage.messageId) {
+            filtered.add(m);
+            processedGroups.add(gid);
+          }
         }
+        // ✅ FIX: Completely hide non-anchor messages (no dots, no rendering)
+        // They are handled by the collage in the anchor message
       }
     }
 
@@ -1399,7 +1472,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final paths = result.map((f) => f.path).toList();
         // ✅ CRITICAL: Close keyboard immediately after selecting multiple images (WhatsApp style)
         _focusNode.unfocus();
-        
+
         await ChatService.sendMediaGroup(
           chatId: widget.chatId,
           receiverId: widget.otherUserId,
@@ -1505,7 +1578,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
         // ✅ CRITICAL: Close keyboard immediately after sending image (WhatsApp style)
         _focusNode.unfocus();
-        
+
         setState(() {
           _imageFile = null;
           _replyingToMessage = null;
@@ -1553,6 +1626,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final bool isSelected = selectedMessageIds.contains(msgId);
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
+
+    // ✅ FIX: Hide non-anchor messages in grouped media (prevent dots and duplication)
+    if ((msg.groupId ?? '').isNotEmpty) {
+      final String gid = msg.groupId!;
+      // Get all messages with this groupId
+      final List<Message> allGroupMessages = [];
+      allGroupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      allGroupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      
+      if (allGroupMessages.isNotEmpty) {
+        // Find minimum imageIndex (anchor)
+        final int anchorIndex = allGroupMessages
+            .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
+            .map((m) => m.imageIndex!)
+            .fold(9999, (a, b) => a < b ? a : b);
+        final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
+        
+        // ✅ FIX: Only render the anchor message, hide all others completely
+        if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
+          return const SizedBox.shrink(); // Completely hide non-anchor messages
+        }
+      }
+    }
 
     // ✅ CRITICAL: Show temp media messages instantly with loading indicator (WhatsApp style)
     final isTemp = msg.messageId.toString().startsWith('temp_');
@@ -1984,13 +2080,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildMediaMessage(Message msg, String mediaUrl, Color textColor) {
     if ((msg.groupId ?? '').isNotEmpty) {
       final String gid = msg.groupId!;
-      final List<Message> groupMessages = _messageBox.values
-          .where((m) => m.groupId == gid && m.chatId == widget.chatId)
-          .toList();
-      print('🧩 BuildMedia: msg=${msg.messageId} gid=$gid count=${groupMessages.length} idx=${msg.imageIndex}');
-      if (groupMessages.isNotEmpty) {
+      
+      // ✅ FIX: Get ALL messages (including pending temp ones) for the group
+      final List<Message> groupMessages = [];
+      // Add from Hive
+      groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      // Add from pending temp messages
+      groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      
+      // Remove duplicates by messageId
+      final uniqueGroupMessages = <String, Message>{};
+      for (final m in groupMessages) {
+        if (!uniqueGroupMessages.containsKey(m.messageId)) {
+          uniqueGroupMessages[m.messageId] = m;
+        } else {
+          // Keep the one with thumbnail if available
+          final existing = uniqueGroupMessages[m.messageId]!;
+          if (m.thumbnailBase64 != null && m.thumbnailBase64!.isNotEmpty &&
+              (existing.thumbnailBase64 == null || existing.thumbnailBase64!.isEmpty)) {
+            uniqueGroupMessages[m.messageId] = m;
+          }
+        }
+      }
+      final finalGroupMessages = uniqueGroupMessages.values.toList();
+      
+      print('🧩 BuildMedia: msg=${msg.messageId} gid=$gid count=${finalGroupMessages.length} idx=${msg.imageIndex}');
+      if (finalGroupMessages.isNotEmpty) {
         // ✅ FIX: Sort by imageIndex to maintain sender's sequence (same logic as _buildCollageForMessages)
-        groupMessages.sort((a, b) {
+        finalGroupMessages.sort((a, b) {
           final aIndex = a.imageIndex ?? -1;
           final bIndex = b.imageIndex ?? -1;
 
@@ -2007,15 +2124,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           return a.timestamp.compareTo(b.timestamp);
         });
         try {
-          final idxs = groupMessages.map((m) => m.imageIndex?.toString() ?? 'null').join(',');
+          final idxs = finalGroupMessages.map((m) => m.imageIndex?.toString() ?? 'null').join(',');
           print('🧩 Group ${gid} indices after sort: [$idxs]');
         } catch (_) {}
-        final int anchorIndex = groupMessages.first.imageIndex ?? 0; // smallest index present
-        print('🧩 Group ${gid} anchorIndex=$anchorIndex currentIdx=${msg.imageIndex ?? 0}');
-        if ((msg.imageIndex ?? 0) == anchorIndex) {
-          print('🧩 Rendering collage for group $gid at anchor message ${groupMessages.first.messageId}');
-          return _buildCollageForMessages(groupMessages, groupMessages.first);
+        final int anchorIndex = finalGroupMessages.map((m) => m.imageIndex ?? 9999).reduce((a, b) => a < b ? a : b);
+        final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
+        print('🧩 Group ${gid} anchorIndex=$actualAnchorIndex currentIdx=${msg.imageIndex ?? 0}');
+        if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
+          // Find the actual anchor message
+          final anchorMsg = finalGroupMessages.firstWhere(
+            (m) => (m.imageIndex ?? 0) == actualAnchorIndex,
+            orElse: () => finalGroupMessages.first,
+          );
+          print('🧩 Rendering collage for group $gid at anchor message ${anchorMsg.messageId}');
+          return _buildCollageForMessages(finalGroupMessages, anchorMsg);
         } else {
+          // ✅ FIX: Completely hide non-anchor messages - no rendering at all
           print('🧩 Non-anchor message ${msg.messageId} hidden for group $gid');
           return const SizedBox.shrink();
         }
@@ -2237,10 +2361,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final bool isRemote = url.startsWith('http');
       final bool isLocal = !isRemote;
-      
+
       // ✅ CRITICAL: WhatsApp style - Show low quality thumbnail FIRST, then high quality
       Widget imageWidget;
-      
+
       if (isLocal) {
         // ✅ CRITICAL: WhatsApp style - Show INSTANT low quality preview, then thumbnail, then high quality
         imageWidget = Stack(
@@ -2320,8 +2444,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
             return Container(color: Colors.grey[200]);
           },
-          fadeInDuration: const Duration(milliseconds: 200),
-          fadeOutDuration: const Duration(milliseconds: 100),
+          fadeInDuration: const Duration(milliseconds: 150), // ✅ FIX: Faster fade to reduce flickering
+          fadeOutDuration: const Duration(milliseconds: 50), // ✅ FIX: Faster fade out
           errorWidget: (context, url, error) {
             // ✅ Show thumbnail on error
             if (thumb != null && thumb.isNotEmpty) {
@@ -2488,11 +2612,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 onLongPress: () => _showMessageOptions(anchor),
                 child: SizedBox(
                   width: maxWidth,
-                  height: count == 1 
+                  height: count == 1
                       ? 300  // Single image - tall
-                      : count == 2 
-                          ? 200  // 2 images side by side - medium
-                          : 300,  // 3+ images - grid - tall
+                      : count == 2
+                      ? 200  // 2 images side by side - medium
+                      : 300,  // 3+ images - grid - tall
                   child: grid,
                 ),
               ),
@@ -2582,7 +2706,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             cacheHeight: 200,
             gaplessPlayback: true,
             frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-              // ✅ Show immediately - no opacity animation for instant preview
+              // ✅ FIX: Show immediately without flickering
+              if (wasSynchronouslyLoaded) return child;
+              if (frame == null) {
+                return child; // Show low quality immediately even while loading
+              }
               return child;
             },
           ),
@@ -2597,7 +2725,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 gaplessPlayback: true,
               ),
             ),
-          // ✅ STEP 3: Load high quality file on top (progressive - fade in)
+          // ✅ STEP 3: Load high quality file on top (progressive - smooth fade in)
           Image.file(
             File(mediaUrl),
             fit: BoxFit.cover,
@@ -2605,11 +2733,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             height: double.infinity,
             cacheWidth: 800, // ✅ High quality
             cacheHeight: 800,
+            gaplessPlayback: true, // ✅ FIX: Prevent flickering during load
             frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-              if (wasSynchronouslyLoaded) return child;
-              return AnimatedOpacity(
-                opacity: frame == null ? 0 : 1,
-                duration: const Duration(milliseconds: 300),
+              if (wasSynchronouslyLoaded || frame != null) return child;
+              // Only show placeholder while frame is null
+              return Opacity(
+                opacity: 0,
                 child: child,
               );
             },
@@ -2650,6 +2779,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // ✅ FIX: Transparent instead of grey
         return Container(color: Colors.transparent);
       },
+      fadeInDuration: const Duration(milliseconds: 150), // ✅ FIX: Faster fade to reduce flickering
+      fadeOutDuration: const Duration(milliseconds: 50), // ✅ FIX: Faster fade out
       errorWidget: (context, url, error) {
         // ✅ FIX: On error, show thumbnail if available
         if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {

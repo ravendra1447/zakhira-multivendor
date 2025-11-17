@@ -118,6 +118,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Message> _cachedMessages = [];
   bool _needsRefresh = true;
   Timer? _updateTimer;
+  
+  // ✅ CRITICAL: In-memory temp messages for INSTANT display (WhatsApp style)
+  // This ensures temp messages appear instantly before Hive sync completes
+  final Map<String, Message> _pendingTempMessages = {};
 
   // ✅ DUPLICATE PROTECTION
   final Set<String> _processedMessageIds = {};
@@ -224,11 +228,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
 
         if (existingMessage == null) {
-          // ✅ FIX: Only scroll if at bottom (prevent fluctuation)
+          // ✅ FIX: Only scroll if at bottom (prevent fluctuation/jumping)
           if (_shouldScrollToBottom) {
-            _scrollToBottomSmooth();
+            // ✅ CRITICAL: Prevent jumping at start - delay scroll slightly
+            Future.microtask(() {
+              if (mounted && _shouldScrollToBottom) {
+                _scrollToBottomSmooth();
+              }
+            });
           }
-          HapticFeedback.selectionClick();
+          
+          // ✅ Only haptic feedback for non-temp messages (prevent flickering)
+          if (!msg.messageId.toString().startsWith('temp_')) {
+            HapticFeedback.selectionClick();
+          }
 
           // ✅ FIX: Resolve header without blocking UI
           unawaited(_resolveHeader());
@@ -239,12 +252,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
         }
 
-        // ✅ FIX: Batch refresh to prevent fluctuation
+        // ✅ CRITICAL FIX: Instant refresh for temp messages (WhatsApp style)
+        final isTemp = msg.messageId.toString().startsWith('temp_');
         _needsRefresh = true;
-        if (mounted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() {});
+        
+        // ✅ CRITICAL: Clean up pending temp messages if we got a real message ID
+        // (This happens when server confirms temp message with real ID)
+        if (!isTemp) {
+          // Check if this real message might be replacing a pending temp message
+          // (by checking timestamp and content match)
+          _pendingTempMessages.removeWhere((tempId, tempMsg) {
+            // If real message matches temp message, remove the temp one
+            if (tempMsg.chatId == msg.chatId &&
+                tempMsg.messageType == msg.messageType &&
+                tempMsg.timestamp.difference(msg.timestamp).inSeconds.abs() < 5) {
+              print("🧹 Cleaned up pending temp message: $tempId (replaced by ${msg.messageId})");
+              return true;
+            }
+            return false;
           });
+        }
+        
+        if (mounted) {
+          if (isTemp) {
+            // ✅ CRITICAL: Store in-memory for instant display (before Hive sync)
+            _pendingTempMessages[msg.messageId] = msg;
+            // ✅ CRITICAL: Force IMMEDIATE synchronous setState (no callback delay - WhatsApp style)
+            // Use direct setState instead of scheduleFrameCallback for true instant display
+            if (mounted) {
+              setState(() {
+                _cachedMessages.clear(); // ✅ Force cache clear for instant update
+              });
+              print("⚡ INSTANT UI refresh (synchronous) for temp message: ${msg.messageId}");
+              // ✅ Also schedule a frame callback for thumbnail updates
+              WidgetsBinding.instance.scheduleFrameCallback((_) {
+                if (mounted) setState(() {});
+              });
+            }
+          } else {
+            // ✅ Batch refresh for non-temp messages (prevent fluctuation)
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() {});
+            });
+          }
         }
       }
     });
@@ -276,16 +326,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
-    // ✅ THUMBNAIL READY LISTENER - Refresh UI when thumbnail is updated
+    // ✅ CRITICAL FIX: THUMBNAIL READY LISTENER - Instant UI refresh (WhatsApp style)
     _thumbnailReadySubscription = ChatService.onThumbnailReady.listen((thumbnailData) {
       if (mounted) {
         final tempId = thumbnailData['tempId']?.toString();
         final message = thumbnailData['message'] as Message?;
+        final thumbnailBase64 = thumbnailData['thumbnailBase64'];
 
+        // ✅ CRITICAL: Update UI for temp messages (even without thumbnail initially)
         if (message != null && message.chatId == widget.chatId) {
-          print("🖼️ Thumbnail ready for message: $tempId, refreshing UI");
-          setState(() {
-            _needsRefresh = true;
+          // ✅ CRITICAL: Update in-memory pending messages
+          if (tempId != null && _pendingTempMessages.containsKey(tempId)) {
+            _pendingTempMessages[tempId] = message;
+          }
+
+
+          if (thumbnailBase64 != null && thumbnailBase64.toString().isNotEmpty) {
+            print("🖼️ Thumbnail ready for message: $tempId, refreshing UI INSTANTLY");
+          } else {
+            print("⚡ Temp message notification (no thumbnail yet): $tempId, refreshing UI INSTANTLY");
+          }
+          // ✅ CRITICAL: Force immediate frame rebuild (no delay)
+          WidgetsBinding.instance.scheduleFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _needsRefresh = true;
+                _cachedMessages.clear(); // ✅ Force cache clear for instant update
+              });
+              print("✅ UI refreshed INSTANTLY for message: $tempId");
+            }
           });
         }
       }
@@ -327,44 +396,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ OPTIMIZED: GET MESSAGES WITH CACHING
   List<Message> _getOptimizedMessages() {
     if (!_needsRefresh && _cachedMessages.isNotEmpty) {
+      // ✅ CRITICAL: Still include pending temp messages for instant display
+      final pendingToAdd = _pendingTempMessages.values
+          .where((msg) => msg.chatId == widget.chatId)
+          .where((msg) => !_cachedMessages.any((m) => m.messageId == msg.messageId))
+          .where((msg) {
+            final isTemp = msg.messageId.toString().startsWith('temp_');
+            if (isTemp) {
+              return msg.messageType == 'media' || msg.messageType == 'encrypted_media';
+            }
+            return false;
+          })
+          .toList();
+      
+      if (pendingToAdd.isNotEmpty) {
+        final combined = [..._cachedMessages, ...pendingToAdd];
+        combined.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        return combined;
+      }
       return _cachedMessages;
     }
 
-    final messages = _messageBox.values
+    // ✅ CRITICAL: Combine Hive messages with in-memory pending temp messages
+    final hiveMessages = _messageBox.values
         .where((msg) => msg.chatId == widget.chatId)
-        .where((msg) {
-          // ✅ FIX: Completely hide ALL temp_ messages on receiver side (no dot bubbles)
-          final isTemp = msg.messageId.toString().startsWith('temp_');
-          final userId = LocalAuthService.getUserId();
-          final isSender = msg.senderId == userId;
-          
-          if (isTemp) {
-            // ✅ FIX: Only show temp messages on sender side if uploading
-            if (isSender && (msg.messageType == 'media' || msg.messageType == 'encrypted_media')) {
-              final tempId = msg.messageId.toString();
-              final hasThumbnail = msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty;
-              final uploadProgress = _uploadProgress[tempId];
-              final isUploading = uploadProgress != null && uploadProgress < 100;
-              
-              // Only show on sender side if has thumbnail AND is uploading
-              return hasThumbnail && isUploading;
-            }
-            // ✅ FIX: Hide ALL temp messages on receiver side completely (no dot bubbles)
-            return false;
-          }
-          
-          // Show all non-temp messages
-          return true;
-        })
+        .toList();
+    
+    // ✅ Add pending temp messages that aren't in Hive yet (for instant display)
+    final pendingMessages = _pendingTempMessages.values
+        .where((msg) => msg.chatId == widget.chatId)
+        .where((msg) => !hiveMessages.any((m) => m.messageId == msg.messageId))
+        .toList();
+    
+    final allMessages = [...hiveMessages, ...pendingMessages];
+    
+    final messages = allMessages.where((msg) {
+      // ✅ CRITICAL FIX: Show temp messages INSTANTLY (WhatsApp style - even without thumbnails)
+      final isTemp = msg.messageId.toString().startsWith('temp_');
+      if (isTemp) {
+        // ✅ CRITICAL: Show temp media messages IMMEDIATELY (even without thumbnail)
+        // ✅ Thumbnails will load in background and update UI
+        if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
+          return true; // ✅ Show INSTANTLY - WhatsApp style (no thumbnail wait)
+        }
+        // Hide all temp text messages completely
+        return false;
+      }
+
+      // Show all non-temp messages
+      return true;
+    })
         .toList();
 
     // ✅ EFFICIENT: Sort only when needed
     messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
     // ✅ FIX: Deduplication - Remove duplicate messages by messageId
+    // ✅ CRITICAL: Also clean up pending temp messages that are now in Hive
     final Map<String, Message> uniqueMessages = {};
     for (final m in messages) {
       final msgId = m.messageId.toString();
+      // ✅ CRITICAL: If message is in Hive (real ID), remove from pending (already synced)
+      if (!m.messageId.toString().startsWith('temp_')) {
+        _pendingTempMessages.removeWhere((key, value) => 
+          value.chatId == m.chatId &&
+          value.messageType == m.messageType &&
+          value.timestamp.difference(m.timestamp).inSeconds.abs() < 5
+        );
+      } else if (_pendingTempMessages.containsKey(msgId)) {
+        // ✅ If temp message is in Hive, prefer Hive version if it has more data
+        final pending = _pendingTempMessages[msgId]!;
+        if ((m.thumbnailBase64 != null && m.thumbnailBase64!.isNotEmpty) ||
+            (m.mediaUrls != null && m.mediaUrls!.isNotEmpty)) {
+          // Use Hive version if it has data - remove from pending
+          _pendingTempMessages.remove(msgId);
+        } else {
+          // Use pending version if Hive version has no data yet
+          // Skip Hive version, will add pending version later
+          continue;
+        }
+      }
+      
       if (!uniqueMessages.containsKey(msgId)) {
         uniqueMessages[msgId] = m;
       } else {
@@ -377,65 +489,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
     
+    // ✅ CRITICAL: Add back pending temp messages that aren't in Hive yet (for instant display)
+    for (final entry in _pendingTempMessages.entries) {
+      if (!uniqueMessages.containsKey(entry.key)) {
+        uniqueMessages[entry.key] = entry.value;
+      }
+    }
+
     final deduplicatedMessages = uniqueMessages.values.toList();
-    
-    // ✅ FIX: STRONG DEDUPE GROUPED MEDIA - Only ONE collage per groupId
-    final Map<String, Message> groupAnchors = {}; // Store anchor message, not just index
-    final Set<String> processedGroupIds = {}; // Track processed groups
-    
+
+    // ✅ DEDUPE GROUPED MEDIA: show only anchor (smallest imageIndex present)
+    final Map<String, int> groupAnchors = {};
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid != null && gid.isNotEmpty) {
         final idx = m.imageIndex ?? 0;
-        
-        // ✅ FIX: Only keep ONE anchor message per group (smallest imageIndex)
-        if (!groupAnchors.containsKey(gid)) {
-          groupAnchors[gid] = m;
-        } else {
-          final existingAnchor = groupAnchors[gid]!;
-          final existingIdx = existingAnchor.imageIndex ?? 0;
-          if (idx < existingIdx) {
-            groupAnchors[gid] = m; // Update to smaller index
-          }
+        if (!groupAnchors.containsKey(gid) || idx < groupAnchors[gid]!) {
+          groupAnchors[gid] = idx;
         }
       }
     }
 
     if (groupAnchors.isNotEmpty) {
       try {
-        final anchorsLog = groupAnchors.entries.map((e) => '${e.key}:${e.value.imageIndex}').join(', ');
+        final anchorsLog = groupAnchors.entries.map((e) => '${e.key}:${e.value}').join(', ');
         print('🧩 Group anchors computed: $anchorsLog');
       } catch (_) {}
     }
 
-    // ✅ FIX: Filter messages - only show anchor for groups, hide all others
     final filtered = <Message>[];
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid == null || gid.isEmpty) {
-        // ✅ FIX: Non-group messages - check if they're part of a cluster
-        final cluster = _getContiguousMediaCluster(m);
-        if (cluster.length >= 2) {
-          // ✅ FIX: Only show if it's the first message in cluster (to prevent duplicates)
-          cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-          if (m.messageId != cluster.first.messageId) {
-            continue; // Skip non-anchor messages in cluster
-          }
-        }
         filtered.add(m);
       } else {
-        // ✅ FIX: Group messages - only show anchor (ONE collage per group)
-        final anchor = groupAnchors[gid];
-        if (anchor != null && m.messageId == anchor.messageId) {
-          // ✅ FIX: Only add if not already processed
-          if (!processedGroupIds.contains(gid)) {
-            filtered.add(m);
-            processedGroupIds.add(gid);
-            print('✅ Added anchor for group $gid: ${m.messageId}');
-          }
-        } else {
-          // ✅ FIX: Hide all non-anchor messages in group (no bubbles)
-          print('🚫 Hiding non-anchor message ${m.messageId} from group $gid');
+        final anchor = groupAnchors[gid] ?? 0;
+        if ((m.imageIndex ?? 0) == anchor) {
+          filtered.add(m);
         }
       }
     }
@@ -1110,35 +1200,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       //lowQualityUrl = _convertToFullUrl(lowQualityUrl);
       //highQualityUrl = _convertToFullUrl(highQualityUrl);
 
-      // ✅ FIX: STRONG duplicate check before creating message
-      final existingMsg = _messageBox.values.firstWhereOrNull(
-        (m) => m.messageId == idToProcess && m.chatId == widget.chatId,
-      );
-      
-      if (existingMsg != null) {
-        // ✅ FIX: Update existing message if needed (prevent duplication)
-        bool needsUpdate = false;
-        if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty &&
-            (existingMsg.thumbnailBase64 == null || existingMsg.thumbnailBase64!.isEmpty)) {
-          existingMsg.thumbnailBase64 = thumbnailBase64;
-          needsUpdate = true;
-        }
-        if (existingMsg.isDelivered == 0 && int.tryParse(data["is_delivered"]?.toString() ?? "0") == 1) {
-          existingMsg.isDelivered = 1;
-          needsUpdate = true;
-        }
-        if (existingMsg.isRead == 0 && int.tryParse(data["is_read"]?.toString() ?? "0") == 1) {
-          existingMsg.isRead = 1;
-          needsUpdate = true;
-        }
-        if (needsUpdate) {
-          await ChatService.saveMessageLocal(existingMsg);
-          _needsRefresh = true;
-          if (mounted) setState(() {});
-        }
-        return; // ✅ FIX: Don't create duplicate
-      }
-
       final msg = Message(
         messageId: idToProcess,
         chatId: int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0,
@@ -1153,6 +1214,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         receiverName: data["receiver_name"]?.toString(),
         senderPhoneNumber: data["sender_phone"]?.toString(),
         receiverPhoneNumber: data["receiver_phone"]?.toString(),
+        //lowQualityUrl: lowQualityUrl,
+        //highQualityUrl: highQualityUrl,
+        //blurHash: blurHash,
         thumbnailBase64: thumbnailBase64,
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
@@ -1168,13 +1232,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _startProgressiveLoading(msg);
       }
 
-      // ✅ FIX: Instant UI refresh for receiver side
       _needsRefresh = true;
-      if (mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) setState(() {});
-        });
-      }
 
     } catch (e) {
       print("❌ Error handling incoming data: $e");
@@ -1313,7 +1371,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           messageId: message.messageId,
           isLocalFile: isLocalFile,
           chatId: widget.chatId,
-          otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName, // ✅ FIX: Pass otherUserName
         ),
       ),
     );
@@ -1340,6 +1397,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await _sendMessage();
       } else {
         final paths = result.map((f) => f.path).toList();
+        // ✅ CRITICAL: Close keyboard immediately after selecting multiple images (WhatsApp style)
+        _focusNode.unfocus();
+        
         await ChatService.sendMediaGroup(
           chatId: widget.chatId,
           receiverId: widget.otherUserId,
@@ -1417,12 +1477,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // ✅ FIX: Prevent chat fluctuation when sending text
     final textBeforeSend = text;
-    
+
     setState(() {
       _isSending = true;
       _shouldScrollToBottom = true;
     });
-    
+
     // ✅ FIX: Clear text immediately to prevent UI fluctuation
     if (_imageFile == null) {
       _controller.clear();
@@ -1443,6 +1503,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           replyToMessageId: _replyingToMessage?.messageId,
         );
 
+        // ✅ CRITICAL: Close keyboard immediately after sending image (WhatsApp style)
+        _focusNode.unfocus();
+        
         setState(() {
           _imageFile = null;
           _replyingToMessage = null;
@@ -1491,21 +1554,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
 
-    // ✅ FIX: Completely hide ALL temp messages without thumbnail (no dot bubbles)
+    // ✅ CRITICAL: Show temp media messages instantly with loading indicator (WhatsApp style)
     final isTemp = msg.messageId.toString().startsWith('temp_');
     if (isTemp) {
-      // Only show temp media if it has thumbnail AND is uploading
       if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
-        final tempId = msg.messageId.toString();
-        final hasThumbnail = msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty;
-        final uploadProgress = _uploadProgress[tempId];
-        final isUploading = uploadProgress != null && uploadProgress < 100;
-        
-        if (!hasThumbnail || !isUploading) {
-          // Don't show temp media without thumbnail or if not uploading
-          return const SizedBox.shrink();
-        }
-        
+        // ✅ Show temp media messages immediately (even without thumbnail) with loading indicator
         return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
       }
       // Hide all temp text messages completely
@@ -1559,7 +1612,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (_selectionMode) {
                 _toggleSelection(msgId);
               } else {
-                _showMessageOptions(msg); // ✅ FIX: Show options on long press
+                _enterSelectionMode(msgId);
               }
             },
             child: Container(
@@ -1754,6 +1807,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ✅ INFO OPTION FOR MEDIA MESSAGES (WhatsApp style) - ADDED
+            if (msg.messageType == 'media' || msg.messageType == 'encrypted_media')
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Info'),
+                onTap: () {
+                  Navigator.pop(context); // Close bottom sheet
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MessageInfoScreen(
+                        message: msg,
+                        otherUserName: widget.otherUserName,
+                      ),
+                    ),
+                  );
+                },
+              ),
             // ✅ COPY OPTION - ADDED
             if (msg.messageType == 'text')
               ListTile(
@@ -1788,29 +1859,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _showDeleteConfirmation(msg.messageId);
               },
             ),
-            // ✅ FIX: Add Info option (WhatsApp style) - Navigate to full screen
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('Info'),
-              onTap: () {
-                Navigator.pop(context); // Close bottom sheet
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MessageInfoScreen(
-                      message: msg,
-                      otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName,
-                    ),
-                  ),
-                );
-              },
-            ),
           ],
         ),
       ),
     );
   }
-
 
   // ✅ MEDIA MESSAGE BUBBLE WITH PERSISTENT LOADING - SAME SIZE MAINTAINED
   Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
@@ -1838,7 +1891,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (_selectionMode) {
               _toggleSelection(msg.messageId);
             } else {
-              _showMessageOptions(msg); // ✅ FIX: Show options on long press
+              // ✅ FIX: For media messages, show options (including Info) - WhatsApp style
+              if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
+                _showMessageOptions(msg);
+              } else {
+                _enterSelectionMode(msg.messageId);
+              }
             }
           },
           child: Container(
@@ -1852,7 +1910,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                    padding: const EdgeInsets.all(6),
+                    // ✅ FIX: Reduce padding for grouped images (cleaner WhatsApp style)
+                    padding: (msg.groupId != null && msg.groupId!.isNotEmpty)
+                        ? const EdgeInsets.all(2)  // Minimal padding for grouped images
+                        : const EdgeInsets.all(6),  // Normal padding for single images
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.75,
                     ),
@@ -1932,16 +1993,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         groupMessages.sort((a, b) {
           final aIndex = a.imageIndex ?? -1;
           final bIndex = b.imageIndex ?? -1;
-          
+
           // If both have imageIndex, sort by imageIndex
           if (aIndex >= 0 && bIndex >= 0) {
             return aIndex.compareTo(bIndex);
           }
-          
+
           // If only one has imageIndex, prioritize it
           if (aIndex >= 0) return -1;
           if (bIndex >= 0) return 1;
-          
+
           // If neither has imageIndex, sort by timestamp (fallback)
           return a.timestamp.compareTo(b.timestamp);
         });
@@ -1960,9 +2021,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
     } else {
-      // ✅ FIX: Remove fallback cluster - only use groupId for grouping
-      // This prevents duplicate collages
-      print('🧩 No groupId for ${msg.messageId}, showing as single image');
+      final cluster = _getContiguousMediaCluster(msg);
+      print('🧩 Fallback cluster for ${msg.messageId}: size=${cluster.length}');
+      if (cluster.length >= 2) {
+        cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final Message anchor = cluster.first;
+        print('🧩 Fallback anchor=${anchor.messageId} for msg=${msg.messageId}');
+        if (msg.messageId == anchor.messageId) {
+          print('🧩 Rendering fallback collage for anchor ${anchor.messageId}');
+          return _buildCollageForMessages(cluster, anchor);
+        } else {
+          return const SizedBox.shrink();
+        }
+      }
     }
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
@@ -1975,6 +2046,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     return GestureDetector(
+      // ✅ FIX: Only click on image itself, not surrounding space
+      behavior: HitTestBehavior.opaque,
       onTap: () => _openImageFullScreen(msg),
       child: Container(
         constraints: BoxConstraints(
@@ -1982,32 +2055,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         child: Stack(
           children: [
+            // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.65,
-                height: 300, // ✅ SAME HEIGHT MAINTAINED
-                color: Colors.transparent,
-                child: _buildImageWithBlurHash(msg, mediaUrl),
+              child: InkWell(
+                onTap: () => _openImageFullScreen(msg),
+                child: Container(
+                  width: MediaQuery.of(context).size.width * 0.65,
+                  height: 300, // ✅ SAME HEIGHT MAINTAINED
+                  color: Colors.transparent,
+                  child: _buildImageWithBlurHash(msg, mediaUrl),
+                ),
               ),
             ),
 
+            // ✅ CRITICAL: WhatsApp-style loading indicator when uploading
             if (isMe && isUploading && uploadProgress != null)
-              Positioned(
-                top: 8,
-                right: 8,
+              Positioned.fill(
                 child: Container(
-                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
+                    color: Colors.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    '${uploadProgress.toInt()}%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          strokeWidth: 2,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${uploadProgress.toInt()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -2097,25 +2184,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final List<Message> groupMessages = _messageBox.values
         .where((m) => m.groupId == firstMsg.groupId)
         .toList();
-    
+
     // ✅ FIX: Sort by imageIndex to maintain sender's sequence (same logic as other functions)
     groupMessages.sort((a, b) {
       final aIndex = a.imageIndex ?? -1;
       final bIndex = b.imageIndex ?? -1;
-      
+
       // If both have imageIndex, sort by imageIndex
       if (aIndex >= 0 && bIndex >= 0) {
         return aIndex.compareTo(bIndex);
       }
-      
+
       // If only one has imageIndex, prioritize it
       if (aIndex >= 0) return -1;
       if (bIndex >= 0) return 1;
-      
+
       // If neither has imageIndex, sort by timestamp (fallback)
       return a.timestamp.compareTo(b.timestamp);
     });
-    
+
     return _buildCollageForMessages(groupMessages, firstMsg);
   }
 
@@ -2125,20 +2212,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     groupMessages.sort((a, b) {
       final aIndex = a.imageIndex ?? -1;
       final bIndex = b.imageIndex ?? -1;
-      
+
       // If both have imageIndex, sort by imageIndex
       if (aIndex >= 0 && bIndex >= 0) {
         return aIndex.compareTo(bIndex);
       }
-      
+
       // If only one has imageIndex, prioritize it
       if (aIndex >= 0) return -1;
       if (bIndex >= 0) return 1;
-      
+
       // If neither has imageIndex, sort by timestamp (fallback)
       return a.timestamp.compareTo(b.timestamp);
     });
-    
+
     final int count = groupMessages.length;
     final double maxWidth = MediaQuery.of(context).size.width * 0.65;
 
@@ -2151,79 +2238,125 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final bool isRemote = url.startsWith('http');
       final bool isLocal = !isRemote;
       
-      // ✅ FIX: Proper image fit - width full, height can be cut (like WhatsApp)
-      Widget imageWidget = isLocal
-          ? Image.file(
-              File(url),
-              fit: BoxFit.cover, // ✅ FIX: Cover to fill width, height can be cut
-              width: double.infinity,
-              height: double.infinity,
-              cacheWidth: 400,
-              cacheHeight: 400,
-            )
-          : CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.cover, // ✅ FIX: Cover to fill width properly
-              width: double.infinity,
-              height: double.infinity,
-              memCacheWidth: 400,
-              memCacheHeight: 400,
-              maxWidthDiskCache: 800,
-              maxHeightDiskCache: 800,
-              placeholder: (context, url) {
-                if (thumb != null && thumb.isNotEmpty) {
-                  try {
-                    final bytes = base64Decode(thumb);
-                    return Image.memory(
-                      bytes,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                      gaplessPlayback: true,
-                      cacheWidth: 200,
-                      cacheHeight: 200,
-                    );
-                  } catch (_) {}
-                }
-                return Container(color: Colors.transparent);
-              },
-              errorWidget: (context, url, error) {
-                if (thumb != null && thumb.isNotEmpty) {
-                  try {
-                    final bytes = base64Decode(thumb);
-                    return Image.memory(
-                      bytes,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                      cacheWidth: 200,
-                      cacheHeight: 200,
-                    );
-                  } catch (_) {}
-                }
-                return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
-              },
-            );
+      // ✅ CRITICAL: WhatsApp style - Show low quality thumbnail FIRST, then high quality
+      Widget imageWidget;
       
+      if (isLocal) {
+        // ✅ CRITICAL: WhatsApp style - Show INSTANT low quality preview, then thumbnail, then high quality
+        imageWidget = Stack(
+          fit: StackFit.expand,
+          children: [
+            // ✅ STEP 1: Show VERY low quality file preview INSTANTLY (no decode delay)
+            // This ensures instant display even without thumbnail
+            Image.file(
+              File(url),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              cacheWidth: 200, // ✅ VERY low quality for INSTANT display (no decode delay)
+              cacheHeight: 200,
+              gaplessPlayback: true,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                // ✅ Show immediately - no opacity animation for instant preview
+                return child;
+              },
+            ),
+            // ✅ STEP 2: Show low quality thumbnail if available (overlay)
+            if (thumb != null && thumb.isNotEmpty)
+              Positioned.fill(
+                child: Image.memory(
+                  base64Decode(thumb),
+                  fit: BoxFit.cover,
+                  cacheWidth: 150, // ✅ Low quality thumbnail
+                  cacheHeight: 150,
+                  gaplessPlayback: true,
+                ),
+              ),
+            // ✅ STEP 3: Load high quality file on top (progressive - fade in)
+            Image.file(
+              File(url),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              cacheWidth: 800, // ✅ High quality
+              cacheHeight: 800,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (wasSynchronouslyLoaded) return child;
+                return AnimatedOpacity(
+                  opacity: frame == null ? 0 : 1,
+                  duration: const Duration(milliseconds: 300),
+                  child: child,
+                );
+              },
+            ),
+          ],
+        );
+      } else {
+        // ✅ For remote URLs: Show thumbnail first, then full image
+        imageWidget = CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          memCacheWidth: 800, // ✅ High quality cache
+          memCacheHeight: 800,
+          maxWidthDiskCache: 1200,
+          maxHeightDiskCache: 1200,
+          placeholder: (context, url) {
+            // ✅ STEP 1: Show low quality thumbnail FIRST (WhatsApp style)
+            if (thumb != null && thumb.isNotEmpty) {
+              try {
+                final bytes = base64Decode(thumb);
+                return Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  gaplessPlayback: true,
+                  cacheWidth: 150, // ✅ Low quality for instant display
+                  cacheHeight: 150,
+                );
+              } catch (_) {}
+            }
+            return Container(color: Colors.grey[200]);
+          },
+          fadeInDuration: const Duration(milliseconds: 200),
+          fadeOutDuration: const Duration(milliseconds: 100),
+          errorWidget: (context, url, error) {
+            // ✅ Show thumbnail on error
+            if (thumb != null && thumb.isNotEmpty) {
+              try {
+                final bytes = base64Decode(thumb);
+                return Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  cacheWidth: 200,
+                  cacheHeight: 200,
+                );
+              } catch (_) {}
+            }
+            return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
+          },
+        );
+      }
+
       return GestureDetector(
-        onTap: onTap ?? () => _openImageFullScreen(m),
+        onTap: onTap ?? () => _openImageFullScreen(m), // ✅ FIX: Open specific image on tap
         child: ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: Container(
-            width: double.infinity,
-            height: double.infinity,
-            child: imageWidget, // ✅ FIX: Proper fit inside container
-          ),
+          child: imageWidget, // ✅ FIX: Direct widget - BoxFit.cover is already set
         ),
       );
     }
 
-    // ✅ FIX: Proper collage layout for 2, 3, 4+ images like WhatsApp
+    // ✅ FIX: Proper collage layout for 1, 2, 3, 4, 5+ images like WhatsApp (auto-adjust)
     Widget grid;
     if (count == 1) {
+      // ✅ 1 image - full width, no gaps
       grid = buildTile(groupMessages[0]);
     } else if (count == 2) {
-      // ✅ FIX: 2 images - side by side
+      // ✅ 2 images - side by side (equal width)
       grid = Row(
         children: [
           Expanded(child: buildTile(groupMessages[0])),
@@ -2232,7 +2365,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       );
     } else if (count == 3) {
-      // ✅ FIX: 3 images - 1 large on left, 2 stacked on right
+      // ✅ 3 images - 1 large on left, 2 stacked on right (WhatsApp style)
       grid = Row(
         children: [
           Expanded(
@@ -2252,7 +2385,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       );
     } else if (count == 4) {
-      // ✅ FIX: 4 images - 2x2 grid
+      // ✅ 4 images - 2x2 grid (perfect square)
       grid = Column(
         children: [
           Expanded(
@@ -2277,7 +2410,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       );
     } else {
-      // ✅ FIX: 5+ images - 2x2 grid with +N overlay
+      // ✅ 5+ images - 2x2 grid with +N overlay on last tile (WhatsApp style)
       grid = Column(
         children: [
           Expanded(
@@ -2300,9 +2433,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     fit: StackFit.expand,
                     children: [
                       buildTile(groupMessages[3]),
+                      // ✅ Show +N overlay if more than 4 images
                       if (count > 4)
                         Container(
-                          color: Colors.black45,
+                          color: Colors.black54,
                           child: Center(
                             child: Text(
                               '+${count - 4}',
@@ -2328,29 +2462,72 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final bool isMe = anchor.senderId == userId;
     final String time = _formatTime(anchor.timestamp);
 
+    // ✅ CRITICAL: Get upload progress for loading indicator (WhatsApp style)
+    final tempId = anchor.messageId.toString();
+    final uploadProgress = _uploadProgress[tempId];
+    final isUploading = uploadProgress != null && uploadProgress < 100;
+
     return GestureDetector(
+      // ✅ FIX: Only click on image itself, not surrounding space
+      behavior: HitTestBehavior.opaque,
       onTap: () => _openImageFullScreen(anchor),
+      // ✅ FIX: Long press on collage to show info (WhatsApp style)
+      onLongPress: () => _showMessageOptions(anchor),
       child: Container(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        // ✅ FIX: Add border to collage container (like before)
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: Colors.grey.withOpacity(0.3),
-            width: 1,
-          ),
         ),
         child: Stack(
           children: [
+            // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: maxWidth,
-                height: count == 1 ? 300 : (count <= 2 ? 200 : 300), // ✅ FIX: Dynamic height
-                child: grid,
+              child: InkWell(
+                onTap: () => _openImageFullScreen(anchor),
+                onLongPress: () => _showMessageOptions(anchor),
+                child: SizedBox(
+                  width: maxWidth,
+                  height: count == 1 
+                      ? 300  // Single image - tall
+                      : count == 2 
+                          ? 200  // 2 images side by side - medium
+                          : 300,  // 3+ images - grid - tall
+                  child: grid,
+                ),
               ),
             ),
-            // ✅ FIX: Timestamp on right side (WhatsApp style)
+            // ✅ CRITICAL: WhatsApp-style loading indicator when uploading
+            if (isMe && isUploading && uploadProgress != null)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          strokeWidth: 2,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${uploadProgress.toInt()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            // ✅ FIX: Remove dots/bubble from collage - only show time (no ticks)
             Positioned(
               bottom: 6,
               right: 6,
@@ -2360,16 +2537,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatTime(anchor.timestamp), // ✅ FIX: Use formatTime
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w400),
-                    ),
-                    if (isMe) const SizedBox(width: 4),
-                    if (isMe) _buildMessageTicks(anchor),
-                  ],
+                child: Text(
+                  time,
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w400),
                 ),
               ),
             ),
@@ -2379,7 +2549,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ OPTIMIZED WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET - SAME SIZE MAINTAINED
+  // ✅ CRITICAL: WhatsApp style progressive loading - Low quality FIRST, then high quality
   // ✅ FIXED: OPTIMIZED WHATSAPP-STYLE PROGRESSIVE IMAGE WIDGET WITH THUMBNAIL SUPPORT
   Widget _buildImageWithBlurHash(Message msg, String mediaUrl) {
     // ✅ CLEAN AND VALIDATE THUMBNAIL BASE64
@@ -2392,18 +2562,74 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
 
-    // ✅ FIX: Use CachedNetworkImage for better caching and no reload
+    final bool isRemote = mediaUrl.startsWith('http');
+    final bool isLocal = !isRemote;
+
+    // ✅ CRITICAL: WhatsApp style - Show INSTANT low quality preview, then thumbnail, then high quality
+    if (isLocal) {
+      // ✅ For local files: Show VERY low quality INSTANTLY, then thumbnail, then high quality
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          // ✅ STEP 1: Show VERY low quality file preview INSTANTLY (no decode delay)
+          // This ensures instant display even without thumbnail (WhatsApp style)
+          Image.file(
+            File(mediaUrl),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: 200, // ✅ VERY low quality for INSTANT display (no decode delay)
+            cacheHeight: 200,
+            gaplessPlayback: true,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              // ✅ Show immediately - no opacity animation for instant preview
+              return child;
+            },
+          ),
+          // ✅ STEP 2: Show low quality thumbnail if available (overlay)
+          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty)
+            Positioned.fill(
+              child: Image.memory(
+                base64Decode(thumbnailBase64),
+                fit: BoxFit.cover,
+                cacheWidth: 150, // ✅ Low quality thumbnail
+                cacheHeight: 150,
+                gaplessPlayback: true,
+              ),
+            ),
+          // ✅ STEP 3: Load high quality file on top (progressive - fade in)
+          Image.file(
+            File(mediaUrl),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: 800, // ✅ High quality
+            cacheHeight: 800,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded) return child;
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: const Duration(milliseconds: 300),
+                child: child,
+              );
+            },
+          ),
+        ],
+      );
+    }
+
+    // ✅ For remote URLs: Show thumbnail first (low quality), then full image (high quality)
     return CachedNetworkImage(
       imageUrl: mediaUrl,
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
-      memCacheWidth: 800, // ✅ FIX: Limit cache size for performance
+      memCacheWidth: 800, // ✅ High quality cache
       memCacheHeight: 800,
       maxWidthDiskCache: 1200,
       maxHeightDiskCache: 1200,
       placeholder: (context, url) {
-        // ✅ FIX: Show thumbnail immediately, no grey placeholder
+        // ✅ STEP 1: Show low quality thumbnail FIRST (WhatsApp style)
         if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
           try {
             final thumbnailBytes = base64Decode(thumbnailBase64);
@@ -2412,9 +2638,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               fit: BoxFit.cover,
               width: double.infinity,
               height: double.infinity,
-              gaplessPlayback: true, // Prevents flicker
-              cacheWidth: 200, // ✅ FIX: Optimized cache size
-              cacheHeight: 200,
+              gaplessPlayback: true,
+              cacheWidth: 150, // ✅ Low quality for instant display (WhatsApp style)
+              cacheHeight: 150,
             );
           } catch (e) {
             // Return transparent container instead of grey
@@ -2464,7 +2690,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               messageId: 'local_preview',
               isLocalFile: true,
               chatId: widget.chatId,
-              otherUserName: _resolvedTitle.isNotEmpty ? _resolvedTitle : widget.otherUserName, // ✅ FIX: Pass otherUserName
             ),
           ),
         );

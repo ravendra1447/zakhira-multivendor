@@ -289,14 +289,23 @@ class ChatService {
           return;
         }
 
-        // ✅ STRONG DUPLICATE CHECK
-        if (_processedMessageIds.contains(idToProcess)) {
-          print("⚠️ [new_message] Duplicate blocked: $idToProcess");
-          return;
-        }
+      // ✅ STRONG DUPLICATE CHECK (improved)
+      if (_processedMessageIds.contains(idToProcess)) {
+        print("⚠️ [new_message] Duplicate blocked: $idToProcess");
+        return;
+      }
+      
+      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+      final existingInDb = _messageBox.values.firstWhereOrNull(
+        (msg) => msg.messageId == idToProcess,
+      );
+      if (existingInDb != null) {
+        print("⚠️ [new_message] Message already exists in DB: $idToProcess");
+        return;
+      }
 
-        await _handleIncomingData(data, source: "new_message");
-        SoundUtils.playReceiveSound();
+      await _handleIncomingData(data, source: "new_message");
+      SoundUtils.playReceiveSound();
       } catch (e) {
         print("❌ [new_message] Error: $e");
       }
@@ -315,13 +324,22 @@ class ChatService {
           return;
         }
 
-        // ✅ STRONG DUPLICATE CHECK
-        if (_processedMessageIds.contains(idToProcess)) {
-          print("⚠️ [receive_message] Duplicate blocked: $idToProcess");
-          return;
-        }
+      // ✅ STRONG DUPLICATE CHECK (improved)
+      if (_processedMessageIds.contains(idToProcess)) {
+        print("⚠️ [receive_message] Duplicate blocked: $idToProcess");
+        return;
+      }
+      
+      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+      final existingInDb = _messageBox.values.firstWhereOrNull(
+        (msg) => msg.messageId == idToProcess,
+      );
+      if (existingInDb != null) {
+        print("⚠️ [receive_message] Message already exists in DB: $idToProcess");
+        return;
+      }
 
-        await _handleIncomingData(data, source: "receive_message", forceDelivered: true);
+      await _handleIncomingData(data, source: "receive_message", forceDelivered: true);
       } catch (e) {
         print("❌ [receive_message] Error: $e");
       }
@@ -340,13 +358,22 @@ class ChatService {
           return;
         }
 
-        // ✅ STRONG DUPLICATE CHECK
-        if (_processedMessageIds.contains(idToProcess)) {
-          print("⚠️ [media_message_ready] Duplicate blocked: $idToProcess");
-          return;
-        }
+      // ✅ STRONG DUPLICATE CHECK (improved)
+      if (_processedMessageIds.contains(idToProcess)) {
+        print("⚠️ [media_message_ready] Duplicate blocked: $idToProcess");
+        return;
+      }
+      
+      // ✅ FIX: Also check if message already exists in database (prevent duplicates)
+      final existingInDb = _messageBox.values.firstWhereOrNull(
+        (msg) => msg.messageId == idToProcess,
+      );
+      if (existingInDb != null) {
+        print("⚠️ [media_message_ready] Message already exists in DB: $idToProcess");
+        return;
+      }
 
-        await _handleIncomingData(data, source: "media_message_ready", forceDelivered: true);
+      await _handleIncomingData(data, source: "media_message_ready", forceDelivered: true);
       } catch (e) {
         print("❌ [media_message_ready] Error: $e");
       }
@@ -646,69 +673,69 @@ class ChatService {
       print("🎨 Generating thumbnail for: $mediaPath");
 
       if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
-        // ✅ FIX: Generate small thumbnail (5-10 KB) - 80x80, quality 40
+        // ✅ FIX: Generate ultra-small thumbnail (3-5 KB) for instant display - 60x60, quality 30
         final compressedThumbnail = await FlutterImageCompress.compressWithFile(
           mediaPath,
-          quality: 40, // ✅ Reduced to 40 for 5-10 KB size
-          minWidth: 80, // ✅ Reduced to 80 for smaller file size
-          minHeight: 80, // ✅ Reduced to 80 for smaller file size
+          quality: 30, // ✅ Reduced to 30 for 3-5 KB size - faster generation
+          minWidth: 60, // ✅ Reduced to 60 for faster processing
+          minHeight: 60, // ✅ Reduced to 60 for faster processing
         );
 
         if (compressedThumbnail != null) {
           // ✅ Additional check: if still too large, compress further
           var finalThumbnail = compressedThumbnail;
           var sizeKB = (compressedThumbnail.length / 1024);
-          
-          if (sizeKB > 10) {
-            // Recompress with even lower quality if still too large
+
+          if (sizeKB > 5) {
+            // Recompress with even lower quality if still too large (target 3-5 KB)
             final furtherCompressed = await FlutterImageCompress.compressWithList(
               compressedThumbnail,
-              quality: 30,
-              minWidth: 60,
-              minHeight: 60,
+              quality: 20, // ✅ Further reduced for faster processing
+              minWidth: 50,
+              minHeight: 50,
             );
             if (furtherCompressed != null) {
               finalThumbnail = furtherCompressed;
               sizeKB = (furtherCompressed.length / 1024);
             }
           }
-          
+
           thumbnailBase64 = base64Encode(finalThumbnail);
           print("✅ Generated image thumbnail: ${sizeKB.toStringAsFixed(2)} KB (${finalThumbnail.length} bytes)");
         }
       } else if (['mp4', 'mov', 'avi', 'mkv'].contains(ext)) {
-        // ✅ FIX: Generate small video thumbnail
+        // ✅ FIX: Generate ultra-small video thumbnail for instant display
         try {
           final thumbnailFile = await VideoCompress.getFileThumbnail(
             mediaPath,
-            quality: 50, // ✅ Reduced from 85 to 50
+            quality: 40, // ✅ Reduced from 50 to 40 for faster processing
           );
           final thumbnailBytes = await thumbnailFile.readAsBytes();
-          
-          // ✅ FIX: Further compress video thumbnail to 5-10 KB
+
+          // ✅ FIX: Further compress video thumbnail to 3-5 KB (target same as images)
           var compressedVideoThumbnail = await FlutterImageCompress.compressWithList(
             thumbnailBytes,
-            quality: 40,
-            minWidth: 80,
-            minHeight: 80,
+            quality: 30, // ✅ Reduced to 30 for faster processing
+            minWidth: 60, // ✅ Reduced for faster processing
+            minHeight: 60, // ✅ Reduced for faster processing
           );
-          
-          // ✅ Additional compression if still too large
-          if (compressedVideoThumbnail != null) {
-            var sizeKB = (compressedVideoThumbnail.length / 1024);
-            if (sizeKB > 10) {
-              final furtherCompressed = await FlutterImageCompress.compressWithList(
-                compressedVideoThumbnail,
-                quality: 30,
-                minWidth: 60,
-                minHeight: 60,
-              );
+
+            // ✅ Additional compression if still too large (target 3-5 KB)
+            if (compressedVideoThumbnail != null) {
+              var sizeKB = (compressedVideoThumbnail.length / 1024);
+              if (sizeKB > 5) {
+                final furtherCompressed = await FlutterImageCompress.compressWithList(
+                  compressedVideoThumbnail,
+                  quality: 20, // ✅ Further reduced for faster processing
+                  minWidth: 50,
+                  minHeight: 50,
+                );
               if (furtherCompressed != null) {
                 compressedVideoThumbnail = furtherCompressed;
                 sizeKB = (furtherCompressed.length / 1024);
               }
             }
-            
+
             thumbnailBase64 = base64Encode(compressedVideoThumbnail);
             print("✅ Generated video thumbnail: ${sizeKB.toStringAsFixed(2)} KB");
           } else {
@@ -810,7 +837,7 @@ class ChatService {
         _processedMessageIds.remove(idToProcess!);
       });
 
-      // ✅ STEP 2: Check if message already exists in database
+      // ✅ STEP 2: Check if message already exists in database (by ID or by groupId + imageIndex)
       final existingMessage = _messageBox.values.firstWhereOrNull(
             (msg) => msg.messageId == idToProcess,
       );
@@ -826,6 +853,22 @@ class ChatService {
           print("✅ Updated delivery status for existing message: $idToProcess");
         }
         return;
+      }
+
+      // ✅ CRITICAL: Check for duplicate grouped messages (prevent multiple collages)
+      final groupId = data["group_id"]?.toString();
+      var imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
+      if (groupId != null && groupId.isNotEmpty && imageIndex != null) {
+        final existingGroupMessage = _messageBox.values.firstWhereOrNull(
+          (msg) => msg.groupId == groupId &&
+              msg.imageIndex == imageIndex &&
+              msg.chatId == int.tryParse(data["chat_id"]?.toString() ?? "0") &&
+              msg.senderId == int.tryParse(data["sender_id"]?.toString() ?? "0"),
+        );
+        if (existingGroupMessage != null) {
+          print("⚠️ Duplicate grouped message blocked: groupId=$groupId, imageIndex=$imageIndex");
+          return;
+        }
       }
 
       // ✅ STEP 3: Handle tempId to messageId conversion
@@ -1027,10 +1070,10 @@ class ChatService {
 
       // ✅ STEP 10: CREATE AND SAVE NEW MESSAGE
       // ✅ FIX: Properly extract group_id, image_index, and total_images with debug logging
-      final String? groupId = data["group_id"]?.toString();
-      
+      //final String? groupId = data["group_id"]?.toString();
+
       // ✅ FIX: Handle image_index extraction - can be int or string
-      int? imageIndex;
+      //int? imageIndex;
       if (data["image_index"] != null) {
         final imageIndexValue = data["image_index"];
         if (imageIndexValue is int) {
@@ -1041,7 +1084,7 @@ class ChatService {
           imageIndex = int.tryParse(imageIndexValue.toString());
         }
       }
-      
+
       // ✅ FIX: Handle total_images extraction - can be int or string
       int? totalImages;
       if (data["total_images"] != null) {
@@ -1054,7 +1097,7 @@ class ChatService {
           totalImages = int.tryParse(totalImagesValue.toString());
         }
       }
-      
+
       // ✅ DEBUG: Log extracted values
       if (groupId != null || imageIndex != null || totalImages != null) {
         print("🧩 GROUP DATA EXTRACTED: groupId=$groupId, imageIndex=$imageIndex, totalImages=$totalImages");
@@ -1184,13 +1227,13 @@ class ChatService {
 
       // ✅ FIX: Use existing thumbnail if already generated (for media groups)
       String? thumbnailBase64 = existingTempMsg.thumbnailBase64;
-      
+
       // ✅ STEP 2: GENERATE THUMBNAIL ONLY IF NOT ALREADY PRESENT
       if (thumbnailBase64 == null || thumbnailBase64.isEmpty) {
         print("🎨 Generating thumbnail...");
         final mediaData = await _generateThumbnail(mediaPath);
         thumbnailBase64 = mediaData['thumbnailBase64'];
-        
+
         // ✅ FIX: Update temp message with thumbnail immediately
         if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
           existingTempMsg.thumbnailBase64 = thumbnailBase64;
@@ -1461,22 +1504,15 @@ class ChatService {
     final int total = mediaPaths.length;
     final baseTimestamp = DateTime.now();
 
-    // ✅ FIX: Generate thumbnails FIRST for instant UI display (parallel)
-    final List<Future<Map<String, dynamic>>> thumbnailFutures = [];
-    for (int i = 0; i < mediaPaths.length; i++) {
-      thumbnailFutures.add(_generateThumbnail(mediaPaths[i]));
-    }
-    
-    // ✅ FIX: Wait for all thumbnails in parallel
-    final thumbnailResults = await Future.wait(thumbnailFutures);
-
-    // ✅ FIX: Create all temp messages with thumbnails INSTANTLY (no delay)
+    // ✅ CRITICAL FIX: Create temp messages INSTANTLY FIRST (WhatsApp style - no waiting)
+    // ✅ Don't wait for thumbnails - show messages immediately, update thumbnails later
+    print("⚡ Creating temp messages INSTANTLY (WhatsApp style) - no thumbnail wait...");
     final List<Message> tempMessages = [];
     for (int i = 0; i < mediaPaths.length; i++) {
       final String path = mediaPaths[i];
       final String tempId = 'temp_${chatId}_${baseTimestamp.microsecondsSinceEpoch}_$i';
-      final thumbnailBase64 = thumbnailResults[i]['thumbnailBase64'];
 
+      // ✅ CRITICAL: Create message WITHOUT thumbnail FIRST (instant display)
       final tempMsg = Message(
         messageId: tempId,
         chatId: chatId,
@@ -1486,7 +1522,7 @@ class ChatService {
         messageType: 'media',
         isRead: 0,
         isDelivered: 0,
-        timestamp: baseTimestamp.add(Duration(milliseconds: i)), // ✅ FIX: Sequential timestamps
+        timestamp: baseTimestamp.add(Duration(milliseconds: i)),
         senderName: senderName,
         receiverName: receiverName,
         senderPhoneNumber: senderPhoneNumber,
@@ -1495,27 +1531,60 @@ class ChatService {
         groupId: groupId,
         imageIndex: i,
         totalImages: total,
-        thumbnailBase64: thumbnailBase64, // ✅ FIX: Add thumbnail immediately
+        thumbnailBase64: null, // ✅ Will be added later in background
       );
 
-      await saveMessageLocal(tempMsg);
+      // ✅ CRITICAL: Save and notify UI INSTANTLY (synchronous - no await)
+      saveMessageLocal(tempMsg); // ✅ This saves to Hive AND notifies UI instantly
+      // ✅ CRITICAL: Multiple notifications for instant UI update
+      _newMessageController.add(tempMsg); // ✅ Direct notification for instant display
+      _messageSentController.sink.add(tempMsg.messageId);
+      // ✅ CRITICAL: Also notify via thumbnail controller (even without thumbnail) for instant display
+      _thumbnailReadyController.sink.add({
+        'tempId': tempMsg.messageId,
+        'thumbnailBase64': null, // Will be updated later
+        'message': tempMsg,
+      });
       tempMessages.add(tempMsg);
+      print("⚡ INSTANT: Temp message $i/$total created and displayed: $tempId");
     }
 
-    // ✅ FIX: Notify UI ONCE with all messages for INSTANT display (no delay, no fluctuation)
-    // Send all at once for instant UI update
-    for (final tempMsg in tempMessages) {
-      _newMessageController.add(tempMsg);
-      _messageSentController.sink.add(tempMsg.messageId);
-    }
     SoundUtils.playSendSound();
-    
-    // ✅ FIX: Force immediate UI refresh for instant display
-    Future.microtask(() {
-      for (final tempMsg in tempMessages) {
-        _newMessageController.add(tempMsg);
-      }
-    });
+    print("✅ ${tempMessages.length} messages displayed INSTANTLY on sender side (WhatsApp style)");
+
+    // ✅ Now generate thumbnails in background and update messages (non-blocking)
+    print("🎨 Generating thumbnails in background (will update UI as ready)...");
+    Future.wait(
+      mediaPaths.asMap().entries.map((entry) async {
+        final i = entry.key;
+        final path = entry.value;
+        final tempMsg = tempMessages[i];
+        
+        try {
+          // Generate thumbnail
+          final thumbnailResult = await _generateThumbnail(path);
+          final thumbnailBase64 = thumbnailResult['thumbnailBase64'];
+          
+          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+            // Update message with thumbnail
+            tempMsg.thumbnailBase64 = thumbnailBase64;
+            _messageBox.put(tempMsg.messageId, tempMsg); // ✅ Sync update
+            
+            // ✅ Notify UI about thumbnail update
+            _thumbnailReadyController.sink.add({
+              'tempId': tempMsg.messageId,
+              'thumbnailBase64': thumbnailBase64,
+              'message': tempMsg,
+            });
+            _newMessageController.add(tempMsg); // ✅ Refresh UI with thumbnail
+            
+            print("✅ Thumbnail $i/$total generated and updated: ${tempMsg.messageId}");
+          }
+        } catch (e) {
+          print("❌ Thumbnail generation error for $i: $e");
+        }
+      }),
+    );
 
     // ✅ FIX: Send all media in PARALLEL (like WhatsApp)
     final List<Future<void>> uploadFutures = [];
@@ -1536,9 +1605,9 @@ class ChatService {
         totalImages: total,
       ));
     }
-    
-    // ✅ FIX: Process all uploads in parallel (don't wait)
-    unawaited(Future.wait(uploadFutures));
+
+    // ✅ FIX: Process all uploads in parallel (don't wait - fire and forget)
+    Future.wait(uploadFutures).catchError((e) => print("❌ Upload error: $e"));
   }
 
   // ------------------- MEDIA UPLOAD FUNCTIONS -------------------
@@ -1572,7 +1641,7 @@ class ChatService {
     if (userId == null) throw Exception("User ID not found");
 
     try {
-      // ✅ STEP 1: Create immediate temporary message for instant UI update
+      // ✅ CRITICAL FIX: Create temp message INSTANTLY (WhatsApp style - no waiting)
       final tempMsg = Message(
         messageId: tempId,
         chatId: chatId,
@@ -1588,17 +1657,46 @@ class ChatService {
         senderPhoneNumber: senderPhoneNumber,
         receiverPhoneNumber: receiverPhoneNumber,
         replyToMessageId: replyToMessageId,
+        thumbnailBase64: null, // ✅ Will be added in background
       );
 
-      await saveMessageLocal(tempMsg);
-      print("💾 Saved temporary media message with instant preview: $tempId");
-
-      // ✅ Notify UI immediately
-      _newMessageController.add(tempMsg);
+      // ✅ CRITICAL: Save and notify UI INSTANTLY (no await - synchronous)
+      saveMessageLocal(tempMsg); // ✅ This saves AND notifies UI instantly
+      // ✅ CRITICAL: Multiple notifications for instant UI update
+      _newMessageController.add(tempMsg); // ✅ Direct notification for instant display
       _messageSentController.sink.add(tempId);
+      // ✅ CRITICAL: Also notify via thumbnail controller (even without thumbnail) for instant display
+      _thumbnailReadyController.sink.add({
+        'tempId': tempMsg.messageId,
+        'thumbnailBase64': null, // Will be updated later
+        'message': tempMsg,
+      });
       SoundUtils.playSendSound();
+      print("⚡ INSTANT: Single image message displayed immediately: $tempId");
 
-      // ✅ STEP 2: Process and upload media in background WITH THUMBNAIL
+      // ✅ STEP 2: Generate thumbnail in background and update message
+      Future.microtask(() async {
+        try {
+          final thumbnailResult = await _generateThumbnail(mediaPath);
+          final thumbnailBase64 = thumbnailResult['thumbnailBase64'];
+          
+          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+            tempMsg.thumbnailBase64 = thumbnailBase64;
+            _messageBox.put(tempMsg.messageId, tempMsg);
+            _thumbnailReadyController.sink.add({
+              'tempId': tempMsg.messageId,
+              'thumbnailBase64': thumbnailBase64,
+              'message': tempMsg,
+            });
+            _newMessageController.add(tempMsg);
+            print("✅ Thumbnail generated and updated for single image: $tempId");
+          }
+        } catch (e) {
+          print("❌ Thumbnail generation error: $e");
+        }
+      });
+
+      // ✅ STEP 3: Process and upload media in background WITH THUMBNAIL
       _processAndSendMedia(
         mediaPath: mediaPath,
         chatId: chatId,
@@ -1816,24 +1914,38 @@ class ChatService {
 
   static Future<void> saveMessageLocal(Message message) async {
     try {
-      // ✅ FINAL SAFETY CHECK before saving
-      final existingMessage = _messageBox.values.firstWhereOrNull(
-            (msg) =>
-        msg.messageId == message.messageId ||
-            (msg.chatId == message.chatId &&
-                msg.senderId == message.senderId &&
-                msg.messageContent == message.messageContent &&
-                msg.timestamp.difference(message.timestamp).inSeconds.abs() < 3),
-      );
+      // ✅ FIX: Skip duplicate check for temp messages (for instant display)
+      final isTemp = message.messageId.toString().startsWith('temp_');
+      
+      if (!isTemp) {
+        // ✅ FINAL SAFETY CHECK before saving (only for non-temp messages)
+        final existingMessage = _messageBox.values.firstWhereOrNull(
+              (msg) =>
+          msg.messageId == message.messageId ||
+              (msg.chatId == message.chatId &&
+                  msg.senderId == message.senderId &&
+                  msg.messageContent == message.messageContent &&
+                  msg.timestamp.difference(message.timestamp).inSeconds.abs() < 3),
+        );
 
-      if (existingMessage != null) {
-        print("⚠️ DUPLICATE BLOCKED in saveMessageLocal: ${message.messageId}");
-        print("   Existing ID: ${existingMessage.messageId}");
-        return;
+        if (existingMessage != null) {
+          print("⚠️ DUPLICATE BLOCKED in saveMessageLocal: ${message.messageId}");
+          print("   Existing ID: ${existingMessage.messageId}");
+          return;
+        }
       }
 
-      await _messageBox.put(message.messageId, message);
-      print("💾 Message saved to local storage: ${message.messageId}");
+      // ✅ CRITICAL FIX: Save IMMEDIATELY and SYNCHRONOUSLY (no await for instant display)
+      _messageBox.put(message.messageId, message);
+      
+      // ✅ CRITICAL: For temp messages, notify UI IMMEDIATELY (WhatsApp style)
+      if (isTemp) {
+        // ✅ Direct notification for instant display - don't wait
+        _newMessageController.add(message);
+        print("⚡ INSTANT: Message saved to Hive and UI notified: ${message.messageId}");
+      } else {
+        print("💾 Message saved to local storage: ${message.messageId}");
+      }
     } catch (e) {
       print("❌ Error saving message locally: $e");
     }

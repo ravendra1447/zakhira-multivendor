@@ -254,14 +254,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
         // ✅ CRITICAL FIX: Instant refresh for temp messages (WhatsApp style)
         final isTemp = msg.messageId.toString().startsWith('temp_');
-        
+
         // ✅ FIX: Check if real message already exists to prevent duplication
         if (!isTemp) {
           // Check if this real message already exists in Hive
           final existingMsg = _messageBox.get(msg.messageId);
           if (existingMsg != null) {
             // Message already exists, just update it if needed
-            if (msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty && 
+            if (msg.thumbnailBase64 != null && msg.thumbnailBase64!.isNotEmpty &&
                 (existingMsg.thumbnailBase64 == null || existingMsg.thumbnailBase64!.isEmpty)) {
               existingMsg.thumbnailBase64 = msg.thumbnailBase64;
               await _messageBox.put(msg.messageId, existingMsg);
@@ -284,7 +284,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
             return; // Don't process duplicate
           }
-          
+
           // Check if this real message might be replacing a pending temp message
           _pendingTempMessages.removeWhere((tempId, tempMsg) {
             // If real message matches temp message (by content, type, timestamp), remove temp
@@ -444,7 +444,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final filteredPending = <Message>[];
         final processedGroups = <String>{};
         final allMessages = [..._cachedMessages, ...pendingToAdd];
-        
+
         for (final msg in pendingToAdd) {
           if ((msg.groupId ?? '').isEmpty) {
             filteredPending.add(msg);
@@ -459,7 +459,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     .map((m) => m.imageIndex!)
                     .fold(9999, (a, b) => a < b ? a : b);
                 final actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
-                
+
                 if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
                   filteredPending.add(msg);
                   processedGroups.add(gid);
@@ -468,7 +468,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
         }
-        
+
         final combined = [..._cachedMessages, ...filteredPending];
         combined.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         return combined;
@@ -579,27 +579,71 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final filtered = <Message>[];
     // ✅ FIX: Track processed groupIds to prevent showing multiple collages
     final processedGroups = <String>{};
-    
+
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
       if (gid == null || gid.isEmpty) {
-        filtered.add(m);
-      } else {
-        // ✅ FIX: Only show one message per group (the anchor)
-        if (!processedGroups.contains(gid)) {
-          final anchor = groupAnchors[gid] ?? 0;
-          // Find the anchor message for this group
-          final anchorMessage = deduplicatedMessages.firstWhere(
-            (msg) => msg.groupId == gid && (msg.imageIndex ?? 0) == anchor,
-            orElse: () => m,
-          );
-          if ((m.imageIndex ?? 0) == anchor && m.messageId == anchorMessage.messageId) {
-            filtered.add(m);
-            processedGroups.add(gid);
+        // ✅ FIX: Check if message is part of fallback cluster
+        final cluster = _getContiguousMediaCluster(m);
+        if (cluster.length >= 2) {
+          // ✅ FIX: Only show anchor message from cluster
+          cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+          final Message anchor = cluster.first;
+          if (m.messageId != anchor.messageId) {
+            // Hide non-anchor messages from cluster
+            continue; // Skip this message
           }
         }
-        // ✅ FIX: Completely hide non-anchor messages (no dots, no rendering)
-        // They are handled by the collage in the anchor message
+        filtered.add(m);
+      } else {
+        // ✅ FIX: Get all messages in this group to check count
+        final List<Message> groupMessages = [];
+        groupMessages.addAll(deduplicatedMessages.where((msg) => msg.groupId == gid && msg.chatId == widget.chatId));
+        
+        // ✅ FIX: Check if this is sender side (isMe) or receiver side
+        final userId = LocalAuthService.getUserId();
+        final bool isMe = m.senderId == userId;
+        
+        // ✅ FIX: On receiver side, ALWAYS group (never show individually)
+        if (!isMe && groupMessages.length >= 2) {
+          // Receiver side: only show anchor message - STRICT CHECK
+          final anchor = groupAnchors[gid] ?? 0;
+          if ((m.imageIndex ?? 0) == anchor && !processedGroups.contains(gid)) {
+            filtered.add(m);
+            processedGroups.add(gid);
+            print('✅ Receiver: Added anchor message ${m.messageId} for group $gid');
+          } else {
+            // ✅ FIX: Completely skip non-anchor messages on receiver side
+            print('🚫 Receiver: Hiding non-anchor message ${m.messageId} (idx=${m.imageIndex}, anchor=$anchor)');
+            continue; // Skip this message completely
+          }
+        } else {
+          // Sender side: Check if should show individually (progressive grouping)
+          if (_shouldShowIndividually(m)) {
+            // Show all messages individually when recent (while sending)
+            filtered.add(m);
+          } else if (groupMessages.length >= 2) {
+            // Grouping mode: only show anchor message
+            if (!processedGroups.contains(gid)) {
+              final anchor = groupAnchors[gid] ?? 0;
+              if ((m.imageIndex ?? 0) == anchor) {
+                filtered.add(m);
+                processedGroups.add(gid);
+                print('✅ Sender: Added anchor message ${m.messageId} for group $gid');
+              } else {
+                print('🚫 Sender: Hiding non-anchor message ${m.messageId} (idx=${m.imageIndex}, anchor=$anchor)');
+                continue; // Skip this message completely
+              }
+            } else {
+              // Already processed this group - skip all other messages
+              print('🚫 Sender: Group $gid already processed, hiding ${m.messageId}');
+              continue; // Skip this message completely
+            }
+          } else {
+            // Single message in group (not enough for collage yet)
+            filtered.add(m);
+          }
+        }
       }
     }
 
@@ -732,11 +776,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (bottomInset > 0.0 && _focusNode.hasFocus && _shouldScrollToBottom) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.easeOut,
+          );
+        }
       }
     });
   }
@@ -1273,6 +1319,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       //lowQualityUrl = _convertToFullUrl(lowQualityUrl);
       //highQualityUrl = _convertToFullUrl(highQualityUrl);
 
+      // ✅ FIX: Check for duplicate grouped messages on receiver side
+      final String? groupId = data["group_id"]?.toString();
+      final int? imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
+      final int? totalImages = data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : null;
+      
+      // ✅ DEBUG: Log group data
+      if (groupId != null && groupId.isNotEmpty) {
+        print("🧩 RECEIVED GROUP MESSAGE: groupId=$groupId, imageIndex=$imageIndex, totalImages=$totalImages, messageId=$idToProcess");
+      }
+      
+      if (groupId != null && groupId.isNotEmpty && imageIndex != null) {
+        // ✅ Check if message with same groupId and imageIndex already exists
+        final existingGroupedMsg = _messageBox.values.firstWhereOrNull(
+          (m) => m.groupId == groupId && 
+                 m.imageIndex == imageIndex && 
+                 m.chatId == int.tryParse(data["chat_id"]?.toString() ?? "0") &&
+                 m.messageId != idToProcess, // Don't match itself
+        );
+        
+        if (existingGroupedMsg != null) {
+          print("⚠️ Duplicate grouped message blocked on receiver: groupId=$groupId, imageIndex=$imageIndex, existingId=${existingGroupedMsg.messageId}");
+          return; // Skip duplicate
+        }
+        
+        // ✅ DEBUG: Count how many messages we have for this group
+        final chatIdForGroup = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
+        final groupCount = _messageBox.values.where((m) => m.groupId == groupId && m.chatId == chatIdForGroup).length;
+        print("🧩 Group $groupId now has $groupCount messages (expected: $totalImages)");
+      }
+      
+      // ✅ Also check if message with same ID already exists
+      final existingMsg = _messageBox.values.firstWhereOrNull(
+        (m) => m.messageId == idToProcess,
+      );
+      
+      if (existingMsg != null) {
+        print("⚠️ Duplicate message blocked on receiver: messageId=$idToProcess");
+        return; // Skip duplicate
+      }
+
       final msg = Message(
         messageId: idToProcess,
         chatId: int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0,
@@ -1294,8 +1380,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
         forwardedFrom: forwardedFrom,
-        groupId: data["group_id"]?.toString(),
-        imageIndex: data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null,
+        groupId: groupId,
+        imageIndex: imageIndex,
         totalImages: data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : null,
       );
 
@@ -1303,6 +1389,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
       if (messageType == 'media' && mounted && !_fullyLoadedMessages.contains(msg.messageId)) {
         _startProgressiveLoading(msg);
+      }
+
+      // ✅ FIX: On receiver side, if message has groupId, immediately check if grouping is needed
+      final userId = LocalAuthService.getUserId();
+      final bool isMe = msg.senderId == userId;
+      if (groupId != null && groupId.isNotEmpty && !isMe) {
+        // ✅ DEBUG: Log group status
+        final groupCount = _messageBox.values.where((m) => m.groupId == groupId && m.chatId == msg.chatId).length;
+        print("🧩 Receiver side: Group $groupId has $groupCount messages, triggering UI refresh");
+        
+        // Trigger immediate UI refresh to check grouping
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              // Force rebuild to check grouping
+              _needsRefresh = true;
+            });
+          }
+        });
       }
 
       _needsRefresh = true;
@@ -1628,24 +1733,60 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final bool isMe = msg.senderId == userId;
 
     // ✅ FIX: Hide non-anchor messages in grouped media (prevent dots and duplication)
+    // ✅ CRITICAL: This check happens BEFORE any rendering, so non-anchor messages never appear
     if ((msg.groupId ?? '').isNotEmpty) {
       final String gid = msg.groupId!;
       // Get all messages with this groupId
       final List<Message> allGroupMessages = [];
       allGroupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
       allGroupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
-      
-      if (allGroupMessages.isNotEmpty) {
+
+      if (allGroupMessages.length >= 2) {
+        // ✅ FIX: Only group if we have 2+ messages (collage)
         // Find minimum imageIndex (anchor)
         final int anchorIndex = allGroupMessages
             .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
             .map((m) => m.imageIndex!)
             .fold(9999, (a, b) => a < b ? a : b);
         final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
-        
-        // ✅ FIX: Only render the anchor message, hide all others completely
-        if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
-          return const SizedBox.shrink(); // Completely hide non-anchor messages
+
+        // ✅ FIX: On receiver side, ALWAYS hide non-anchor messages (strict check)
+        if (!isMe) {
+          // Receiver side: ALWAYS hide non-anchor messages - no exceptions, no selection, no interaction
+          if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
+            print('🚫 CRITICAL: Hiding non-anchor message on receiver: msgId=${msg.messageId}, idx=${msg.imageIndex}, anchor=$actualAnchorIndex, group=$gid');
+            return const SizedBox.shrink(); // Completely hide - no widget, no selection, nothing
+          }
+        } else {
+          // Sender side: check if should show individually
+          final bool shouldShowIndividually = _shouldShowIndividually(msg);
+          if (!shouldShowIndividually) {
+            // Grouping mode: hide non-anchor messages
+            if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
+              print('🚫 CRITICAL: Hiding non-anchor message on sender (grouped): msgId=${msg.messageId}, idx=${msg.imageIndex}, anchor=$actualAnchorIndex, group=$gid');
+              return const SizedBox.shrink(); // Completely hide - no widget, no selection, nothing
+            }
+          }
+          // If shouldShowIndividually is true, show all messages (while sending)
+        }
+      }
+    }
+    
+    // ✅ FIX: Also check fallback cluster for messages without groupId
+    final bool isMediaMessage = msg.messageType == 'media' ||
+        msg.messageType == 'encrypted_media' ||
+        (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
+        (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
+    
+    if (isMediaMessage && (msg.groupId ?? '').isEmpty) {
+      final cluster = _getContiguousMediaCluster(msg);
+      if (cluster.length >= 2) {
+        cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final Message anchor = cluster.first;
+        if (msg.messageId != anchor.messageId) {
+          // ✅ FIX: Hide non-anchor messages from fallback cluster
+          print('🚫 CRITICAL: Hiding non-anchor message from fallback cluster: msgId=${msg.messageId}, anchor=${anchor.messageId}');
+          return const SizedBox.shrink(); // Completely hide
         }
       }
     }
@@ -1654,20 +1795,252 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final isTemp = msg.messageId.toString().startsWith('temp_');
     if (isTemp) {
       if (msg.messageType == 'media' || msg.messageType == 'encrypted_media') {
-        // ✅ Show temp media messages immediately (even without thumbnail) with loading indicator
-        return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
+        // ✅ FIX: If message has groupId, it's part of a group - never show bubble
+        // ✅ Show individually without bubble while sending, or as collage after all sent
+        final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
+        final bool isTempCollage = _isCollageMessage(msg);
+        
+        if (hasGroupId || isTempCollage) {
+          // ✅ Render grouped images without bubble (individual or collage)
+          return GestureDetector(
+            onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+            onHorizontalDragUpdate: _handleSwipeUpdate,
+            onHorizontalDragEnd: _handleSwipeEnd,
+            behavior: HitTestBehavior.opaque,
+            child: Transform.translate(
+              offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+              child: RepaintBoundary(
+                key: key,
+                child: Align(
+                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                    ),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                        ),
+                        // ✅ SELECTION CHECKBOX for grouped images
+                        if (_selectionMode && isSelected)
+                          Positioned(
+                            top: 8,
+                            left: isMe ? null : 4,
+                            right: isMe ? 4 : null,
+                            child: GestureDetector(
+                              onTap: () => _toggleSelection(msgId),
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: isSelected ? Colors.green : Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? Colors.green : Colors.grey,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: isSelected
+                                    ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                    : null,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        } else {
+          // ✅ Show temp single media messages (not part of group) with bubble
+          return _buildMediaMessageBubble(msg, isMe: isMe, isSelected: isSelected);
+        }
       }
       // Hide all temp text messages completely
       return const SizedBox.shrink();
     }
 
-    final bool isMediaMessage = msg.messageType == 'media' ||
-        msg.messageType == 'encrypted_media' ||
-        (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
-        (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
+    // final bool isMediaMessage = msg.messageType == 'media' ||
+    //     msg.messageType == 'encrypted_media' ||
+    //     (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
+    //     (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
 
     if ((isMe && msg.isDeletedSender == 1) || (!isMe && msg.isDeletedReceiver == 1)) {
       return const SizedBox.shrink();
+    }
+
+    // ✅ FIX: If message has groupId, it's part of a group - never show bubble
+    // ✅ Show individually without bubble or as collage
+    final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
+    final bool isCollage = isMediaMessage && _isCollageMessage(msg);
+    
+    // ✅ FIX: Grouped images should never show bubbles - only show as collage or individually without bubble
+    if (hasGroupId && isMediaMessage) {
+      // ✅ Check if should show individually (while sending) or as collage (after all sent)
+      final bool shouldShowIndividually = _shouldShowIndividually(msg);
+      
+      if (shouldShowIndividually) {
+        // ✅ Show individually without bubble while sending
+        return GestureDetector(
+          onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+          onHorizontalDragUpdate: _handleSwipeUpdate,
+          onHorizontalDragEnd: _handleSwipeEnd,
+          behavior: HitTestBehavior.opaque,
+          child: Transform.translate(
+            offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+            child: RepaintBoundary(
+              key: key,
+              child: Align(
+                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.75,
+                  ),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                      ),
+                      // ✅ SELECTION CHECKBOX for grouped images
+                      if (_selectionMode && isSelected)
+                        Positioned(
+                          top: 8,
+                          left: isMe ? null : 4,
+                          right: isMe ? 4 : null,
+                          child: GestureDetector(
+                            onTap: () => _toggleSelection(msgId),
+                            child: Container(
+                              width: 20,
+                              height: 20,
+                              decoration: BoxDecoration(
+                                color: isSelected ? Colors.green : Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSelected ? Colors.green : Colors.grey,
+                                  width: 2,
+                                ),
+                              ),
+                              child: isSelected
+                                  ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                  : null,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      // ✅ Otherwise show as collage (after all sent) - no bubble
+      // ✅ For grouped images, always show without bubble (either individually or as collage)
+      return GestureDetector(
+        onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+        onHorizontalDragUpdate: _handleSwipeUpdate,
+        onHorizontalDragEnd: _handleSwipeEnd,
+        behavior: HitTestBehavior.opaque,
+        child: Transform.translate(
+          offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+          child: RepaintBoundary(
+            key: key,
+            child: Align(
+              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.70,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    if (isCollage) {
+      // ✅ FIX: Get group messages to check count
+      final String gid = msg.groupId ?? '';
+      final List<Message> groupMessages = [];
+      groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      
+      // ✅ FIX: Remove duplicates
+      final uniqueGroupMessages = <String, Message>{};
+      for (final m in groupMessages) {
+        if (!uniqueGroupMessages.containsKey(m.messageId)) {
+          uniqueGroupMessages[m.messageId] = m;
+        }
+      }
+      final finalGroupMessages = uniqueGroupMessages.values.toList();
+      
+      // ✅ FIX: Render collage without bubble - use ClipRRect with borderRadius
+      return GestureDetector(
+        onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+        onHorizontalDragUpdate: _handleSwipeUpdate,
+        onHorizontalDragEnd: _handleSwipeEnd,
+        behavior: HitTestBehavior.opaque,
+        child: Transform.translate(
+          offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+          child: RepaintBoundary(
+            key: key,
+            child: Align(
+              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.70,
+                ),
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                    ),
+                    // ✅ SELECTION CHECKBOX for collage
+                    if (_selectionMode && isSelected)
+                      Positioned(
+                        top: 8,
+                        left: isMe ? null : 4,
+                        right: isMe ? 4 : null,
+                        child: GestureDetector(
+                          onTap: () => _toggleSelection(msgId),
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.green : Colors.white,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isSelected ? Colors.green : Colors.grey,
+                                width: 2,
+                              ),
+                            ),
+                            child: isSelected
+                                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                : null,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
@@ -1963,6 +2336,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ MEDIA MESSAGE BUBBLE WITH PERSISTENT LOADING - SAME SIZE MAINTAINED
   Widget _buildMediaMessageBubble(Message msg, {required bool isMe, required bool isSelected}) {
+    // ✅ FIX: If message has groupId, it's part of a group - NEVER show bubble
+    // ✅ Show without bubble (individually or as collage)
+    final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
+    final bool isCollage = _isCollageMessage(msg);
+    
+    if (hasGroupId || isCollage) {
+      // ✅ Render grouped images without bubble (always, for both sender and receiver)
+      final String gid = msg.groupId ?? '';
+      final List<Message> groupMessages = [];
+      groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      
+      final uniqueGroupMessages = <String, Message>{};
+      for (final m in groupMessages) {
+        if (!uniqueGroupMessages.containsKey(m.messageId)) {
+          uniqueGroupMessages[m.messageId] = m;
+        }
+      }
+      final finalGroupMessages = uniqueGroupMessages.values.toList();
+      
+      return GestureDetector(
+        onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+        onHorizontalDragUpdate: _handleSwipeUpdate,
+        onHorizontalDragEnd: _handleSwipeEnd,
+        behavior: HitTestBehavior.opaque,
+        child: Transform.translate(
+          offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+          child: Align(
+            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.70,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
     final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
 
     return GestureDetector(
@@ -2011,7 +2428,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ? const EdgeInsets.all(2)  // Minimal padding for grouped images
                         : const EdgeInsets.all(6),  // Normal padding for single images
                     constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                      maxWidth: MediaQuery.of(context).size.width * 0.70, // ✅ FIX: Adjusted width
                     ),
                     decoration: BoxDecoration(
                       color: color,
@@ -2077,17 +2494,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ✅ Helper function to check if message should be shown as individual (not grouped yet)
+  bool _shouldShowIndividually(Message msg) {
+    if ((msg.groupId ?? '').isEmpty) return false;
+
+    final String gid = msg.groupId!;
+    final List<Message> groupMessages = [];
+    groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+    groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+
+    if (groupMessages.length < 2) return false;
+
+    // ✅ FIX: Check if this is sender side (isMe) or receiver side
+    final userId = LocalAuthService.getUserId();
+    final bool isMe = msg.senderId == userId;
+
+    // ✅ FIX: On receiver side, ALWAYS group immediately (never show individually)
+    // ✅ Only on sender side, show individually while sending (within 2 seconds)
+    if (!isMe) {
+      return false; // Receiver side: always group
+    }
+
+    // ✅ Sender side: Show individually only if messages are VERY recent (within 2 seconds)
+    final now = DateTime.now();
+    final recentMessages = groupMessages.where((m) {
+      final diff = now.difference(m.timestamp).inSeconds;
+      return diff < 2; // Very recent (within 2 seconds) - show individually while sending
+    }).length;
+
+    // ✅ If all messages are very recent (within 2 seconds), show individually on sender side
+    return recentMessages == groupMessages.length;
+  }
+
+  // ✅ Helper function to check if message is part of a collage
+  bool _isCollageMessage(Message msg) {
+    // Check if message has groupId
+    if ((msg.groupId ?? '').isNotEmpty) {
+      final String gid = msg.groupId!;
+      final List<Message> groupMessages = [];
+      groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+      groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
+
+      // ✅ FIX: Simple check - if groupMessages.length >= 2, it's a collage
+      bool isCollage = groupMessages.length >= 2;
+
+      if (isCollage) {
+        // ✅ FIX: Don't show as collage if should show individually (progressive grouping)
+        if (_shouldShowIndividually(msg)) {
+          return false;
+        }
+
+        // Only return true if this is the anchor message
+        final int anchorIndex = groupMessages
+            .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
+            .map((m) => m.imageIndex!)
+            .fold(9999, (a, b) => a < b ? a : b);
+        final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
+        return (msg.imageIndex ?? 0) == actualAnchorIndex;
+      }
+    }
+    
+    // Check if message is part of a cluster (fallback)
+    final cluster = _getContiguousMediaCluster(msg);
+    if (cluster.length >= 2) {
+      cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return msg.messageId == cluster.first.messageId;
+    }
+    
+    return false;
+  }
+
   Widget _buildMediaMessage(Message msg, String mediaUrl, Color textColor) {
     if ((msg.groupId ?? '').isNotEmpty) {
       final String gid = msg.groupId!;
-      
+
       // ✅ FIX: Get ALL messages (including pending temp ones) for the group
       final List<Message> groupMessages = [];
       // Add from Hive
       groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
       // Add from pending temp messages
       groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
-      
+
       // Remove duplicates by messageId
       final uniqueGroupMessages = <String, Message>{};
       for (final m in groupMessages) {
@@ -2103,7 +2590,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
       final finalGroupMessages = uniqueGroupMessages.values.toList();
-      
+
       print('🧩 BuildMedia: msg=${msg.messageId} gid=$gid count=${finalGroupMessages.length} idx=${msg.imageIndex}');
       if (finalGroupMessages.isNotEmpty) {
         // ✅ FIX: Sort by imageIndex to maintain sender's sequence (same logic as _buildCollageForMessages)
@@ -2133,7 +2620,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
           // Find the actual anchor message
           final anchorMsg = finalGroupMessages.firstWhere(
-            (m) => (m.imageIndex ?? 0) == actualAnchorIndex,
+                (m) => (m.imageIndex ?? 0) == actualAnchorIndex,
             orElse: () => finalGroupMessages.first,
           );
           print('🧩 Rendering collage for group $gid at anchor message ${anchorMsg.messageId}');
@@ -2180,15 +2667,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Stack(
           children: [
             // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: InkWell(
-                onTap: () => _openImageFullScreen(msg),
-                child: Container(
-                  width: MediaQuery.of(context).size.width * 0.65,
-                  height: 300, // ✅ SAME HEIGHT MAINTAINED
-                  color: Colors.transparent,
-                  child: _buildImageWithBlurHash(msg, mediaUrl),
+            // ✅ FIX: Add border for receiver side like WhatsApp
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: !isMe ? Border.all(color: Colors.grey.withOpacity(0.3), width: 1) : null,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  onTap: () => _openImageFullScreen(msg),
+                  child: Container(
+                    width: MediaQuery.of(context).size.width * 0.70,
+                    height: 350, // ✅ FIX: Increased height for better display
+                    color: Colors.transparent,
+                    child: _buildImageWithBlurHash(msg, mediaUrl),
+                  ),
                 ),
               ),
             ),
@@ -2351,7 +2845,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     final int count = groupMessages.length;
-    final double maxWidth = MediaQuery.of(context).size.width * 0.65;
+    final double maxWidth = MediaQuery.of(context).size.width * 0.70; // ✅ FIX: Adjusted width
 
     Widget buildTile(Message m, {VoidCallback? onTap}) {
       final String url = m.messageContent;
@@ -2481,7 +2975,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       grid = buildTile(groupMessages[0]);
     } else if (count == 2) {
       // ✅ 2 images - side by side (equal width)
+      // ✅ FIX: Add mainAxisSize to prevent overflow
       grid = Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Expanded(child: buildTile(groupMessages[0])),
           const SizedBox(width: 2),
@@ -2490,7 +2986,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } else if (count == 3) {
       // ✅ 3 images - 1 large on left, 2 stacked on right (WhatsApp style)
+      // ✅ FIX: Add mainAxisSize to prevent overflow
       grid = Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Expanded(
             flex: 2,
@@ -2499,6 +2997,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           const SizedBox(width: 2),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Expanded(child: buildTile(groupMessages[1])),
                 const SizedBox(height: 2),
@@ -2509,36 +3008,59 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       );
     } else if (count == 4) {
-      // ✅ 4 images - 2x2 grid (perfect square)
+      // ✅ 4 images - 2x2 grid (WhatsApp style: images fit within box, no width cropping)
+      // ✅ FIX: Use Expanded to prevent overflow and 4px overlay issue
       grid = Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(child: buildTile(groupMessages[0])),
-                const SizedBox(width: 2),
-                Expanded(child: buildTile(groupMessages[1])),
-              ],
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: buildTile(groupMessages[0]),
+                ),
+              ),
+              const SizedBox(width: 2),
+              Expanded(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: buildTile(groupMessages[1]),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 2),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(child: buildTile(groupMessages[2])),
-                const SizedBox(width: 2),
-                Expanded(child: buildTile(groupMessages[3])),
-              ],
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: buildTile(groupMessages[2]),
+                ),
+              ),
+              const SizedBox(width: 2),
+              Expanded(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: buildTile(groupMessages[3]),
+                ),
+              ),
+            ],
           ),
         ],
       );
     } else {
       // ✅ 5+ images - 2x2 grid with +N overlay on last tile (WhatsApp style)
+      // ✅ FIX: Add mainAxisSize to prevent overflow
       grid = Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Expanded(
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Expanded(child: buildTile(groupMessages[0])),
                 const SizedBox(width: 2),
@@ -2549,6 +3071,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           const SizedBox(height: 2),
           Expanded(
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Expanded(child: buildTile(groupMessages[2])),
                 const SizedBox(width: 2),
@@ -2603,20 +3126,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Stack(
+          clipBehavior: Clip.hardEdge,
           children: [
             // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
+              clipBehavior: Clip.hardEdge,
               child: InkWell(
                 onTap: () => _openImageFullScreen(anchor),
                 onLongPress: () => _showMessageOptions(anchor),
                 child: SizedBox(
                   width: maxWidth,
                   height: count == 1
-                      ? 300  // Single image - tall
+                      ? 350  // ✅ FIX: Single image - increased height
                       : count == 2
-                      ? 200  // 2 images side by side - medium
-                      : 300,  // 3+ images - grid - tall
+                      ? 220  // ✅ FIX: 2 images side by side - adjusted
+                      : count == 4
+                      ? maxWidth  // ✅ FIX: 4 images - 2x2 grid: square tiles, height equals width
+                      : 350,  // ✅ FIX: 3, 5+ images - increased height
                   child: grid,
                 ),
               ),
@@ -2932,7 +3459,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   String _formatTime(DateTime timestamp) {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    // ✅ FIX: 12-hour format with AM/PM
+    int hour = timestamp.hour;
+    int minute = timestamp.minute;
+    String period = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    if (hour == 0) hour = 12;
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
   }
 
   Widget _buildMediaError(String url, String error) {

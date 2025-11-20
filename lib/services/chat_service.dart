@@ -1586,28 +1586,39 @@ class ChatService {
       }),
     );
 
-    // ✅ FIX: Send all media in PARALLEL (like WhatsApp)
-    final List<Future<void>> uploadFutures = [];
+    // ✅ FIX: Send images ONE BY ONE sequentially (WhatsApp style)
+    // ✅ Send first image immediately, then wait for it to complete before sending next
+    print("📤 Sending ${mediaPaths.length} images one by one (WhatsApp style)...");
     for (int i = 0; i < mediaPaths.length; i++) {
-      uploadFutures.add(_processAndSendMedia(
-        mediaPath: mediaPaths[i],
-        chatId: chatId,
-        receiverId: receiverId,
-        tempId: tempMessages[i].messageId,
-        userId: userId,
-        senderName: senderName,
-        receiverName: receiverName,
-        senderPhoneNumber: senderPhoneNumber,
-        receiverPhoneNumber: receiverPhoneNumber,
-        replyToMessageId: replyToMessageId,
-        groupId: groupId,
-        imageIndex: i,
-        totalImages: total,
-      ));
+      print("📤 Sending image ${i + 1}/${mediaPaths.length}...");
+      try {
+        await _processAndSendMedia(
+          mediaPath: mediaPaths[i],
+          chatId: chatId,
+          receiverId: receiverId,
+          tempId: tempMessages[i].messageId,
+          userId: userId,
+          senderName: senderName,
+          receiverName: receiverName,
+          senderPhoneNumber: senderPhoneNumber,
+          receiverPhoneNumber: receiverPhoneNumber,
+          replyToMessageId: replyToMessageId,
+          groupId: groupId,
+          imageIndex: i,
+          totalImages: total,
+        );
+        print("✅ Image ${i + 1}/${mediaPaths.length} sent successfully");
+        
+        // ✅ Small delay between images (like WhatsApp) - 200ms
+        if (i < mediaPaths.length - 1) {
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+      } catch (e) {
+        print("❌ Error sending image ${i + 1}: $e");
+        // Continue with next image even if one fails
+      }
     }
-
-    // ✅ FIX: Process all uploads in parallel (don't wait - fire and forget)
-    Future.wait(uploadFutures).catchError((e) => print("❌ Upload error: $e"));
+    print("✅ All ${mediaPaths.length} images sent one by one");
   }
 
   // ------------------- MEDIA UPLOAD FUNCTIONS -------------------
@@ -1782,6 +1793,10 @@ class ChatService {
 
       await saveMessageLocal(tempMsg);
       print("💾 Saved temporary message locally with ID: $tempId");
+      
+      // ✅ CRITICAL: Notify UI immediately for instant display (WhatsApp style)
+      _newMessageController.add(tempMsg);
+      _messageSentController.sink.add(tempId);
 
       _socket!.emit("send_message", {
         "chat_id": chatId,

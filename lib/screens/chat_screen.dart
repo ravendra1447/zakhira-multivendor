@@ -138,6 +138,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DateTime _oldestMessageTime = DateTime.now();
   bool _hasMoreMessages = true;
 
+  // ✅ COLLAGE STATE MANAGEMENT - Fixed Slot System
+  // Track which groups have been built (collage created once)
+  final Set<String> _builtGroups = {};
+  // Fixed slots: groupId -> List of image URLs/null by index
+  final Map<String, List<String?>> _collageMap = {};
+  // Track if layout is frozen for a group
+  final Map<String, bool> _collageLayoutFrozen = {};
+  // Track total images expected for each group
+  final Map<String, int> _collageTotalImages = {};
+  // ✅ SOLUTION #1: Track which groups have been RENDERED (prevent duplicate rendering)
+  final Set<String> _renderedGroups = {};
+  // ✅ SOLUTION #2: Track which anchor messages have been rendered
+  final Set<String> _renderedAnchorMessages = {};
+  // ✅ Collage widget cache keyed by anchorId to reuse already built collages
+  final Map<String, Widget> _collageWidgetCache = {};
+  // ✅ Track filled slots count when caching collage widgets (for cache invalidation)
+  final Map<String, int> _cachedFilledSlotsCount = {};
+  // ✅ Track which groups already ran one-time slot sync inside build
+  final Set<String> _slotsSyncedForGroup = {};
+  // ✅ Track rendered anchors in fallback/cluster flows
+  final Set<String> _clusterRenderedAnchors = {};
+  // ✅ CLUSTER CACHE: Prevent reprocessing the same fallback cluster repeatedly
+  final Set<String> _clusterCache = {};
+  // ✅ STEP 3: Cluster debounce to prevent duplicate builds from socket hits
+  final Map<String, int> _clusterStamp = {};
+
   // ✅ PERMANENT FIX: Use Hive to store loaded status
   bool get _areMessagesLoaded {
     return _authBox.get('messages_loaded_${widget.chatId}', defaultValue: false) ?? false;
@@ -197,6 +223,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await _fetchMessages();
       } else {
         print("✅ Using previously loaded messages for chat ${widget.chatId}");
+        // ✅ Initialize fixed slots from existing messages
+        _initializeFixedSlotsFromExistingMessages();
         if (mounted) setState(() {});
       }
 
@@ -222,6 +250,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         Future.delayed(const Duration(seconds: 30), () {
           _processedMessageIds.remove(msg.messageId);
         });
+
+        // ✅ CRITICAL: Initialize fixed slots for temp messages with groupId
+        if ((msg.groupId ?? '').isNotEmpty &&
+            msg.imageIndex != null &&
+            msg.totalImages != null &&
+            msg.totalImages! > 0) {
+          final gid = msg.groupId!;
+          if (!_collageMap.containsKey(gid)) {
+            print("🧩 [TEMP] Creating fixed slots for group $gid with ${msg.totalImages} images");
+            _collageMap[gid] = List.filled(msg.totalImages!, null);
+            // ✅ FIX: Don't freeze immediately - only freeze when 4 slots are full
+            _collageLayoutFrozen[gid] = false;
+            _collageTotalImages[gid] = msg.totalImages!;
+          }
+
+          // ✅ Place temp message in fixed slot
+          final slotList = _collageMap[gid]!;
+          if (msg.imageIndex! >= 0 && msg.imageIndex! < slotList.length) {
+            if (slotList[msg.imageIndex!] == null) {
+              slotList[msg.imageIndex!] = msg.messageContent;
+              print("✅ [TEMP] Image placed in slot ${msg.imageIndex} for group $gid");
+            } else {
+              print("⚠️ [TEMP] Slot ${msg.imageIndex} already filled for group $gid - duplicate detected");
+              // Don't add duplicate temp message
+              return;
+            }
+          }
+        }
 
         final existingMessage = _messageBox.values.firstWhereOrNull(
               (existingMsg) => existingMsg.messageId == msg.messageId && existingMsg.chatId == widget.chatId,
@@ -312,20 +368,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (isTemp) {
             // ✅ CRITICAL: Store in-memory for instant display (before Hive sync)
             _pendingTempMessages[msg.messageId] = msg;
-            // ✅ FIX: Reduced setState calls to prevent flickering
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                setState(() {
-                  // Don't clear cache unnecessarily - causes flickering
-                });
-              }
-            });
+            // ✅ CRITICAL FIX: Batch setState calls to prevent flickering
+            // Use debounce to batch multiple updates together
+            _debounceSetState();
             print("⚡ INSTANT UI refresh for temp message: ${msg.messageId}");
           } else {
             // ✅ Batch refresh for non-temp messages (prevent fluctuation)
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) setState(() {});
-            });
+            _debounceSetState();
           }
         }
       }
@@ -377,15 +426,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           } else {
             print("⚡ Temp message notification (no thumbnail yet): $tempId");
           }
-          // ✅ FIX: Reduced setState to prevent flickering
+          // ✅ CRITICAL FIX: Use debounced setState to prevent flickering
           _needsRefresh = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              setState(() {
-                // Don't clear cache - causes flickering
-              });
-            }
-          });
+          _debounceSetState();
         }
       }
     });
@@ -507,8 +550,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     })
         .toList();
 
-    // ✅ EFFICIENT: Sort only when needed
-    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    // ✅ CRITICAL FIX: Sort by imageIndex for grouped messages, timestamp otherwise
+    // This ensures sender and receiver show images in SAME order
+    messages.sort((a, b) {
+      // ✅ If both messages belong to same group, sort by imageIndex
+      if (a.groupId != null && a.groupId == b.groupId &&
+          a.imageIndex != null && b.imageIndex != null) {
+        return a.imageIndex!.compareTo(b.imageIndex!);
+      }
+
+      // ✅ If both have imageIndex but different groups, sort by imageIndex first, then timestamp
+      if (a.imageIndex != null && b.imageIndex != null) {
+        final indexCompare = a.imageIndex!.compareTo(b.imageIndex!);
+        if (indexCompare != 0) return indexCompare;
+      }
+
+      // ✅ Fallback to timestamp sorting for non-grouped messages
+      return a.timestamp.compareTo(b.timestamp);
+    });
 
     // ✅ FIX: Deduplication - Remove duplicate messages by messageId
     // ✅ CRITICAL: Also clean up pending temp messages that are now in Hive
@@ -557,7 +616,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final deduplicatedMessages = uniqueMessages.values.toList();
 
-    // ✅ DEDUPE GROUPED MEDIA: show only anchor (smallest imageIndex present)
+    // ✅ CRITICAL: DEDUPE GROUPED MEDIA: show only anchor (smallest imageIndex present)
+    // ✅ This ensures consistent anchor detection across all functions
     final Map<String, int> groupAnchors = {};
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
@@ -572,13 +632,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (groupAnchors.isNotEmpty) {
       try {
         final anchorsLog = groupAnchors.entries.map((e) => '${e.key}:${e.value}').join(', ');
-        print('🧩 Group anchors computed: $anchorsLog');
+        print('🧩 [ANCHOR DETECTION] Group anchors computed: $anchorsLog');
       } catch (_) {}
     }
 
+    // ✅ CRITICAL: DON'T pre-mark anchors here - let them be marked during actual rendering
+    // ✅ Pre-marking causes issues where anchor is marked but collage never renders
+    // ✅ The filtering below will ensure only anchor messages are in the list
+
     final filtered = <Message>[];
-    // ✅ FIX: Track processed groupIds to prevent showing multiple collages
+    // ✅ CRITICAL: Track processed groupIds to prevent showing multiple collages
     final processedGroups = <String>{};
+    // ✅ CRITICAL: Track processed cluster anchors to prevent duplicates
+    final processedClusterAnchors = <String>{};
 
     for (final m in deduplicatedMessages) {
       final gid = m.groupId;
@@ -591,57 +657,64 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final Message anchor = cluster.first;
           if (m.messageId != anchor.messageId) {
             // Hide non-anchor messages from cluster
+            print('🚫 [FILTER] Hiding non-anchor cluster message ${m.messageId} (anchor=${anchor.messageId})');
             continue; // Skip this message
           }
+
+          // ✅ CRITICAL: Use cluster-level key to prevent duplicate cluster anchors
+          final List<String> clusterIds = cluster.map((msg) => msg.messageId.toString()).toList()..sort();
+          final String clusterKey = 'cluster_${clusterIds.join('_')}';
+
+          if (processedClusterAnchors.contains(clusterKey)) {
+            print('🚫 [FILTER] Cluster $clusterKey already processed, hiding ${m.messageId}');
+            continue; // Skip duplicate cluster
+          }
+          processedClusterAnchors.add(clusterKey);
+          print('✅ [FILTER] Added cluster anchor ${m.messageId} for cluster $clusterKey');
         }
         filtered.add(m);
       } else {
         // ✅ FIX: Get all messages in this group to check count
         final List<Message> groupMessages = [];
         groupMessages.addAll(deduplicatedMessages.where((msg) => msg.groupId == gid && msg.chatId == widget.chatId));
-        
+
         // ✅ FIX: Check if this is sender side (isMe) or receiver side
         final userId = LocalAuthService.getUserId();
         final bool isMe = m.senderId == userId;
-        
-        // ✅ FIX: On receiver side, ALWAYS group (never show individually)
-        if (!isMe && groupMessages.length >= 2) {
-          // Receiver side: only show anchor message - STRICT CHECK
-          final anchor = groupAnchors[gid] ?? 0;
-          if ((m.imageIndex ?? 0) == anchor && !processedGroups.contains(gid)) {
-            filtered.add(m);
-            processedGroups.add(gid);
-            print('✅ Receiver: Added anchor message ${m.messageId} for group $gid');
-          } else {
-            // ✅ FIX: Completely skip non-anchor messages on receiver side
-            print('🚫 Receiver: Hiding non-anchor message ${m.messageId} (idx=${m.imageIndex}, anchor=$anchor)');
-            continue; // Skip this message completely
-          }
+
+        // ✅ FIX: On receiver side, show ALL images sent by sender
+        if (!isMe) {
+          // Receiver side: Show ALL messages (all images) - no filtering, no anchor check
+          filtered.add(m);
+          print('✅ [FILTER] Receiver: Added message ${m.messageId} for group $gid (imageIndex=${m.imageIndex})');
+          // Don't mark group as processed on receiver side - allow all messages through
         } else {
+          // Sender side: Check if group already processed - STRICT CHECK
+          if (processedGroups.contains(gid)) {
+            print('🚫 [FILTER] Group $gid already processed, hiding ${m.messageId}');
+            continue; // Skip - group already has an anchor
+          }
           // Sender side: Check if should show individually (progressive grouping)
-          if (_shouldShowIndividually(m)) {
+          final bool shouldShowIndividually = _shouldShowIndividually(m);
+          if (shouldShowIndividually) {
             // Show all messages individually when recent (while sending)
             filtered.add(m);
-          } else if (groupMessages.length >= 2) {
+            print('✅ [FILTER] Sender: Added individual message ${m.messageId} for group $gid (progressive)');
+          } else if (groupMessages.length >= 4) {
             // Grouping mode: only show anchor message
-            if (!processedGroups.contains(gid)) {
-              final anchor = groupAnchors[gid] ?? 0;
-              if ((m.imageIndex ?? 0) == anchor) {
-                filtered.add(m);
-                processedGroups.add(gid);
-                print('✅ Sender: Added anchor message ${m.messageId} for group $gid');
-              } else {
-                print('🚫 Sender: Hiding non-anchor message ${m.messageId} (idx=${m.imageIndex}, anchor=$anchor)');
-                continue; // Skip this message completely
-              }
+            final anchor = groupAnchors[gid] ?? 0;
+            if ((m.imageIndex ?? 0) == anchor) {
+              filtered.add(m);
+              processedGroups.add(gid);
+              print('✅ [FILTER] Sender: Added anchor message ${m.messageId} for group $gid (anchor=$anchor)');
             } else {
-              // Already processed this group - skip all other messages
-              print('🚫 Sender: Group $gid already processed, hiding ${m.messageId}');
+              print('🚫 [FILTER] Sender: Hiding non-anchor message ${m.messageId} (idx=${m.imageIndex}, anchor=$anchor)');
               continue; // Skip this message completely
             }
           } else {
-            // Single message in group (not enough for collage yet)
+            // Single message in group (not enough for collage yet) - ALWAYS show on sender side
             filtered.add(m);
+            print('✅ [FILTER] Added single message ${m.messageId} for group $gid (waiting for more)');
           }
         }
       }
@@ -655,13 +728,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ IMPLEMENTED: FRAME-SYNCED AUTO-SCROLL
   void _scrollToBottomSmooth() {
+    if (!_scrollController.hasClients) return;
+
+    // ✅ Use multiple callbacks to ensure scroll happens after layout
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && _shouldScrollToBottom) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 150), // ✅ FIX: Faster scroll animation
-          curve: Curves.easeOut,
-        );
+        try {
+          final maxScroll = _scrollController.position.maxScrollExtent;
+          if (maxScroll > 0) {
+            _scrollController.animateTo(
+              maxScroll,
+              duration: const Duration(milliseconds: 150), // ✅ FIX: Faster scroll animation
+              curve: Curves.easeOut,
+            );
+          }
+        } catch (e) {
+          print("Scroll error in _scrollToBottomSmooth: $e");
+        }
       }
     });
   }
@@ -791,15 +874,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _jumpToBottom() {
     if (!_scrollController.hasClients) return;
 
+    // ✅ Use multiple callbacks to ensure scroll happens after layout
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && _shouldScrollToBottom) {
         try {
-          final maxScroll = _scrollController.position.maxScrollExtent;
-          if (maxScroll > 0) {
-            _scrollController.jumpTo(maxScroll);
-          }
+          // ✅ Wait for next frame to ensure layout is complete
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients && _shouldScrollToBottom) {
+              try {
+                final maxScroll = _scrollController.position.maxScrollExtent;
+                if (maxScroll > 0) {
+                  _scrollController.jumpTo(maxScroll);
+                }
+              } catch (e) {
+                print("Scroll error in _jumpToBottom: $e");
+              }
+            }
+          });
         } catch (e) {
-          print("Scroll error: $e");
+          print("Scroll error in _jumpToBottom (outer): $e");
         }
       }
     });
@@ -1260,6 +1353,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _needsRefresh = true;
       });
 
+      // ✅ Initialize fixed slots from loaded messages
+      _initializeFixedSlotsFromExistingMessages();
+
     } catch (e) {
       print("❌ Fetch messages error: $e");
       setState(() {
@@ -1267,6 +1363,269 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _needsRefresh = true;
       });
     }
+  }
+
+  // ✅ Initialize fixed slots from existing messages (for app restart)
+  void _initializeFixedSlotsFromExistingMessages() {
+    print("🔄 Initializing fixed slots from existing messages...");
+
+    // ✅ CRITICAL: Clear everything on initialization to allow fresh rendering
+    // ✅ But we'll mark anchors during initialization to prevent duplicates
+    _renderedGroups.clear();
+    _renderedAnchorMessages.clear();
+    _collageWidgetCache.clear();
+    _cachedFilledSlotsCount.clear(); // Also clear cached counts
+    _slotsSyncedForGroup.clear();
+    _clusterRenderedAnchors.clear();
+    _clusterCache.clear();
+    _clusterStamp.clear(); // ✅ Clear cluster debounce stamps
+    print("🧹 Cleared rendered groups, anchors, widget cache, slot syncs, cluster anchors, cluster cache, and cluster stamps for fresh initialization");
+
+    // Group messages by groupId (from both Hive and pending temp messages)
+    final Map<String, List<Message>> groupMap = {};
+
+    // ✅ Add messages from Hive
+    for (final msg in _messageBox.values) {
+      if (msg.chatId == widget.chatId &&
+          (msg.groupId ?? '').isNotEmpty &&
+          msg.imageIndex != null &&
+          msg.totalImages != null) {
+        final gid = msg.groupId!;
+        if (!groupMap.containsKey(gid)) {
+          groupMap[gid] = [];
+        }
+        groupMap[gid]!.add(msg);
+      }
+    }
+
+    // ✅ Add messages from pending temp messages
+    for (final msg in _pendingTempMessages.values) {
+      if (msg.chatId == widget.chatId &&
+          (msg.groupId ?? '').isNotEmpty &&
+          msg.imageIndex != null &&
+          msg.totalImages != null) {
+        final gid = msg.groupId!;
+        if (!groupMap.containsKey(gid)) {
+          groupMap[gid] = [];
+        }
+        // ✅ Only add if not already in map (avoid duplicates)
+        final exists = groupMap[gid]!.any((m) =>
+        m.messageId == msg.messageId ||
+            (m.imageIndex == msg.imageIndex && m.groupId == msg.groupId)
+        );
+        if (!exists) {
+          groupMap[gid]!.add(msg);
+        }
+      }
+    }
+
+    // Create fixed slots for each group
+    for (final entry in groupMap.entries) {
+      final groupId = entry.key;
+      final messages = entry.value;
+
+      if (messages.isEmpty) continue;
+
+      // ✅ Get totalImages from message with totalImages set, or calculate from unique imageIndexes
+      int? totalImages;
+      final messagesWithTotal = messages.where((m) => m.totalImages != null).toList();
+      if (messagesWithTotal.isNotEmpty) {
+        totalImages = messagesWithTotal.first.totalImages;
+      } else {
+        // Calculate from max imageIndex + 1
+        final maxIndex = messages
+            .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
+            .map((m) => m.imageIndex!)
+            .fold(-1, (a, b) => a > b ? a : b);
+        totalImages = maxIndex >= 0 ? maxIndex + 1 : messages.length;
+      }
+
+      if (totalImages == null || totalImages <= 0) continue;
+
+      // Create fixed slots if not already created
+      if (!_collageMap.containsKey(groupId)) {
+        print("🧩 Initializing fixed slots for group $groupId with $totalImages images");
+        _collageMap[groupId] = List.filled(totalImages, null);
+        // ✅ FIX: Don't freeze immediately - only freeze when 4 slots are full
+        _collageLayoutFrozen[groupId] = false;
+        _collageTotalImages[groupId] = totalImages;
+      }
+
+      // Fill slots with existing messages (prioritize non-temp messages)
+      final slotList = _collageMap[groupId]!;
+      for (final msg in messages) {
+        if (msg.imageIndex != null &&
+            msg.imageIndex! >= 0 &&
+            msg.imageIndex! < slotList.length) {
+          final url = msg.messageContent;
+          if (url.isNotEmpty) {
+            // ✅ If slot is empty, fill it
+            // ✅ If slot has temp message and this is real message, replace it
+            // ✅ If slot has real message and this is temp, keep real message
+            final isTemp = msg.messageId.toString().startsWith('temp_');
+            if (slotList[msg.imageIndex!] == null) {
+              slotList[msg.imageIndex!] = url;
+              print("✅ Restored slot ${msg.imageIndex} for group $groupId (${isTemp ? 'temp' : 'real'})");
+            } else if (!isTemp) {
+              // Real message replaces temp in slot
+              slotList[msg.imageIndex!] = url;
+              print("✅ Updated slot ${msg.imageIndex} for group $groupId with real message");
+            }
+          }
+        }
+      }
+
+      // ✅ CRITICAL: DON'T mark anchor during initialization - let it be marked during actual rendering
+      // ✅ Marking during initialization causes issues where anchor is marked but collage never renders
+      // ✅ The filtering in _getOptimizedMessages() will ensure only anchor messages are shown
+      print("✅ [INIT] Group $groupId initialized with ${messages.length} messages - anchor will be marked during rendering");
+    }
+
+    print("✅ Fixed slots initialized for ${groupMap.length} groups");
+  }
+
+  // ✅ CRITICAL FIX: Re-initialize slots for a specific group when new images arrive
+  // This ensures all images show immediately in real-time, same as when navigating back
+  void _reinitializeSlotsForGroup(String groupId, int chatId) {
+    print("🔄 [RE-INIT] Re-initializing slots for group $groupId (real-time update)");
+
+    // Get ALL messages for this group from both Hive and pending temp messages
+    final List<Message> groupMessages = [];
+
+    // Add from Hive
+    groupMessages.addAll(_messageBox.values.where((m) =>
+    m.chatId == chatId &&
+        m.groupId == groupId &&
+        m.imageIndex != null &&
+        m.totalImages != null
+    ));
+
+    // Add from pending temp messages
+    groupMessages.addAll(_pendingTempMessages.values.where((m) =>
+    m.chatId == chatId &&
+        m.groupId == groupId &&
+        m.imageIndex != null &&
+        m.totalImages != null
+    ));
+
+    if (groupMessages.isEmpty) {
+      print("⚠️ [RE-INIT] No messages found for group $groupId");
+      return;
+    }
+
+    print("🔄 [RE-INIT] Found ${groupMessages.length} messages for group $groupId");
+
+    // Get totalImages from message with totalImages set, or calculate
+    int? totalImages;
+    final messagesWithTotal = groupMessages.where((m) => m.totalImages != null).toList();
+    if (messagesWithTotal.isNotEmpty) {
+      totalImages = messagesWithTotal.first.totalImages;
+    } else {
+      final maxIndex = groupMessages
+          .where((m) => m.imageIndex != null && m.imageIndex! >= 0)
+          .map((m) => m.imageIndex!)
+          .fold(-1, (a, b) => a > b ? a : b);
+      totalImages = maxIndex >= 0 ? maxIndex + 1 : groupMessages.length;
+    }
+
+    if (totalImages == null || totalImages <= 0) {
+      print("⚠️ [RE-INIT] Invalid totalImages for group $groupId");
+      return;
+    }
+
+    // Create or ensure slots exist
+    if (!_collageMap.containsKey(groupId)) {
+      print("🧩 [RE-INIT] Creating fixed slots for group $groupId with $totalImages images");
+      _collageMap[groupId] = List.filled(totalImages, null);
+      // ✅ FIX: Don't freeze immediately - only freeze when 4 slots are full
+      _collageLayoutFrozen[groupId] = false;
+      _collageTotalImages[groupId] = totalImages;
+    }
+
+    // ✅ CRITICAL: Clear ALL caches and flags FIRST before filling slots
+    final String groupAnchorKey = 'group_${groupId}_anchor';
+
+    // Clear ALL tracking flags to allow fresh rebuild
+    _renderedGroups.remove(groupId);
+    _renderedAnchorMessages.remove(groupAnchorKey);
+    _slotsSyncedForGroup.remove(groupId);
+    _builtGroups.remove(groupId);
+
+    // Get all messages in group to clear cache for all anchors
+    final allMessagesInGroup = _messageBox.values
+        .where((m) => m.chatId == chatId && m.groupId == groupId)
+        .toList();
+    allMessagesInGroup.addAll(_pendingTempMessages.values
+        .where((m) => m.chatId == chatId && m.groupId == groupId));
+
+    // Clear cache for ALL anchor messages
+    for (final m in allMessagesInGroup) {
+      if ((m.imageIndex ?? 0) == 0) {
+        final anchorKey = m.messageId.toString();
+        _collageWidgetCache.remove(anchorKey);
+        _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+        _renderedAnchorMessages.remove(anchorKey);
+        print("🗑️ [RE-INIT] Cleared cache for anchor $anchorKey");
+      }
+    }
+
+    // Fill slots with ALL messages (prioritize non-temp messages)
+    final slotList = _collageMap[groupId]!;
+    int previousFilledCount = slotList.where((url) => url != null).length;
+
+    // ✅ Sort messages: real messages first, then temp messages
+    groupMessages.sort((a, b) {
+      final aIsTemp = a.messageId.toString().startsWith('temp_');
+      final bIsTemp = b.messageId.toString().startsWith('temp_');
+      if (aIsTemp && !bIsTemp) return 1; // Real messages first
+      if (!aIsTemp && bIsTemp) return -1;
+      return 0;
+    });
+
+    for (final msg in groupMessages) {
+      if (msg.imageIndex != null &&
+          msg.imageIndex! >= 0 &&
+          msg.imageIndex! < slotList.length) {
+        final url = msg.messageContent;
+        if (url.isNotEmpty) {
+          final isTemp = msg.messageId.toString().startsWith('temp_');
+          // ✅ Always update slot if it's empty or if this is a real message
+          if (slotList[msg.imageIndex!] == null || !isTemp) {
+            slotList[msg.imageIndex!] = url;
+            print("✅ [RE-INIT] Filled slot ${msg.imageIndex} for group $groupId (${isTemp ? 'temp' : 'real'})");
+          }
+        }
+      }
+    }
+
+    final filledSlots = slotList.where((url) => url != null).length;
+    print("✅ [RE-INIT] Group $groupId re-initialized: $filledSlots/$totalImages slots filled (was $previousFilledCount)");
+    print("✅ [RE-INIT] Slot status: ${slotList.asMap().entries.map((e) => '${e.key}:${e.value != null ? "filled" : "empty"}').join(', ')}");
+
+    // ✅ CRITICAL: Always force UI rebuild when slots are re-initialized (new images arrived)
+    print("🔄 [RE-INIT] Forcing UI rebuild for group $groupId ($filledSlots/$totalImages slots filled, was $previousFilledCount)");
+
+    // Clear message cache to force rebuild of message list
+    _cachedMessages.clear();
+    _needsRefresh = true;
+
+    // ✅ CRITICAL: Force immediate setState (don't wait for callbacks)
+    if (mounted) {
+      setState(() {
+        _needsRefresh = true;
+      });
+      print("🔄 [RE-INIT] Triggered immediate setState for group $groupId");
+    }
+
+    // ✅ Also trigger post-frame callback as backup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _needsRefresh = true;
+        });
+        print("🔄 [RE-INIT] Triggered setState (postFrame backup) for group $groupId");
+      }
+    });
   }
 
   Future<void> _handleIncomingData(dynamic data) async {
@@ -1323,40 +1682,174 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final String? groupId = data["group_id"]?.toString();
       final int? imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
       final int? totalImages = data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : null;
-      
+
       // ✅ DEBUG: Log group data
       if (groupId != null && groupId.isNotEmpty) {
         print("🧩 RECEIVED GROUP MESSAGE: groupId=$groupId, imageIndex=$imageIndex, totalImages=$totalImages, messageId=$idToProcess");
       }
-      
-      if (groupId != null && groupId.isNotEmpty && imageIndex != null) {
-        // ✅ Check if message with same groupId and imageIndex already exists
-        final existingGroupedMsg = _messageBox.values.firstWhereOrNull(
-          (m) => m.groupId == groupId && 
-                 m.imageIndex == imageIndex && 
-                 m.chatId == int.tryParse(data["chat_id"]?.toString() ?? "0") &&
-                 m.messageId != idToProcess, // Don't match itself
-        );
-        
-        if (existingGroupedMsg != null) {
-          print("⚠️ Duplicate grouped message blocked on receiver: groupId=$groupId, imageIndex=$imageIndex, existingId=${existingGroupedMsg.messageId}");
-          return; // Skip duplicate
-        }
-        
-        // ✅ DEBUG: Count how many messages we have for this group
-        final chatIdForGroup = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
-        final groupCount = _messageBox.values.where((m) => m.groupId == groupId && m.chatId == chatIdForGroup).length;
-        print("🧩 Group $groupId now has $groupCount messages (expected: $totalImages)");
-      }
-      
-      // ✅ Also check if message with same ID already exists
+
+      // ✅ CRITICAL: Check for duplicate by messageId first
       final existingMsg = _messageBox.values.firstWhereOrNull(
-        (m) => m.messageId == idToProcess,
+            (m) => m.messageId == idToProcess,
       );
-      
+
       if (existingMsg != null) {
         print("⚠️ Duplicate message blocked on receiver: messageId=$idToProcess");
         return; // Skip duplicate
+      }
+
+      // ✅ FIXED SLOT SYSTEM: Handle group images with index-based placement
+      if (groupId != null && groupId.isNotEmpty && imageIndex != null && totalImages != null && totalImages > 0) {
+        final chatIdForGroup = int.tryParse(data["chat_id"]?.toString() ?? "0") ?? 0;
+        final senderIdForGroup = int.tryParse(data["sender_id"]?.toString() ?? "0") ?? 0;
+        final userId = LocalAuthService.getUserId();
+        final bool isMe = senderIdForGroup == userId;
+
+        // ✅ STEP 1: Create fixed slots when first image arrives
+        if (!_collageMap.containsKey(groupId)) {
+          print("🧩 Creating fixed slots for group $groupId with $totalImages images");
+          _collageMap[groupId] = List.filled(totalImages, null);
+          // ✅ FIX: Don't freeze immediately - only freeze when 4 slots are full
+          _collageLayoutFrozen[groupId] = false;
+          _collageTotalImages[groupId] = totalImages;
+        }
+
+        // ✅ STEP 2: Check for duplicate by groupId + imageIndex + chatId (including temp messages)
+        // ✅ CRITICAL: Check both Hive messages AND pending temp messages
+        final existingGroupedMsg = _messageBox.values.firstWhereOrNull(
+              (m) => m.groupId == groupId &&
+              m.imageIndex == imageIndex &&
+              m.chatId == chatIdForGroup,
+        );
+
+        // ✅ CRITICAL: Also check pending temp messages
+        final existingTempMsg = _pendingTempMessages.values.firstWhereOrNull(
+              (m) => m.groupId == groupId &&
+              m.imageIndex == imageIndex &&
+              m.chatId == chatIdForGroup,
+        );
+
+        if (existingGroupedMsg != null) {
+          print("⚠️ Duplicate grouped message blocked: groupId=$groupId, imageIndex=$imageIndex, messageId=$idToProcess, existingId=${existingGroupedMsg.messageId}");
+
+          // ✅ If this is a real message replacing a temp message, update the temp message
+          if (existingGroupedMsg.messageId.toString().startsWith('temp_') && !idToProcess.toString().startsWith('temp_')) {
+            final oldTempId = existingGroupedMsg.messageId;
+            print("🔄 Updating temp message $oldTempId with real messageId $idToProcess");
+            existingGroupedMsg.messageId = idToProcess;
+            if (mediaUrl != null) existingGroupedMsg.messageContent = mediaUrl;
+            if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+              existingGroupedMsg.thumbnailBase64 = thumbnailBase64;
+            }
+            await ChatService.saveMessageLocal(existingGroupedMsg);
+            _pendingTempMessages.remove(oldTempId);
+
+            // ✅ STEP 2 FIX: If old temp was anchor and rendered, update rendered set
+            // ✅ Use groupId as key instead of messageId to prevent duplicate anchors
+            final String groupAnchorKey = 'group_${groupId}_anchor';
+            if (_renderedAnchorMessages.contains(groupAnchorKey)) {
+              print("🔄 Anchor already rendered for group $groupId - keeping existing anchor");
+            } else {
+              _renderedAnchorMessages.add(groupAnchorKey);
+              print("✅ Marked group $groupId anchor as rendered");
+            }
+
+            // ✅ Also update messageId-based tracking for cache
+            if (_renderedAnchorMessages.contains(oldTempId.toString())) {
+              _renderedAnchorMessages.remove(oldTempId.toString());
+            }
+            _renderedAnchorMessages.add(idToProcess.toString());
+            print("🔄 Updated rendered anchor from $oldTempId to $idToProcess (Hive update)");
+
+            _needsRefresh = true;
+            if (mounted) setState(() {});
+            return; // Don't create new message, just updated existing
+          }
+
+          return; // Skip duplicate
+        }
+
+        if (existingTempMsg != null && !idToProcess.toString().startsWith('temp_')) {
+          print("🔄 Found temp message for same groupId+imageIndex, updating it with real messageId");
+          // Update temp message with real messageId
+          final oldTempId = existingTempMsg.messageId;
+          existingTempMsg.messageId = idToProcess;
+          if (mediaUrl != null) existingTempMsg.messageContent = mediaUrl;
+          if (thumbnailBase64 != null && thumbnailBase64.isNotEmpty) {
+            existingTempMsg.thumbnailBase64 = thumbnailBase64;
+          }
+          _pendingTempMessages.remove(oldTempId);
+          _pendingTempMessages[idToProcess] = existingTempMsg;
+
+          // ✅ STEP 2 FIX: If old temp was anchor and rendered, update rendered set
+          // ✅ Use groupId as key instead of messageId to prevent duplicate anchors
+          final String groupAnchorKey = 'group_${groupId}_anchor';
+          if (_renderedAnchorMessages.contains(groupAnchorKey)) {
+            print("⛔ Duplicate anchor attempt blocked for group $groupId");
+            return; // ✅ BLOCK - anchor already exists for this group
+          } else {
+            _renderedAnchorMessages.add(groupAnchorKey);
+            print("✅ Marked group $groupId anchor as rendered");
+          }
+
+          // ✅ Also update messageId-based tracking for cache
+          if (_renderedAnchorMessages.contains(oldTempId.toString())) {
+            _renderedAnchorMessages.remove(oldTempId.toString());
+          }
+          _renderedAnchorMessages.add(idToProcess.toString());
+          print("🔄 Updated rendered anchor from $oldTempId to $idToProcess");
+
+          // ✅ Update fixed slot
+          final slotList = _collageMap[groupId]!;
+          if (imageIndex >= 0 && imageIndex < slotList.length) {
+            slotList[imageIndex] = mediaUrl ?? messageText;
+          }
+          // Continue to save the updated message
+        }
+
+        // ✅ STEP 3: Place image in fixed slot by index (NO DUPLICATE POSSIBLE)
+        final slotList = _collageMap[groupId]!;
+        if (imageIndex >= 0 && imageIndex < slotList.length) {
+          // ✅ CRITICAL: Check if slot is already filled - if yes, it's a duplicate
+          if (slotList[imageIndex] != null) {
+            print("⚠️ [FIXED SLOT] Slot $imageIndex already filled for group $groupId - DUPLICATE BLOCKED");
+            print("   - Existing slot URL: ${slotList[imageIndex]}");
+            print("   - New message URL: ${mediaUrl ?? messageText}");
+            print("   - New messageId: $idToProcess");
+
+            // ✅ Check if existing message exists in Hive or pending
+            final slotFilledMsg = _messageBox.values.firstWhereOrNull(
+                  (m) => m.groupId == groupId &&
+                  m.imageIndex == imageIndex &&
+                  m.chatId == chatIdForGroup,
+            ) ?? _pendingTempMessages.values.firstWhereOrNull(
+                  (m) => m.groupId == groupId &&
+                  m.imageIndex == imageIndex &&
+                  m.chatId == chatIdForGroup,
+            );
+
+            if (slotFilledMsg != null) {
+              print("⚠️ [FIXED SLOT] Message already exists for slot $imageIndex - BLOCKING DUPLICATE");
+              print("   - Existing messageId: ${slotFilledMsg.messageId}");
+              return; // ✅ BLOCK DUPLICATE - slot already has a message
+            }
+
+            // ✅ STEP 1 FIX: If slot is filled but no message exists, DON'T replace - it might be from another source
+            // ✅ Just block the duplicate instead of replacing
+            print("⚠️ [FIXED SLOT] Slot $imageIndex already filled but no message found in Hive - BLOCKING to prevent replacement");
+            print("   - Existing slot URL: ${slotList[imageIndex]}");
+            print("   - New message URL: ${mediaUrl ?? messageText}");
+            return; // ✅ BLOCK - don't replace filled slot
+          } else {
+            // Slot is empty, fill it
+            slotList[imageIndex] = mediaUrl ?? messageText;
+            print("✅ [FIXED SLOT] Image placed in slot $imageIndex for group $groupId");
+          }
+        }
+
+        // ✅ DEBUG: Count how many slots are filled
+        final filledSlots = slotList.where((url) => url != null).length;
+        print("🧩 Group $groupId: $filledSlots/$totalImages slots filled");
       }
 
       final msg = Message(
@@ -1385,6 +1878,47 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         totalImages: data["total_images"] != null ? int.tryParse(data["total_images"].toString()) : null,
       );
 
+      // ✅ CRITICAL: Final duplicate check using fixed slots BEFORE saving
+      // ✅ FIX: Only block if message with SAME messageId already exists (not just same slot)
+      if (groupId != null && groupId.isNotEmpty && imageIndex != null && _collageMap.containsKey(groupId)) {
+        final slotList = _collageMap[groupId]!;
+        if (imageIndex >= 0 && imageIndex < slotList.length && slotList[imageIndex] != null) {
+          // ✅ Check if message with SAME messageId already exists (strongest check)
+          final existingByMessageId = _messageBox.values.firstWhereOrNull(
+                (m) => m.messageId == msg.messageId,
+          ) ?? _pendingTempMessages.values.firstWhereOrNull(
+                (m) => m.messageId == msg.messageId,
+          );
+
+          if (existingByMessageId != null) {
+            print("⚠️ [FINAL CHECK] Duplicate blocked by messageId: ${msg.messageId}");
+            return; // ✅ BLOCK DUPLICATE - same messageId
+          }
+
+          // ✅ Also check if message with same groupId+imageIndex+chatId+senderId exists
+          final existingForSlot = _messageBox.values.firstWhereOrNull(
+                (m) => m.groupId == groupId &&
+                m.imageIndex == imageIndex &&
+                m.chatId == msg.chatId &&
+                m.senderId == msg.senderId &&
+                m.messageId != msg.messageId, // ✅ Different messageId
+          ) ?? _pendingTempMessages.values.firstWhereOrNull(
+                (m) => m.groupId == groupId &&
+                m.imageIndex == imageIndex &&
+                m.chatId == msg.chatId &&
+                m.senderId == msg.senderId &&
+                m.messageId != msg.messageId, // ✅ Different messageId
+          );
+
+          if (existingForSlot != null) {
+            print("⚠️ [FINAL CHECK] Duplicate blocked by fixed slot: groupId=$groupId, imageIndex=$imageIndex");
+            print("   - Existing messageId: ${existingForSlot.messageId}");
+            print("   - New messageId: ${msg.messageId}");
+            return; // ✅ BLOCK DUPLICATE - same slot with different messageId
+          }
+        }
+      }
+
       await ChatService.saveMessageLocal(msg);
 
       if (messageType == 'media' && mounted && !_fullyLoadedMessages.contains(msg.messageId)) {
@@ -1395,17 +1929,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final userId = LocalAuthService.getUserId();
       final bool isMe = msg.senderId == userId;
       if (groupId != null && groupId.isNotEmpty && !isMe) {
-        // ✅ DEBUG: Log group status
-        final groupCount = _messageBox.values.where((m) => m.groupId == groupId && m.chatId == msg.chatId).length;
-        print("🧩 Receiver side: Group $groupId has $groupCount messages, triggering UI refresh");
-        
-        // Trigger immediate UI refresh to check grouping
+        print("🔄 [INCOMING] New image arrived for group $groupId, imageIndex=$imageIndex, totalImages=$totalImages");
+
+        // ✅ CRITICAL FIX: Re-initialize slots for this group (same as when navigating back)
+        // This ensures ALL images show immediately in real-time, not just 2
+        _reinitializeSlotsForGroup(groupId, msg.chatId);
+
+        // ✅ CRITICAL: Also clear cache immediately to force rebuild
+        final String groupAnchorKey = 'group_${groupId}_anchor';
+        _renderedGroups.remove(groupId);
+        _renderedAnchorMessages.remove(groupAnchorKey);
+        _builtGroups.remove(groupId);
+
+        // Clear cache for all anchor messages in this group
+        final allGroupMsgs = _messageBox.values
+            .where((m) => m.groupId == groupId && m.chatId == msg.chatId)
+            .toList();
+        allGroupMsgs.addAll(_pendingTempMessages.values
+            .where((m) => m.groupId == groupId && m.chatId == msg.chatId));
+
+        for (final m in allGroupMsgs) {
+          if ((m.imageIndex ?? 0) == 0) {
+            final anchorKey = m.messageId.toString();
+            _collageWidgetCache.remove(anchorKey);
+            _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+            _renderedAnchorMessages.remove(m.messageId.toString());
+          }
+        }
+
+        print("🗑️ [INCOMING] Cleared all caches for group $groupId to force rebuild");
+
+        // ✅ CRITICAL: Clear message cache to force complete rebuild
+        _cachedMessages.clear();
+        _needsRefresh = true;
+
+        // ✅ CRITICAL: Force immediate setState to rebuild collage with all images
+        // Don't wait for callbacks - rebuild immediately
+        if (mounted) {
+          setState(() {
+            _needsRefresh = true;
+          });
+          print("🔄 [INCOMING] Triggered immediate setState for group $groupId");
+        }
+
+        // ✅ Also trigger post-frame callback as backup to ensure rebuild
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             setState(() {
-              // Force rebuild to check grouping
               _needsRefresh = true;
             });
+            print("🔄 [INCOMING] Triggered setState (postFrame backup) for group $groupId");
           }
         });
       }
@@ -1465,6 +2038,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ChatService.stopTyping(widget.chatId);
     }
     _typingTimer?.cancel();
+  }
+
+  // ✅ CRITICAL FIX: Debounce setState to prevent flickering from multiple rapid updates
+  void _debounceSetState() {
+    _updateTimer?.cancel();
+    _updateTimer = Timer(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        setState(() {
+          _needsRefresh = true;
+        });
+      }
+    });
   }
 
   // ✅ REPLY FUNCTIONALITY
@@ -1750,17 +2335,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             .fold(9999, (a, b) => a < b ? a : b);
         final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
 
-        // ✅ FIX: On receiver side, ALWAYS hide non-anchor messages (strict check)
+        // ✅ FIX: On receiver side, show ALL images (no filtering)
         if (!isMe) {
-          // Receiver side: ALWAYS hide non-anchor messages - no exceptions, no selection, no interaction
-          if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
-            print('🚫 CRITICAL: Hiding non-anchor message on receiver: msgId=${msg.messageId}, idx=${msg.imageIndex}, anchor=$actualAnchorIndex, group=$gid');
-            return const SizedBox.shrink(); // Completely hide - no widget, no selection, nothing
-          }
+          // Receiver side: Show ALL messages - allow all images to be displayed
+          print('✅ [BUBBLE] Receiver: Showing message ${msg.messageId} for group $gid (imageIndex=${msg.imageIndex})');
+          // Continue to normal rendering - show all messages
         } else {
           // Sender side: check if should show individually
           final bool shouldShowIndividually = _shouldShowIndividually(msg);
-          if (!shouldShowIndividually) {
+          final isTemp = msg.messageId.toString().startsWith('temp_');
+
+          // ✅ CRITICAL: Always show temp messages individually for instant display
+          if (isTemp) {
+            print('✅ [BUBBLE] Temp message ${msg.messageId} - showing individually (sender side)');
+            // Continue to normal rendering - show individually
+          } else if (!shouldShowIndividually) {
             // Grouping mode: hide non-anchor messages
             if ((msg.imageIndex ?? 0) != actualAnchorIndex) {
               print('🚫 CRITICAL: Hiding non-anchor message on sender (grouped): msgId=${msg.messageId}, idx=${msg.imageIndex}, anchor=$actualAnchorIndex, group=$gid');
@@ -1769,15 +2358,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
           // If shouldShowIndividually is true, show all messages (while sending)
         }
+
+        // ✅ If this is anchor message with 2+ images, show collage
+        if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
+          // ✅ CRITICAL: Check group-level anchor key to prevent duplicates
+          final String groupAnchorKey = 'group_${gid}_anchor';
+
+          // ✅ Check cache first - if cached, allow render
+          final String anchorKey = msg.messageId.toString();
+          if (_collageWidgetCache.containsKey(anchorKey)) {
+            print('✅ [BUBBLE CHECK] Group $gid anchor ${msg.messageId} has cached collage - allowing render');
+            // Continue to render
+          } else if (_renderedGroups.contains(gid) || _renderedAnchorMessages.contains(groupAnchorKey)) {
+            // ✅ If already rendered but no cache, it might be from initialization - allow rebuild
+            print('⚠️ [BUBBLE CHECK] Group $gid anchor ${msg.messageId} marked but no cache - allowing rebuild');
+            // Continue to render - will be handled in _buildMediaMessage
+          } else {
+            // ✅ Not rendered yet - mark it
+            _renderedGroups.add(gid);
+            _renderedAnchorMessages.add(groupAnchorKey);
+            print('✅ [ALLOWING RENDER] Group $gid, anchor ${msg.messageId}, count=${allGroupMessages.length} (bubble check)');
+          }
+        }
+      } else if (allGroupMessages.length == 1) {
+        // ✅ Show single image if only 1 image in group (not enough for collage)
+        print('🧩 Showing single image ${msg.messageId} (only 1 image in group, waiting for more)');
+        // Continue to normal rendering below
       }
     }
-    
+
     // ✅ FIX: Also check fallback cluster for messages without groupId
     final bool isMediaMessage = msg.messageType == 'media' ||
         msg.messageType == 'encrypted_media' ||
         (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
         (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
-    
+
     if (isMediaMessage && (msg.groupId ?? '').isEmpty) {
       final cluster = _getContiguousMediaCluster(msg);
       if (cluster.length >= 2) {
@@ -1799,7 +2414,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // ✅ Show individually without bubble while sending, or as collage after all sent
         final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
         final bool isTempCollage = _isCollageMessage(msg);
-        
+
         if (hasGroupId || isTempCollage) {
           // ✅ Render grouped images without bubble (individual or collage)
           return GestureDetector(
@@ -1835,6 +2450,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               child: Container(
                                 width: 20,
                                 height: 20,
+
                                 decoration: BoxDecoration(
                                   color: isSelected ? Colors.green : Colors.white,
                                   shape: BoxShape.circle,
@@ -1878,12 +2494,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ Show individually without bubble or as collage
     final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
     final bool isCollage = isMediaMessage && _isCollageMessage(msg);
-    
+
     // ✅ FIX: Grouped images should never show bubbles - only show as collage or individually without bubble
     if (hasGroupId && isMediaMessage) {
       // ✅ Check if should show individually (while sending) or as collage (after all sent)
       final bool shouldShowIndividually = _shouldShowIndividually(msg);
-      
+
       if (shouldShowIndividually) {
         // ✅ Show individually without bubble while sending
         return GestureDetector(
@@ -1969,14 +2585,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     }
-    
+
     if (isCollage) {
       // ✅ FIX: Get group messages to check count
       final String gid = msg.groupId ?? '';
       final List<Message> groupMessages = [];
       groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
       groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
-      
+
       // ✅ FIX: Remove duplicates
       final uniqueGroupMessages = <String, Message>{};
       for (final m in groupMessages) {
@@ -1985,7 +2601,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
       final finalGroupMessages = uniqueGroupMessages.values.toList();
-      
+
       // ✅ FIX: Render collage without bubble - use ClipRRect with borderRadius
       return GestureDetector(
         onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
@@ -2340,14 +2956,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ Show without bubble (individually or as collage)
     final bool hasGroupId = (msg.groupId ?? '').isNotEmpty;
     final bool isCollage = _isCollageMessage(msg);
-    
+
+    // ✅ FIX: On receiver side, if it's not a collage message, show individually (skip collage path)
+    if (!isMe && hasGroupId && !isCollage) {
+      // Receiver side non-anchor message: show individually with bubble
+      final color = Colors.white;
+      return GestureDetector(
+        onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
+        onHorizontalDragUpdate: _handleSwipeUpdate,
+        onHorizontalDragEnd: _handleSwipeEnd,
+        behavior: HitTestBehavior.opaque,
+        child: Transform.translate(
+          offset: Offset(_swipeMessage?.messageId == msg.messageId ? _swipeOffset : 0.0, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.70,
+              ),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
+              ),
+              child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+            ),
+          ),
+        ),
+      );
+    }
+
     if (hasGroupId || isCollage) {
       // ✅ Render grouped images without bubble (always, for both sender and receiver)
       final String gid = msg.groupId ?? '';
       final List<Message> groupMessages = [];
       groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
       groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
-      
+
       final uniqueGroupMessages = <String, Message>{};
       for (final m in groupMessages) {
         if (!uniqueGroupMessages.containsKey(m.messageId)) {
@@ -2355,7 +3002,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
       final finalGroupMessages = uniqueGroupMessages.values.toList();
-      
+
       return GestureDetector(
         onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
         onHorizontalDragUpdate: _handleSwipeUpdate,
@@ -2379,7 +3026,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     }
-    
+
     final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
 
     return GestureDetector(
@@ -2496,7 +3143,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ Helper function to check if message should be shown as individual (not grouped yet)
   bool _shouldShowIndividually(Message msg) {
-    if ((msg.groupId ?? '').isEmpty) return false;
+    // ✅ FIX: Always return FALSE for group images
+    if (msg.groupId != null && msg.groupId!.isNotEmpty) return false;
 
     final String gid = msg.groupId!;
     final List<Message> groupMessages = [];
@@ -2515,22 +3163,79 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return false; // Receiver side: always group
     }
 
-    // ✅ Sender side: Show individually only if messages are VERY recent (within 2 seconds)
+    // ✅ CRITICAL: Always show temp messages individually for instant display
+    final isTemp = msg.messageId.toString().startsWith('temp_');
+    if (isTemp) {
+      print('✅ [SHOW INDIVIDUALLY] Temp message ${msg.messageId} - showing individually');
+      return true; // ✅ Always show temp messages individually
+    }
+
+    // ✅ Sender side: Show individually if messages are recent (within 5 seconds)
     final now = DateTime.now();
     final recentMessages = groupMessages.where((m) {
       final diff = now.difference(m.timestamp).inSeconds;
-      return diff < 2; // Very recent (within 2 seconds) - show individually while sending
+      return diff < 5; // Recent (within 5 seconds) - show individually while sending
     }).length;
 
-    // ✅ If all messages are very recent (within 2 seconds), show individually on sender side
-    return recentMessages == groupMessages.length;
+    // ✅ If all messages are recent (within 5 seconds), show individually on sender side
+    final shouldShow = recentMessages == groupMessages.length;
+    if (shouldShow) {
+      print('✅ [SHOW INDIVIDUALLY] Recent messages in group $gid - showing individually');
+    }
+    return shouldShow;
   }
 
   // ✅ Helper function to check if message is part of a collage
+  // ✅ Helper function to get cached filled slots count for a group
+  int _getCachedFilledSlotsCount(String groupId) {
+    if (!_collageMap.containsKey(groupId)) return -1;
+    final slotList = _collageMap[groupId]!;
+    return slotList.where((url) => url != null).length;
+  }
+
+  // ✅ Helper function to get cached filled slots count for a group
+  // int _getCachedFilledSlotsCount(String groupId) {
+  //   if (!_collageMap.containsKey(groupId)) return -1;
+  //   final slotList = _collageMap[groupId]!;
+  //   return slotList.where((url) => url != null).length;
+  // }
+
+  // ✅ Generate key for message bubble that includes filled slots count for grouped messages
+  // This ensures that when slots are updated, the widget rebuilds
+  Key _getMessageKey(Message msg) {
+    if ((msg.groupId ?? '').isNotEmpty) {
+      final groupId = msg.groupId!;
+      final filledSlots = _getCachedFilledSlotsCount(groupId);
+      // Include filled slots count in key so widget rebuilds when slots change
+      return ValueKey('${msg.messageId}_slots_$filledSlots');
+    }
+    return ValueKey(msg.messageId);
+  }
+
   bool _isCollageMessage(Message msg) {
     // Check if message has groupId
     if ((msg.groupId ?? '').isNotEmpty) {
       final String gid = msg.groupId!;
+
+      // ✅ FIXED SLOT SYSTEM: Check if we have fixed slots and at least 2 filled
+      if (_collageMap.containsKey(gid)) {
+        final slotList = _collageMap[gid]!;
+        final filledSlots = slotList.where((url) => url != null).length;
+
+        // ✅ Show collage only after 2 images are received
+        if (filledSlots >= 2) {
+          // ✅ FIX: Don't show as collage if should show individually (progressive grouping)
+          if (_shouldShowIndividually(msg)) {
+            return false;
+          }
+
+          // Only return true if this is the anchor message (index 0)
+          return (msg.imageIndex ?? 0) == 0;
+        }
+        return false; // Not enough images yet
+      }
+
+      // ✅ FALLBACK: Old system for groups without fixed slots
       final List<Message> groupMessages = [];
       groupMessages.addAll(_messageBox.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
       groupMessages.addAll(_pendingTempMessages.values.where((m) => m.groupId == gid && m.chatId == widget.chatId));
@@ -2553,14 +3258,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return (msg.imageIndex ?? 0) == actualAnchorIndex;
       }
     }
-    
+
     // Check if message is part of a cluster (fallback)
     final cluster = _getContiguousMediaCluster(msg);
     if (cluster.length >= 2) {
       cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       return msg.messageId == cluster.first.messageId;
     }
-    
+
     return false;
   }
 
@@ -2568,6 +3273,251 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if ((msg.groupId ?? '').isNotEmpty) {
       final String gid = msg.groupId!;
 
+      // ✅ FIXED SLOT SYSTEM: Use fixed slots if available
+      if (_collageMap.containsKey(gid)) {
+        final slotList = _collageMap[gid]!;
+        final totalImages = _collageTotalImages[gid] ?? slotList.length;
+        final filledSlots = slotList.where((url) => url != null).length;
+
+        // ✅ FIX: Only use frozen layout if 4 slots are full
+        final bool isFrozen = _collageLayoutFrozen[gid] == true && filledSlots == 4;
+
+        // ✅ CRITICAL FIX: Always re-sync slots from actual messages to show all images immediately
+        // This ensures that when new images arrive, they are immediately visible in the collage
+        final allGroupMsgs = _messageBox.values
+            .where((m) => m.groupId == gid && m.chatId == widget.chatId)
+            .toList();
+        allGroupMsgs.addAll(_pendingTempMessages.values
+            .where((m) => m.groupId == gid && m.chatId == widget.chatId));
+
+        // ✅ CRITICAL: Sort messages - real messages first, then temp messages
+        allGroupMsgs.sort((a, b) {
+          final aIsTemp = a.messageId.toString().startsWith('temp_');
+          final bIsTemp = b.messageId.toString().startsWith('temp_');
+          if (aIsTemp && !bIsTemp) return 1; // Real messages first
+          if (!aIsTemp && bIsTemp) return -1;
+          return 0;
+        });
+
+        bool slotsUpdated = false;
+        int previousFilledCount = slotList.where((url) => url != null).length;
+
+        for (final m in allGroupMsgs) {
+          if (m.imageIndex != null && m.imageIndex! >= 0 && m.imageIndex! < slotList.length) {
+            final url = m.messageContent;
+            if (url.isNotEmpty) {
+              final isTemp = m.messageId.toString().startsWith('temp_');
+              // ✅ Always update slot if it's empty OR if this is a real message (replaces temp)
+              if (slotList[m.imageIndex!] == null || !isTemp) {
+                if (slotList[m.imageIndex!] != url) {
+                  slotList[m.imageIndex!] = url;
+                  slotsUpdated = true;
+                  print("🔄 [SYNC] Updated slot ${m.imageIndex} from message ${m.messageId} (${isTemp ? 'temp' : 'real'})");
+                }
+              }
+            }
+          }
+        }
+
+        int currentFilledCount = slotList.where((url) => url != null).length;
+        if (currentFilledCount != previousFilledCount) {
+          slotsUpdated = true;
+          print("🔄 [SYNC] Filled slots changed: $previousFilledCount -> $currentFilledCount");
+
+          // ✅ FIX: Freeze layout only when 4 slots are full
+          if (currentFilledCount == 4) {
+            _collageLayoutFrozen[gid] = true;
+            print("🔒 [FREEZE] Layout frozen for group $gid (4 slots full)");
+          } else {
+            _collageLayoutFrozen[gid] = false;
+            print("🔓 [UNFREEZE] Layout unfrozen for group $gid ($currentFilledCount slots filled)");
+          }
+        }
+
+        // ✅ If slots were updated, clear ALL caches and flags to force complete rebuild
+        if (slotsUpdated) {
+          final String groupAnchorKey = 'group_${gid}_anchor';
+          _renderedGroups.remove(gid); // Clear rendered groups flag
+          _renderedAnchorMessages.remove(groupAnchorKey);
+          _builtGroups.remove(gid);
+          _slotsSyncedForGroup.remove(gid); // Allow re-sync
+
+          // Clear collage cache for all anchor messages
+          final anchorMessages = _messageBox.values
+              .where((m) => m.groupId == gid && m.chatId == widget.chatId && (m.imageIndex ?? 0) == 0)
+              .toList();
+          for (final anchorMsg in anchorMessages) {
+            final anchorKey = anchorMsg.messageId.toString();
+            _collageWidgetCache.remove(anchorKey);
+            _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+            _renderedAnchorMessages.remove(anchorMsg.messageId.toString());
+          }
+
+          print("🔄 [SYNC] Cleared ALL caches and flags after slot update for group $gid - forcing rebuild");
+
+          // ✅ CRITICAL: Force immediate UI rebuild to show updated collage
+          if (mounted) {
+            setState(() {
+              _needsRefresh = true;
+            });
+            print("🔄 [SYNC] Triggered immediate setState after slot update for group $gid");
+          }
+
+          // ✅ Also trigger post-frame callback as backup
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _needsRefresh = true;
+              });
+              print("🔄 [SYNC] Triggered postFrame setState after slot update for group $gid");
+            }
+          });
+        }
+
+        // ✅ Use already calculated filledSlots (no need to recalculate)
+        print('🔍 [DEBUG] Group $gid: filledSlots=$filledSlots, totalImages=$totalImages, imageIndex=${msg.imageIndex}, messageId=${msg.messageId}');
+        print('🔍 [DEBUG] Slot list: ${slotList.map((url) => url != null ? "filled" : "empty").toList()}');
+        print('🔍 [DEBUG] Rendered groups: $_renderedGroups');
+        print('🔍 [DEBUG] Rendered anchors: ${_renderedAnchorMessages.take(5).toList()}');
+        print('🔍 [DEBUG] Is anchor? ${(msg.imageIndex ?? 0) == 0}');
+
+        // ✅ Show collage only after 2 images are received
+        if (filledSlots >= 2) {
+          // ✅ FIX: Remove anchor check - only hide if imageIndex is null
+          if (msg.imageIndex == null) {
+            print('🚫 [MEDIA] Hiding message ${msg.messageId} - imageIndex is null');
+            return const SizedBox.shrink();
+          }
+
+          // ✅ Show collage for any message with valid imageIndex
+          if (msg.imageIndex != null && msg.imageIndex! >= 0) {
+            // ✅ CRITICAL: Always render if we have 2+ filled slots and this is anchor
+            print('✅ [RENDERING COLLAGE] Group $gid, anchor ${msg.messageId}, filledSlots=$filledSlots, totalImages=$totalImages');
+            print('✅ [RENDERING COLLAGE] Slot URLs: ${slotList.map((url) => url != null ? "has_url" : "null").toList()}');
+
+            final String anchorKey = msg.messageId.toString();
+            final String groupAnchorKey = 'group_${gid}_anchor';
+
+            // ✅ CRITICAL FIX: Always rebuild if slots were updated OR cache doesn't exist
+            // Re-initialization clears cache, so if cache doesn't exist, we need to rebuild
+            final hasCache = _collageWidgetCache.containsKey(anchorKey);
+
+            // ✅ CRITICAL FIX: Check if filled slots count changed since last cache
+            // Compare with the count stored when widget was cached, not current count
+            final cachedFilledSlots = _cachedFilledSlotsCount[anchorKey];
+            final slotsCountChanged = cachedFilledSlots != null && cachedFilledSlots != filledSlots;
+
+            // ✅ CRITICAL: Also check if slots were synced for this group
+            // If slots were NOT synced, it means new images arrived and we need to rebuild
+            final slotsNeedSync = !_slotsSyncedForGroup.contains(gid);
+
+            // ✅ ALWAYS rebuild if:
+            // 1. Slots were updated in this call
+            // 2. Filled slots count changed (new images arrived)
+            // 3. Cache doesn't exist
+            // 4. Slots need sync (new images arrived but not synced yet)
+            // 5. Filled slots count is less than total images (more images expected)
+            final hasMoreImagesExpected = filledSlots < totalImages;
+
+            // ✅ FIX: Only return cached if frozen AND 4 slots are full (prevent early caching)
+            if (hasCache && isFrozen && filledSlots == 4 && !slotsUpdated && !slotsCountChanged && !slotsNeedSync && !hasMoreImagesExpected) {
+              // Cache exists, layout is frozen, 4 slots full, slots weren't updated, count didn't change, slots synced, and all images received - return cached widget
+              print('♻️ [CACHE] Returning cached collage for anchor $anchorKey (frozen=$isFrozen, filledSlots=$filledSlots/$totalImages, cached=$cachedFilledSlots)');
+              return _collageWidgetCache[anchorKey]!;
+            }
+
+            // ✅ Need to rebuild - slots were updated OR cache doesn't exist OR slots count changed OR slots need sync OR more images expected
+            print('🔄 [REBUILD] Rebuilding collage for group $gid anchor $anchorKey (slotsUpdated=$slotsUpdated, filledSlots=$filledSlots/$totalImages, cached=$cachedFilledSlots, countChanged=$slotsCountChanged, needSync=$slotsNeedSync, moreExpected=$hasMoreImagesExpected, hasCache=$hasCache)');
+
+            // Clear all flags and cache to allow fresh rebuild
+            _renderedGroups.remove(gid);
+            _renderedAnchorMessages.remove(groupAnchorKey);
+            _renderedAnchorMessages.remove(anchorKey);
+            _builtGroups.remove(gid);
+            _collageWidgetCache.remove(anchorKey);
+            _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+
+            // Mark as rendered to prevent duplicates, but allow this build
+            _renderedGroups.add(gid);
+            _renderedAnchorMessages.add(groupAnchorKey);
+            _renderedAnchorMessages.add(anchorKey);
+
+            // ✅ Create collage ONCE per group
+            if (!_builtGroups.contains(gid)) {
+              _builtGroups.add(gid);
+              print('🧩 Creating collage for group $gid with $filledSlots/$totalImages images');
+            }
+
+            // ✅ Build collage from fixed slots
+            try {
+              final collageWidget = _buildCollageFromFixedSlots(gid, slotList, totalImages, msg);
+              print('✅ [SUCCESS] Collage widget built for group $gid with $filledSlots/$totalImages images');
+
+              // ✅ CRITICAL: Only cache if all images have arrived (filledSlots == totalImages)
+              // This prevents caching incomplete collages that need to be rebuilt when more images arrive
+              if (filledSlots == totalImages) {
+                // All images received - safe to cache
+                _collageWidgetCache[anchorKey] = collageWidget;
+                _cachedFilledSlotsCount[anchorKey] = filledSlots;
+                print('✅ [CACHE] Cached collage for group $gid (all $filledSlots images received)');
+              } else {
+                // More images expected - don't cache, force rebuild on next call
+                print('⚠️ [CACHE] NOT caching collage for group $gid ($filledSlots/$totalImages images) - more expected');
+                // Clear any existing cache to force rebuild
+                _collageWidgetCache.remove(anchorKey);
+                _cachedFilledSlotsCount.remove(anchorKey);
+              }
+
+              return collageWidget;
+            } catch (e, st) {
+              print('❌ [ERROR] Failed to build collage for group $gid: $e\n$st');
+              // ✅ Only remove from rendered sets if build failed (allow retry)
+              _renderedAnchorMessages.remove(anchorKey);
+              _renderedGroups.remove(gid);
+              _collageWidgetCache.remove(anchorKey);
+              _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+              // Fall through to normal rendering
+            }
+          } else {
+            // ✅ On receiver side, show all messages individually (no filtering)
+            final userId = LocalAuthService.getUserId();
+            final bool isMe = msg.senderId == userId;
+            if (!isMe) {
+              // Receiver side: Show all messages individually, not just anchor
+              print('✅ [MEDIA] Receiver: Showing non-anchor message ${msg.messageId} individually (imageIndex=${msg.imageIndex})');
+              // Continue to normal single image rendering below
+            } else {
+              // Sender side: Hide non-anchor messages when we have 2+ images (collage mode)
+              print('🧩 Hiding non-anchor message ${msg.messageId}: filledSlots=$filledSlots, imageIndex=${msg.imageIndex}');
+              return const SizedBox.shrink();
+            }
+          }
+        } else if (filledSlots == 1) {
+          // ✅ Show single image if only 1 image received (not enough for collage yet)
+          // ✅ FIX: Remove anchor check - show if imageIndex is not null
+          if (msg.imageIndex == null) {
+            print('🚫 [MEDIA] Hiding message ${msg.messageId} - imageIndex is null');
+            return const SizedBox.shrink();
+          }
+          print('🧩 Showing single image ${msg.messageId} (waiting for more images for collage)');
+          // Continue to normal single image rendering below
+        } else {
+          // ✅ On receiver side, show all messages individually (no filtering)
+          final userId = LocalAuthService.getUserId();
+          final bool isMe = msg.senderId == userId;
+          if (!isMe) {
+            // Receiver side: Show all messages individually, not just anchor
+            print('✅ [MEDIA] Receiver: Showing message ${msg.messageId} individually (imageIndex=${msg.imageIndex}, filledSlots=$filledSlots)');
+            // Continue to normal single image rendering below
+          } else {
+            // Sender side: Hide if not anchor (index 0) when we have less than 2 images
+            print('🧩 Hiding message ${msg.messageId}: filledSlots=$filledSlots, imageIndex=${msg.imageIndex}');
+            return const SizedBox.shrink();
+          }
+        }
+      }
+
+      // ✅ FALLBACK: Old system for groups without fixed slots
       // ✅ FIX: Get ALL messages (including pending temp ones) for the group
       final List<Message> groupMessages = [];
       // Add from Hive
@@ -2617,31 +3567,163 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final int anchorIndex = finalGroupMessages.map((m) => m.imageIndex ?? 9999).reduce((a, b) => a < b ? a : b);
         final int actualAnchorIndex = anchorIndex == 9999 ? 0 : anchorIndex;
         print('🧩 Group ${gid} anchorIndex=$actualAnchorIndex currentIdx=${msg.imageIndex ?? 0}');
-        if ((msg.imageIndex ?? 0) == actualAnchorIndex) {
+        if (finalGroupMessages.length >= 2 && (msg.imageIndex ?? 0) == actualAnchorIndex) {
           // Find the actual anchor message
           final anchorMsg = finalGroupMessages.firstWhere(
                 (m) => (m.imageIndex ?? 0) == actualAnchorIndex,
             orElse: () => finalGroupMessages.first,
           );
-          print('🧩 Rendering collage for group $gid at anchor message ${anchorMsg.messageId}');
-          return _buildCollageForMessages(finalGroupMessages, anchorMsg);
+
+          // ✅ CRITICAL: Always render if we have 2+ messages and this is anchor
+          // ✅ Duplicate prevention will be handled by widget tree
+          print('✅ [ALLOWING RENDER] Group $gid, anchor ${anchorMsg.messageId}, count=${finalGroupMessages.length} (fallback)');
+
+          print('✅ [RENDERING COLLAGE] Group $gid, anchor ${anchorMsg.messageId}, count=${finalGroupMessages.length} (fallback)');
+
+          // ✅ CRITICAL: Use group-level anchor key to ensure only ONE collage per group
+          final String groupAnchorKey = 'group_${gid}_anchor';
+          final String anchorKey = anchorMsg.messageId.toString();
+          final String clusterAnchorKey = 'gid_${gid}_anchor_${anchorMsg.messageId}';
+
+          // ✅ CRITICAL: Cache is source of truth - if cached, always return it
+          if (_collageWidgetCache.containsKey(anchorKey)) {
+            print('♻️ [CACHE] Returning cached fallback collage for anchor $anchorKey');
+            return _collageWidgetCache[anchorKey]!;
+          }
+
+          // ✅ CRITICAL: Check group-level anchor first to prevent multiple collages
+          // ✅ But if cache exists, allow render (might be from initialization)
+          if (_collageWidgetCache.containsKey(anchorKey)) {
+            // Cache exists - allow render
+            print('✅ [FALLBACK] Group $gid anchor $anchorKey has cached collage - allowing render');
+          } else if (_renderedGroups.contains(gid) || _renderedAnchorMessages.contains(groupAnchorKey)) {
+            // ✅ If already rendered but no cache, it might be from initialization - allow rebuild
+            print('⚠️ [FALLBACK] Group $gid anchor $anchorKey marked but no cache - allowing rebuild');
+            // Continue to build - will create cache
+          } else {
+            // ✅ Not rendered yet - mark it
+            _renderedGroups.add(gid);
+            _renderedAnchorMessages.add(groupAnchorKey);
+            print('🔒 [GUARD] Marked (fallback) group $gid anchor ${anchorMsg.messageId} as rendered BEFORE build');
+          }
+
+          // ✅ Mark as rendered BEFORE building
+          _renderedGroups.add(gid);
+          _renderedAnchorMessages.add(groupAnchorKey);
+          _renderedAnchorMessages.add(anchorKey);
+          _clusterRenderedAnchors.add(clusterAnchorKey);
+          print('🔒 [GUARD] Marked (fallback) group $gid anchor ${anchorMsg.messageId} as rendered BEFORE build');
+
+          try {
+            final collageWidget = _buildCollageForMessages(finalGroupMessages, anchorMsg);
+
+            // ✅ CRITICAL: Cache the widget BEFORE returning
+            _collageWidgetCache[anchorKey] = collageWidget;
+            print('✅ [RENDERED] Cached fallback collage for anchor ${anchorMsg.messageId}');
+
+            return collageWidget;
+          } catch (e, st) {
+            print('❌ [ERROR] _buildCollageForMessages failed (fallback) for $gid: $e\n$st');
+            // ✅ Only remove from rendered sets if build failed (allow retry)
+            _renderedAnchorMessages.remove(anchorKey);
+            _renderedGroups.remove(gid);
+            _clusterRenderedAnchors.remove(clusterAnchorKey);
+            _collageWidgetCache.remove(anchorKey);
+            _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+          }
         } else {
-          // ✅ FIX: Completely hide non-anchor messages - no rendering at all
-          print('🧩 Non-anchor message ${msg.messageId} hidden for group $gid');
-          return const SizedBox.shrink();
+          // ✅ On receiver side, show all messages individually (no filtering)
+          final userId = LocalAuthService.getUserId();
+          final bool isMe = msg.senderId == userId;
+          if (!isMe) {
+            // Receiver side: Show all messages individually, not just anchor
+            print('✅ [FALLBACK] Receiver: Showing non-anchor message ${msg.messageId} individually (imageIndex=${msg.imageIndex})');
+            // Continue to normal single image rendering below
+          } else {
+            // Sender side: Hide non-anchor messages - no rendering at all
+            print('🧩 Non-anchor message ${msg.messageId} hidden for group $gid');
+            return const SizedBox.shrink();
+          }
         }
       }
     } else {
+      // ✅ CONTIGUOUS MEDIA CLUSTER (non-group messages)
       final cluster = _getContiguousMediaCluster(msg);
       print('🧩 Fallback cluster for ${msg.messageId}: size=${cluster.length}');
+
       if (cluster.length >= 2) {
+        // ✅ CRITICAL: Sort cluster by timestamp to get consistent anchor
         cluster.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         final Message anchor = cluster.first;
-        print('🧩 Fallback anchor=${anchor.messageId} for msg=${msg.messageId}');
+
+        // ✅ CRITICAL: Use cluster-level key (based on all message IDs) to ensure same cluster = same anchor
+        // ✅ messageId is String, so we'll use string IDs directly for the cluster key
+        final List<String> clusterIds = cluster.map((m) => m.messageId.toString()).toList()..sort();
+        final String clusterKey = 'cluster_${clusterIds.join('_')}';
+
+        print('🧩 Fallback anchor=${anchor.messageId} for msg=${msg.messageId}, clusterKey=$clusterKey');
+
+        // ✅ CRITICAL: Check if this is anchor FIRST
         if (msg.messageId == anchor.messageId) {
-          print('🧩 Rendering fallback collage for anchor ${anchor.messageId}');
-          return _buildCollageForMessages(cluster, anchor);
+          // ✅ This is the anchor - check if cluster already processed
+          if (_clusterCache.contains(clusterKey)) {
+            print('♻️ [CLUSTER CACHE] Cluster $clusterKey already processed - returning cached anchor');
+            final String anchorKey = anchor.messageId.toString();
+            if (_collageWidgetCache.containsKey(anchorKey)) {
+              return _collageWidgetCache[anchorKey]!;
+            }
+            // If cache missing but cluster processed, rebuild
+          } else {
+            // ✅ Mark cluster as processed BEFORE building
+            _clusterCache.add(clusterKey);
+            print('✅ [CLUSTER PROCESSED] Marked cluster $clusterKey as processed');
+          }
+
+          // ✅ This is the anchor - always allow rendering
+          print('✅ [ALLOWING RENDER] Cluster anchor ${anchor.messageId}, count=${cluster.length} (cluster)');
+
+          final String anchorKey = anchor.messageId.toString();
+          final String clusterAnchorKey = 'cluster_anchor_${anchor.messageId}';
+
+          // ✅ CRITICAL: Cache is source of truth - if cached, always return it
+          if (_collageWidgetCache.containsKey(anchorKey)) {
+            print('♻️ [CACHE] Returning cached cluster collage for anchor $anchorKey');
+            return _collageWidgetCache[anchorKey]!;
+          }
+
+          // ✅ CRITICAL: Check if cluster anchor already rendered to prevent duplicates
+          if (_clusterRenderedAnchors.contains(clusterAnchorKey) || _renderedAnchorMessages.contains(anchorKey)) {
+            print('⚠️ [DUPLICATE PREVENTION] Cluster anchor $anchorKey already rendered - hiding duplicate');
+            return const SizedBox.shrink();
+          }
+
+          // ✅ Mark as rendered BEFORE building
+          _renderedAnchorMessages.add(anchorKey);
+          _clusterRenderedAnchors.add(clusterAnchorKey);
+          print('🔒 [GUARD] Marked cluster anchor ${anchor.messageId} as rendered BEFORE build');
+
+          try {
+            final collageWidget = _buildCollageForMessages(cluster, anchor);
+
+            // ✅ CRITICAL: Cache the widget BEFORE returning
+            _collageWidgetCache[anchorKey] = collageWidget;
+            print('✅ [RENDERED] Cached cluster collage for anchor ${anchor.messageId}');
+
+            return collageWidget;
+          } catch (e, st) {
+            print('❌ [ERROR] _buildCollageForMessages failed (cluster) for ${anchor.messageId}: $e');
+            print('❌ [STACK TRACE]: $st');
+            // ✅ Only remove from rendered sets if build failed (allow retry)
+            _renderedAnchorMessages.remove(anchorKey);
+            _clusterRenderedAnchors.remove(clusterAnchorKey);
+            _collageWidgetCache.remove(anchorKey);
+            _cachedFilledSlotsCount.remove(anchorKey); // Also clear cached count
+            _clusterCache.remove(clusterKey); // Remove from cluster cache on error
+            // Fall through to single image rendering
+          }
         } else {
+          // ✅ This is NOT the anchor - hide immediately
+          print('🚫 Hiding non-anchor cluster message ${msg.messageId} (anchor is ${anchor.messageId})');
           return const SizedBox.shrink();
         }
       }
@@ -2751,6 +3833,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ✅ STEP 3: Cluster debounce function to prevent duplicate builds
+  bool _allowCluster(String groupId) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_clusterStamp.containsKey(groupId) &&
+        now - _clusterStamp[groupId]! < 120) {
+      return false; // ✅ BLOCK duplicate cluster build
+    }
+    _clusterStamp[groupId] = now;
+    return true;
+  }
+
   List<Message> _getContiguousMediaCluster(Message msg, {int windowSeconds = 20}) {
     final all = _messageBox.values
         .where((m) => m.chatId == widget.chatId)
@@ -2824,6 +3917,383 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return _buildCollageForMessages(groupMessages, firstMsg);
   }
 
+  // ✅ NEW: Build collage from fixed slots with transparent tiles
+  Widget _buildCollageFromFixedSlots(String groupId, List<String?> slotList, int totalImages, Message anchorMsg) {
+    // ✅ Get messages for thumbnails - map by imageIndex
+    final Map<int, Message> indexToMessage = {};
+    final allGroupMessages = _messageBox.values
+        .where((m) => m.groupId == groupId && m.chatId == widget.chatId)
+        .toList();
+    allGroupMessages.addAll(_pendingTempMessages.values
+        .where((m) => m.groupId == groupId && m.chatId == widget.chatId));
+
+    print('🔍 [COLLAGE] Building collage for group $groupId: totalImages=$totalImages, slotList.length=${slotList.length}');
+    print('🔍 [COLLAGE] Found ${allGroupMessages.length} messages in group');
+
+    for (final msg in allGroupMessages) {
+      if (msg.imageIndex != null && msg.imageIndex! >= 0 && msg.imageIndex! < slotList.length) {
+        indexToMessage[msg.imageIndex!] = msg;
+        print('🔍 [COLLAGE] Mapped message ${msg.messageId} to index ${msg.imageIndex}');
+      }
+    }
+
+    // ✅ Count filled slots and get their indices
+    final filledSlots = <int>[];
+    for (int i = 0; i < slotList.length; i++) {
+      if (slotList[i] != null && slotList[i]!.isNotEmpty) {
+        filledSlots.add(i);
+      }
+    }
+    final filledCount = filledSlots.length;
+    print('🔍 [COLLAGE] Filled slots: $filledCount/$totalImages (indices: $filledSlots)');
+    print('🔍 [COLLAGE] Slot URLs: ${slotList.map((url) => url != null && url.isNotEmpty ? "has_url" : "null").toList()}');
+
+    // ✅ CRITICAL: If no filled slots, return empty widget
+    if (filledCount == 0) {
+      print('⚠️ [COLLAGE] No filled slots for group $groupId');
+      return const SizedBox.shrink();
+    }
+
+    final maxWidth = MediaQuery.of(context).size.width * 0.70;
+
+    // ✅ Build tile widget for a filled slot index
+    Widget buildSlotTile(int slotIndex) {
+      final url = slotList[slotIndex];
+
+      // ✅ This should never be null/empty since we filtered filledSlots
+      if (url == null || url.isEmpty) {
+        print('⚠️ [COLLAGE] Slot $slotIndex is empty but in filledSlots list');
+        return const SizedBox.shrink();
+      }
+
+      final msg = indexToMessage[slotIndex];
+
+      // ✅ Get thumbnail (if message exists)
+      String? thumb;
+      if (msg != null) {
+        thumb = msg.thumbnailBase64;
+        if (thumb != null && thumb.isNotEmpty && thumb.contains(',')) {
+          thumb = thumb.split(',').last.trim();
+        }
+      }
+
+      final bool isRemote = url.startsWith('http');
+      final bool isLocal = !isRemote;
+
+      print('🔍 [COLLAGE] Building slot $slotIndex: url=${url.substring(0, url.length > 50 ? 50 : url.length)}..., msg=${msg != null ? "found" : "null"}, isRemote=$isRemote');
+
+      // ✅ Build image widget with thumbnail first, then full image
+      Widget imageWidget;
+
+      if (isLocal) {
+        imageWidget = Stack(
+          fit: StackFit.expand,
+          children: [
+            // ✅ Show thumbnail if available
+            if (thumb != null && thumb.isNotEmpty)
+              Positioned.fill(
+                child: Image.memory(
+                  base64Decode(thumb),
+                  fit: BoxFit.cover,
+                  cacheWidth: 150,
+                  cacheHeight: 150,
+                  gaplessPlayback: true,
+                ),
+              ),
+            // ✅ Load full image in background
+            Image.file(
+              File(url),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              cacheWidth: 1200,
+              cacheHeight: 1200,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (wasSynchronouslyLoaded) return child;
+                return AnimatedOpacity(
+                  opacity: frame == null ? 0 : 1,
+                  duration: const Duration(milliseconds: 300),
+                  child: child,
+                );
+              },
+            ),
+          ],
+        );
+      } else {
+        imageWidget = CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          memCacheWidth: 1200,
+          memCacheHeight: 1200,
+          placeholder: (context, url) {
+            // ✅ Show thumbnail while loading
+            if (thumb != null && thumb.isNotEmpty) {
+              try {
+                final bytes = base64Decode(thumb);
+                return Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  gaplessPlayback: true,
+                  cacheWidth: 150,
+                  cacheHeight: 150,
+                );
+              } catch (_) {}
+            }
+            return Container(color: Colors.grey[200]);
+          },
+          fadeInDuration: const Duration(milliseconds: 150),
+          fadeOutDuration: const Duration(milliseconds: 50),
+          errorWidget: (context, url, error) {
+            if (thumb != null && thumb.isNotEmpty) {
+              try {
+                final bytes = base64Decode(thumb);
+                return Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  cacheWidth: 200,
+                  cacheHeight: 200,
+                );
+              } catch (_) {}
+            }
+            return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
+          },
+        );
+      }
+
+      return GestureDetector(
+        onTap: () {
+          if (msg != null) {
+            _openImageFullScreen(msg);
+          } else {
+            // ✅ If message not found, try to open from URL directly
+            print('⚠️ [COLLAGE] Message not found for slot $slotIndex, opening URL directly');
+            // You can add a fallback image viewer here if needed
+          }
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(0), // ✅ No border
+          child: imageWidget,
+        ),
+      );
+    }
+
+    // ✅ CRITICAL FIX: Build grid based on filledCount (not totalImages) - only show filled slots
+    Widget grid;
+    if (filledCount == 1) {
+      grid = buildSlotTile(filledSlots[0]);
+    } else if (filledCount == 2) {
+      final double tileWidth = (maxWidth - 2) / 2;
+      final double tileHeight = maxWidth * 0.6;
+      grid = SizedBox(
+        width: maxWidth,
+        height: tileHeight,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[0])),
+            const SizedBox(width: 2),
+            SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[1])),
+          ],
+        ),
+      );
+    } else if (filledCount == 3) {
+      final double leftWidth = (maxWidth - 2) * 2 / 3;
+      final double rightWidth = (maxWidth - 2) / 3;
+      final double leftHeight = maxWidth * 0.7;
+      final double rightTileHeight = (leftHeight - 2) / 2;
+      grid = SizedBox(
+        width: maxWidth,
+        height: leftHeight,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: leftWidth, height: leftHeight, child: buildSlotTile(filledSlots[0])),
+            const SizedBox(width: 2),
+            SizedBox(
+              width: rightWidth,
+              height: leftHeight,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: rightWidth, height: rightTileHeight, child: buildSlotTile(filledSlots[1])),
+                  const SizedBox(height: 2),
+                  SizedBox(width: rightWidth, height: rightTileHeight, child: buildSlotTile(filledSlots[2])),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (filledCount == 4) {
+      final double gapWidth = 2.0;
+      final double tileWidth = (maxWidth - gapWidth) / 2;
+      final double tileHeight = tileWidth;
+      final double gapHeight = 2.0;
+      final double totalHeight = (tileHeight * 2) + gapHeight;
+      grid = SizedBox(
+        width: maxWidth,
+        height: totalHeight,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: maxWidth,
+              height: tileHeight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[0])),
+                  SizedBox(width: gapWidth),
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[1])),
+                ],
+              ),
+            ),
+            SizedBox(height: gapHeight),
+            SizedBox(
+              width: maxWidth,
+              height: tileHeight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[2])),
+                  SizedBox(width: gapWidth),
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[3])),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // ✅ 5+ images - 2x2 grid with +N overlay showing remaining images
+      final double tileWidth = (maxWidth - 2) / 2;
+      final double tileHeight = tileWidth;
+      final double totalHeight = (tileHeight * 2) + 2;
+
+      // Show first 4 images in 2x2 grid
+      final imagesToShow = filledCount > 4 ? 4 : filledCount;
+      final remainingCount = filledCount > 4 ? filledCount - 4 : 0;
+
+      grid = SizedBox(
+        width: maxWidth,
+        height: totalHeight,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: maxWidth,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[0])),
+                  const SizedBox(width: 2),
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[1])),
+                ],
+              ),
+            ),
+            const SizedBox(height: 2),
+            SizedBox(
+              width: maxWidth,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: tileWidth, height: tileHeight, child: buildSlotTile(filledSlots[2])),
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        buildSlotTile(filledSlots[3]),
+                        if (remainingCount > 0)
+                          Container(
+                            color: Colors.black54,
+                            child: Center(
+                              child: Text(
+                                '+$remainingCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final userId = LocalAuthService.getUserId();
+    final bool isMe = anchorMsg.senderId == userId;
+    final String time = _formatTime(anchorMsg.timestamp);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openImageFullScreen(anchorMsg),
+      onLongPress: () => _showMessageOptions(anchorMsg),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        clipBehavior: Clip.hardEdge,
+        child: Container(
+          width: maxWidth,
+          constraints: BoxConstraints(
+            maxWidth: maxWidth,
+            maxHeight: filledCount == 4
+                ? ((maxWidth - 2) / 2 * 2) + 2
+                : double.infinity,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Stack(
+            children: [
+              grid,
+              Positioned(
+                bottom: 6,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        time,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      if (isMe) const SizedBox(width: 4),
+                      if (isMe) _buildMessageTicks(anchorMsg),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCollageForMessages(List<Message> groupMessages, Message anchor) {
     // ✅ FIX: Ensure messages are sorted by imageIndex to maintain sender's sequence
     // Sort by imageIndex first, then by timestamp as fallback for consistency
@@ -2845,7 +4315,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     final int count = groupMessages.length;
-    final double maxWidth = MediaQuery.of(context).size.width * 0.70; // ✅ FIX: Adjusted width
+    // ✅ FIX: WhatsApp style - reduce width to prevent overflow (70% instead of 75%)
+    final double maxWidth = MediaQuery.of(context).size.width * 0.70;
 
     Widget buildTile(Message m, {VoidCallback? onTap}) {
       final String url = m.messageContent;
@@ -2891,13 +4362,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             // ✅ STEP 3: Load high quality file on top (progressive - fade in)
+            // ✅ FIX: Higher quality for clear images (WhatsApp style)
             Image.file(
               File(url),
               fit: BoxFit.cover,
               width: double.infinity,
               height: double.infinity,
-              cacheWidth: 800, // ✅ High quality
-              cacheHeight: 800,
+              cacheWidth: 1200, // ✅ Higher quality for clear images
+              cacheHeight: 1200,
               frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
                 if (wasSynchronouslyLoaded) return child;
                 return AnimatedOpacity(
@@ -2911,15 +4383,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       } else {
         // ✅ For remote URLs: Show thumbnail first, then full image
+        // ✅ FIX: Higher quality for clear images (WhatsApp style)
         imageWidget = CachedNetworkImage(
           imageUrl: url,
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          memCacheWidth: 800, // ✅ High quality cache
-          memCacheHeight: 800,
-          maxWidthDiskCache: 1200,
-          maxHeightDiskCache: 1200,
+          memCacheWidth: 1200, // ✅ Higher quality for clear images
+          memCacheHeight: 1200,
+          maxWidthDiskCache: 1600, // ✅ Higher disk cache
+          maxHeightDiskCache: 1600,
           placeholder: (context, url) {
             // ✅ STEP 1: Show low quality thumbnail FIRST (WhatsApp style)
             if (thumb != null && thumb.isNotEmpty) {
@@ -2975,133 +4448,220 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       grid = buildTile(groupMessages[0]);
     } else if (count == 2) {
       // ✅ 2 images - side by side (equal width)
-      // ✅ FIX: Add mainAxisSize to prevent overflow
-      grid = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(child: buildTile(groupMessages[0])),
-          const SizedBox(width: 2),
-          Expanded(child: buildTile(groupMessages[1])),
-        ],
+      // ✅ FIX: Use fixed SizedBox instead of Expanded to prevent infinite height
+      // ✅ FIX: Reduce width with safety margin to prevent overflow
+      final double safetyMargin = 3.0; // Safety margin to prevent overflow
+      final double tileWidth = (maxWidth - 2 - safetyMargin) / 2; // 2px gap + safety margin
+      final double tileHeight = maxWidth * 0.6; // 60% of width for height
+      grid = SizedBox(
+        width: maxWidth,
+        height: tileHeight,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: tileWidth,
+              height: tileHeight,
+              child: buildTile(groupMessages[0]),
+            ),
+            const SizedBox(width: 2),
+            SizedBox(
+              width: tileWidth,
+              height: tileHeight,
+              child: buildTile(groupMessages[1]),
+            ),
+          ],
+        ),
       );
     } else if (count == 3) {
       // ✅ 3 images - 1 large on left, 2 stacked on right (WhatsApp style)
-      // ✅ FIX: Add mainAxisSize to prevent overflow
-      grid = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(
-            flex: 2,
-            child: buildTile(groupMessages[0]),
+      // ✅ FIX: Use fixed SizedBox instead of Expanded to prevent infinite height
+      // ✅ FIX: Reduce width with larger safety margin to prevent overflow
+      final double safetyMargin = 3.0; // Safety margin to prevent overflow
+      final double leftWidth = (maxWidth - 2 - safetyMargin) * 2 / 3; // 2/3 width for left, minus gap and safety
+      final double rightWidth = (maxWidth - 2 - safetyMargin) / 3; // 1/3 width for right, minus gap and safety
+      final double leftHeight = maxWidth * 0.7; // Height for left image
+      final double rightTileHeight = (leftHeight - 2) / 2; // Each right tile height
+
+      grid = SizedBox(
+        width: maxWidth,
+        height: leftHeight,
+        child: SizedBox(
+          width: maxWidth, // ✅ FIX: Constrain Row width to prevent overflow
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: leftWidth,
+                height: leftHeight,
+                child: buildTile(groupMessages[0]),
+              ),
+              const SizedBox(width: 2),
+              SizedBox(
+                width: rightWidth,
+                height: leftHeight,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: rightWidth,
+                      height: rightTileHeight,
+                      child: buildTile(groupMessages[1]),
+                    ),
+                    const SizedBox(height: 2),
+                    SizedBox(
+                      width: rightWidth,
+                      height: rightTileHeight,
+                      child: buildTile(groupMessages[2]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 2),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(child: buildTile(groupMessages[1])),
-                const SizedBox(height: 2),
-                Expanded(child: buildTile(groupMessages[2])),
-              ],
-            ),
-          ),
-        ],
+        ),
       );
     } else if (count == 4) {
-      // ✅ 4 images - 2x2 grid (WhatsApp style: images fit within box, no width cropping)
-      // ✅ FIX: Use Expanded to prevent overflow and 4px overlay issue
-      grid = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: buildTile(groupMessages[0]),
-                ),
+      // ✅ 4 images - 2x2 grid (WhatsApp style: width full, height adjusts to prevent overflow)
+      // ✅ FIX: Calculate dimensions properly to prevent overflow - account for gaps
+      // ✅ FIX: Reduce available width with larger safety margin to ensure no overflow
+      final double gapWidth = 2.0; // Gap between images
+      final double safetyMargin = 3.0; // Safety margin to prevent overflow (6.9px se zyada)
+      final double availableWidth = maxWidth - gapWidth - safetyMargin; // Total width minus gap and safety margin
+      final double tileWidth = availableWidth / 2; // Each tile gets half of available width
+      // ✅ WhatsApp style: Square tiles for 2x2 grid (width = height)
+      final double tileHeight = tileWidth; // Square tiles
+      // ✅ FIX: Calculate total height to prevent overflow - account for gap
+      final double gapHeight = 2.0; // Gap between rows
+      final double totalHeight = (tileHeight * 2) + gapHeight; // 2 rows + 1 gap
+
+      // ✅ FIX: Wrap in SizedBox with fixed dimensions to prevent overflow
+      grid = SizedBox(
+        width: maxWidth, // ✅ Fixed width to prevent right overflow
+        height: totalHeight, // ✅ Fixed height to prevent bottom overflow
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: maxWidth, // ✅ FIX: Constrain Row width to prevent overflow
+              height: tileHeight, // ✅ FIX: Constrain Row height
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[0]),
+                  ),
+                  SizedBox(width: gapWidth),
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[1]),
+                  ),
+                ],
               ),
-              const SizedBox(width: 2),
-              Expanded(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: buildTile(groupMessages[1]),
-                ),
+            ),
+            SizedBox(height: gapHeight),
+            SizedBox(
+              width: maxWidth, // ✅ FIX: Constrain Row width to prevent overflow
+              height: tileHeight, // ✅ FIX: Constrain Row height
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[2]),
+                  ),
+                  SizedBox(width: gapWidth),
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[3]),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: buildTile(groupMessages[2]),
-                ),
-              ),
-              const SizedBox(width: 2),
-              Expanded(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: buildTile(groupMessages[3]),
-                ),
-              ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       );
     } else {
       // ✅ 5+ images - 2x2 grid with +N overlay on last tile (WhatsApp style)
-      // ✅ FIX: Add mainAxisSize to prevent overflow
-      grid = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(child: buildTile(groupMessages[0])),
-                const SizedBox(width: 2),
-                Expanded(child: buildTile(groupMessages[1])),
-              ],
+      // ✅ FIX: Use fixed SizedBox instead of Expanded to prevent infinite height
+      // ✅ FIX: Reduce width with larger safety margin to prevent overflow
+      final double safetyMargin = 3.0; // Safety margin to prevent overflow
+      final double tileWidth = (maxWidth - 2 - safetyMargin) / 2; // 2px gap + safety margin
+      final double tileHeight = tileWidth; // Square tiles
+      final double totalHeight = (tileHeight * 2) + 2; // 2 rows + 1 gap
+
+      grid = SizedBox(
+        width: maxWidth,
+        height: totalHeight,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: maxWidth, // ✅ FIX: Constrain Row width to prevent overflow
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[0]),
+                  ),
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[1]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(child: buildTile(groupMessages[2])),
-                const SizedBox(width: 2),
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      buildTile(groupMessages[3]),
-                      // ✅ Show +N overlay if more than 4 images
-                      if (count > 4)
-                        Container(
-                          color: Colors.black54,
-                          child: Center(
-                            child: Text(
-                              '+${count - 4}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w600,
+            const SizedBox(height: 2),
+            SizedBox(
+              width: maxWidth, // ✅ FIX: Constrain Row width to prevent overflow
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: buildTile(groupMessages[2]),
+                  ),
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: tileWidth,
+                    height: tileHeight,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        buildTile(groupMessages[3]),
+                        // ✅ Show +N overlay if more than 4 images
+                        if (count > 4)
+                          Container(
+                            color: Colors.black54,
+                            child: Center(
+                              child: Text(
+                                '+${count - 4}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
 
@@ -3116,87 +4676,83 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     return GestureDetector(
       // ✅ FIX: Only click on image itself, not surrounding space
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openImageFullScreen(anchor),
-      // ✅ FIX: Long press on collage to show info (WhatsApp style)
-      onLongPress: () => _showMessageOptions(anchor),
-      child: Container(
-        constraints: BoxConstraints(maxWidth: maxWidth),
-        decoration: BoxDecoration(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openImageFullScreen(anchor),
+        // ✅ FIX: Long press on collage to show info (WhatsApp style)
+        onLongPress: () => _showMessageOptions(anchor),
+        child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-        ),
-        child: Stack(
           clipBehavior: Clip.hardEdge,
-          children: [
-            // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              clipBehavior: Clip.hardEdge,
-              child: InkWell(
-                onTap: () => _openImageFullScreen(anchor),
-                onLongPress: () => _showMessageOptions(anchor),
-                child: SizedBox(
-                  width: maxWidth,
-                  height: count == 1
-                      ? 350  // ✅ FIX: Single image - increased height
-                      : count == 2
-                      ? 220  // ✅ FIX: 2 images side by side - adjusted
-                      : count == 4
-                      ? maxWidth  // ✅ FIX: 4 images - 2x2 grid: square tiles, height equals width
-                      : 350,  // ✅ FIX: 3, 5+ images - increased height
-                  child: grid,
-                ),
-              ),
+          child: Container(
+            width: maxWidth, // ✅ FIX: Fixed width to prevent right overflow
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: count == 4
+                  ? ((maxWidth - 2) / 2 * 2) + 2 // Exact height for 4 images
+                  : double.infinity,
             ),
-            // ✅ CRITICAL: WhatsApp-style loading indicator when uploading
-            if (isMe && isUploading && uploadProgress != null)
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                // ✅ FIX: ClipRRect with InkWell for proper click area (only image area)
+                InkWell(
+                  onTap: () => _openImageFullScreen(anchor),
+                  onLongPress: () => _showMessageOptions(anchor),
+                  child: grid, // ✅ FIX: Grid already has proper sizing with SizedBox, no need for outer SizedBox
+                ),
+                // ✅ CRITICAL: WhatsApp-style loading indicator when uploading
+                if (isMe && isUploading && uploadProgress != null)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              strokeWidth: 2,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${uploadProgress.toInt()}%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          strokeWidth: 2,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${uploadProgress.toInt()}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+                // ✅ FIX: Remove dots/bubble from collage - only show time (no ticks)
+                Positioned(
+                  bottom: 6,
+                  right: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      time,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w400),
                     ),
                   ),
                 ),
-              ),
-            // ✅ FIX: Remove dots/bubble from collage - only show time (no ticks)
-            Positioned(
-              bottom: 6,
-              right: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  time,
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w400),
-                ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        )
     );
   }
 
@@ -3981,7 +5537,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   _buildUnreadSeparator(),
                                   if (previousDate != currentDate)
                                     _buildDateHeader(currentDate),
-                                  _buildMessageBubble(msg, key: ValueKey(msg.messageId)),
+                                  _buildMessageBubble(msg, key: _getMessageKey(msg)),
                                 ],
                               );
                             }
@@ -3990,12 +5546,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               return Column(
                                 children: [
                                   _buildDateHeader(currentDate),
-                                  _buildMessageBubble(msg, key: ValueKey(msg.messageId)),
+                                  _buildMessageBubble(msg, key: _getMessageKey(msg)),
                                 ],
                               );
                             }
 
-                            return _buildMessageBubble(msg, key: ValueKey(msg.messageId));
+                            return _buildMessageBubble(msg, key: _getMessageKey(msg));
                           },
                         );
                       },
@@ -4013,7 +5569,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
           // ✅ SELECTION BOTTOM BAR
           _buildSelectionBottomBar(),
-        ],
+          ]
       ),
     );
   }

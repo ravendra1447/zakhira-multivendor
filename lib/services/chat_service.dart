@@ -1608,7 +1608,7 @@ class ChatService {
           totalImages: total,
         );
         print("✅ Image ${i + 1}/${mediaPaths.length} sent successfully");
-        
+
         // ✅ Small delay between images (like WhatsApp) - 200ms
         if (i < mediaPaths.length - 1) {
           await Future.delayed(const Duration(milliseconds: 200));
@@ -1793,7 +1793,7 @@ class ChatService {
 
       await saveMessageLocal(tempMsg);
       print("💾 Saved temporary message locally with ID: $tempId");
-      
+
       // ✅ CRITICAL: Notify UI immediately for instant display (WhatsApp style)
       _newMessageController.add(tempMsg);
       _messageSentController.sink.add(tempId);

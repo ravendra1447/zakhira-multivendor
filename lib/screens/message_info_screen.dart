@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../models/chat_model.dart';
 import '../services/local_auth_service.dart';
 import 'media_viewer_screen.dart';
+import 'package:flutter/widgets.dart';
 
 class MessageInfoScreen extends StatelessWidget {
   final Message message;
@@ -111,45 +112,24 @@ class MessageInfoScreen extends StatelessWidget {
                           },
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: message.messageContent.startsWith('http')
-                                ? Image.network(
-                                    message.messageContent,
-                                    width: double.infinity,
-                                    height: 200,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      // ✅ FIX: Show thumbnail if available
-                                      if (message.thumbnailBase64 != null && message.thumbnailBase64!.isNotEmpty) {
-                                        try {
-                                          final bytes = base64Decode(message.thumbnailBase64!);
-                                          return Image.memory(
-                                            bytes,
-                                            width: double.infinity,
-                                            height: 200,
-                                            fit: BoxFit.cover,
-                                          );
-                                        } catch (_) {}
-                                      }
-                                      return Container(
-                                        height: 200,
-                                        color: Colors.grey[300],
-                                        child: const Icon(Icons.image, size: 50),
-                                      );
-                                    },
-                                  )
-                                : Image.file(
-                                    File(message.messageContent),
-                                    width: double.infinity,
-                                    height: 200,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Container(
-                                        height: 200,
-                                        color: Colors.grey[300],
-                                        child: const Icon(Icons.image, size: 50),
-                                      );
-                                    },
-                                  ),
+                            child: SizedBox(
+                              width: double.infinity,
+                              height: 200,
+                              child: OrientationAwareImage(
+                                provider: message.messageContent.startsWith('http')
+                                    ? ResizeImage(
+                                        NetworkImage(message.messageContent),
+                                        width: 800,
+                                        height: 800,
+                                      )
+                                    : ResizeImage(
+                                        FileImage(File(message.messageContent)),
+                                        width: 800,
+                                        height: 800,
+                                      ),
+                                thumbBase64: message.thumbnailBase64,
+                              ),
+                            ),
                           ),
                         ),
                       
@@ -321,6 +301,68 @@ class MessageInfoScreen extends StatelessWidget {
     } else {
       return '${duration.inDays} day${duration.inDays > 1 ? 's' : ''}';
     }
+  }
+}
+
+class OrientationAwareImage extends StatefulWidget {
+  final ImageProvider provider;
+  final String? thumbBase64;
+  const OrientationAwareImage({Key? key, required this.provider, this.thumbBase64}) : super(key: key);
+  @override
+  State<OrientationAwareImage> createState() => _OrientationAwareImageState();
+}
+
+class _OrientationAwareImageState extends State<OrientationAwareImage> {
+  BoxFit _fit = BoxFit.cover;
+  Alignment _align = Alignment.center;
+  bool _resolved = false;
+  @override
+  void initState() {
+    super.initState();
+    final stream = widget.provider.resolve(const ImageConfiguration());
+    ImageStreamListener? listener;
+    listener = ImageStreamListener((info, _) {
+      final w = info.image.width.toDouble();
+      final h = info.image.height.toDouble();
+      BoxFit f;
+      if (w > h) {
+        f = BoxFit.fitHeight;
+      } else if (h > w) {
+        f = BoxFit.fitWidth;
+      } else {
+        f = BoxFit.contain;
+      }
+      if (mounted) {
+        setState(() {
+          _fit = f;
+          _align = Alignment.center;
+          _resolved = true;
+        });
+      }
+      stream.removeListener(listener!);
+    }, onError: (error, stack) {
+      stream.removeListener(listener!);
+    });
+    stream.addListener(listener);
+  }
+  @override
+  Widget build(BuildContext context) {
+    Widget? thumb;
+    final t = widget.thumbBase64;
+    if (!_resolved && t != null && t.isNotEmpty) {
+      try {
+        final clean = t.contains(',') ? t.split(',').last.trim() : t.trim();
+        final bytes = base64Decode(clean);
+        thumb = Image.memory(bytes, fit: BoxFit.cover, width: double.infinity, height: double.infinity);
+      } catch (_) {}
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (thumb != null) Positioned.fill(child: thumb),
+        Image(image: widget.provider, fit: _fit, alignment: _align, width: double.infinity, height: double.infinity),
+      ],
+    );
   }
 }
 

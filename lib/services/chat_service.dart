@@ -86,6 +86,11 @@ class ChatService {
   static Stream<Map<String, dynamic>> get onThumbnailReady =>
       _thumbnailReadyController.stream;
 
+  static final StreamController<Map<String, dynamic>> _allThumbnailsReadyController =
+  StreamController.broadcast();
+  static Stream<Map<String, dynamic>> get onAllThumbnailsReady =>
+      _allThumbnailsReadyController.stream;
+
   static final _cryptoManager = CryptoManager();
   static final Set<String> _processedMessageIds = {};
   static final Set<String> _uploadingMediaIds = {};
@@ -227,6 +232,7 @@ class ChatService {
       _socket!.off("user_blocked_by");
       _socket!.off("user_unblocked_by");
       _socket!.off("message_thumbnail_ready"); // ✅ Added thumbnail ready cleanup
+      _socket!.off("all_thumbnails_ready"); // ✅ Added all thumbnails ready cleanup
     }
     print("✅ Cleaned up old socket listeners");
   }
@@ -607,6 +613,31 @@ class ChatService {
       }
     });
 
+    // ✅ ALL THUMBNAILS READY LISTENER - Trigger bundle creation immediately
+    _socket!.on("all_thumbnails_ready", (data) {
+      print("🖼️ [all_thumbnails_ready] event received");
+      try {
+        final groupId = data["group_id"]?.toString();
+        final chatId = data["chat_id"]?.toString();
+        final totalImages = data["total_images"]?.toString();
+
+        if (groupId != null && chatId != null && totalImages != null) {
+          print("✅ [all_thumbnails_ready] All thumbnails ready for group $groupId, chat $chatId, total images: $totalImages");
+          _allThumbnailsReadyController.sink.add({
+            "group_id": groupId,
+            "chat_id": chatId,
+            "total_images": int.tryParse(totalImages) ?? 0,
+            "timestamp": data["timestamp"]?.toString() ?? DateTime.now().toIso8601String(),
+          });
+          print("✅ [all_thumbnails_ready] Event forwarded to UI for immediate bundle creation");
+        } else {
+          print("❌ [all_thumbnails_ready] Invalid data: groupId=$groupId, chatId=$chatId, totalImages=$totalImages");
+        }
+      } catch (e) {
+        print("❌ [all_thumbnails_ready] Error: $e");
+      }
+    });
+
     print("✅ All socket listeners setup completed");
   }
 
@@ -824,6 +855,11 @@ class ChatService {
       }
 
       print("📥 Processing message from $source: $idToProcess");
+      // ✅ DEBUG: Log ALL incoming data keys to see what's available
+      if (data is Map) {
+        print("🔍 [INCOMING DATA] All keys: ${data.keys.toList()}");
+        print("🔍 [INCOMING DATA] group_id: ${data["group_id"]}, image_index: ${data["image_index"]}, total_images: ${data["total_images"]}");
+      }
 
       // ✅ STEP 1: STRONG DUPLICATE CHECK
       if (_processedMessageIds.contains(idToProcess)) {
@@ -856,8 +892,17 @@ class ChatService {
       }
 
       // ✅ CRITICAL: Check for duplicate grouped messages (prevent multiple collages)
-      final groupId = data["group_id"]?.toString();
+      // ✅ CRITICAL FIX: Extract groupId and imageIndex here (will be reused later for message creation)
+      // ✅ NOTE: For encrypted messages, these might be in decrypted data, so we'll update them after decryption
+      var groupId = data["group_id"]?.toString();
+      if (groupId != null && groupId.isEmpty) {
+        groupId = null; // Convert empty string to null
+      }
       var imageIndex = data["image_index"] != null ? int.tryParse(data["image_index"].toString()) : null;
+      
+      // ✅ DEBUG: Log extraction immediately
+      print("🔍 [EXTRACT GROUP] Raw data - group_id: ${data["group_id"]}, image_index: ${data["image_index"]}, total_images: ${data["total_images"]}");
+      print("🔍 [EXTRACT GROUP] Extracted - groupId: $groupId, imageIndex: $imageIndex");
       if (groupId != null && groupId.isNotEmpty && imageIndex != null) {
         final existingGroupMessage = _messageBox.values.firstWhereOrNull(
               (msg) => msg.groupId == groupId &&
@@ -920,6 +965,9 @@ class ChatService {
       String finalMessageType = "text";
       String? finalThumbnailBase64 = thumbnailBase64;
       String? finalMediaUrl = mediaUrl;
+      
+      // ✅ CRITICAL: Declare totalImages here so it's accessible after decryption
+      int? totalImages;
 
       if (messageType == "encrypted" || messageType == "encrypted_media") {
         print("🔓 Processing encrypted message: $messageType");
@@ -961,9 +1009,47 @@ class ChatService {
             finalMediaUrl = decryptedData["low_quality_url"]?.toString();
           }
 
+          // ✅ CRITICAL FIX: Extract group_id, image_index, total_images from decrypted data if not in raw data
+          if (groupId == null && decryptedData.containsKey("group_id")) {
+            groupId = decryptedData["group_id"]?.toString();
+            if (groupId != null && groupId.isEmpty) {
+              groupId = null;
+            }
+            print("🔍 [DECRYPTED GROUP] Extracted groupId from decrypted data: $groupId");
+          }
+          if (imageIndex == null && decryptedData.containsKey("image_index")) {
+            final decryptedImageIndex = decryptedData["image_index"];
+            if (decryptedImageIndex is int) {
+              imageIndex = decryptedImageIndex;
+            } else if (decryptedImageIndex is String) {
+              imageIndex = int.tryParse(decryptedImageIndex);
+            } else if (decryptedImageIndex != null) {
+              imageIndex = int.tryParse(decryptedImageIndex.toString());
+            }
+            print("🔍 [DECRYPTED GROUP] Extracted imageIndex from decrypted data: $imageIndex");
+          }
+          
+          // ✅ CRITICAL FIX: Extract totalImages from decrypted data if not in raw data
+          if (totalImages == null && decryptedData.containsKey("total_images")) {
+            final decryptedTotalImages = decryptedData["total_images"];
+            if (decryptedTotalImages is int) {
+              totalImages = decryptedTotalImages;
+            } else if (decryptedTotalImages is String) {
+              totalImages = int.tryParse(decryptedTotalImages);
+            } else if (decryptedTotalImages != null) {
+              totalImages = int.tryParse(decryptedTotalImages.toString());
+            }
+            print("🔍 [DECRYPTED GROUP] Extracted totalImages from decrypted data: $totalImages");
+          }
+          
+          // ✅ DEBUG: Log all decrypted data keys to see what's available
+          print("🔍 [DECRYPTED DATA] All keys: ${decryptedData.keys.toList()}");
+          print("🔍 [DECRYPTED DATA] group_id: ${decryptedData["group_id"]}, image_index: ${decryptedData["image_index"]}, total_images: ${decryptedData["total_images"]}");
+
           print("✅ DECRYPTION SUCCESSFUL:");
           print("   - Final Type: $finalMessageType");
           print("   - Final Content: '${finalContent.length > 50 ? finalContent.substring(0, 50) + '...' : finalContent}'");
+          print("   - Group Data: groupId=$groupId, imageIndex=$imageIndex, totalImages=$totalImages");
 
         } catch (e) {
           print("❌ Decryption failed: $e");
@@ -1069,12 +1155,9 @@ class ChatService {
       }
 
       // ✅ STEP 10: CREATE AND SAVE NEW MESSAGE
-      // ✅ FIX: Properly extract group_id, image_index, and total_images with debug logging
-      //final String? groupId = data["group_id"]?.toString();
-
-      // ✅ FIX: Handle image_index extraction - can be int or string
-      //int? imageIndex;
-      if (data["image_index"] != null) {
+      // ✅ NOTE: groupId and imageIndex are already extracted at line 890-891, reuse them here
+      // ✅ FIX: Handle image_index extraction properly if not already done - can be int or string
+      if (imageIndex == null && data["image_index"] != null) {
         final imageIndexValue = data["image_index"];
         if (imageIndexValue is int) {
           imageIndex = imageIndexValue;
@@ -1086,8 +1169,8 @@ class ChatService {
       }
 
       // ✅ FIX: Handle total_images extraction - can be int or string
-      int? totalImages;
-      if (data["total_images"] != null) {
+      // ✅ NOTE: totalImages is already declared before decryption block, so check if it's still null
+      if (totalImages == null && data["total_images"] != null) {
         final totalImagesValue = data["total_images"];
         if (totalImagesValue is int) {
           totalImages = totalImagesValue;
@@ -1097,6 +1180,9 @@ class ChatService {
           totalImages = int.tryParse(totalImagesValue.toString());
         }
       }
+      
+      // ✅ CRITICAL: totalImages from decryptedData is handled in decryption block (line ~1025)
+      // We need to declare it before decryption so it's accessible after
 
       // ✅ DEBUG: Log extracted values
       if (groupId != null || imageIndex != null || totalImages != null) {
@@ -1137,6 +1223,12 @@ class ChatService {
       print("   - Chat: $chatId");
       print("   - Sender: $senderId");
       print("   - Timestamp: $messageTimestamp");
+      // ✅ CRITICAL DEBUG: Log groupId assignment
+      if (groupId != null || imageIndex != null || totalImages != null) {
+        print("   - ✅ GROUP DATA ASSIGNED: groupId=${msg.groupId}, imageIndex=${msg.imageIndex}, totalImages=${msg.totalImages}");
+      } else if (finalMessageType == "media" || finalMessageType == "encrypted_media") {
+        print("   - ⚠️ WARNING: Media message WITHOUT groupId! groupId=${msg.groupId}, imageIndex=${msg.imageIndex}, totalImages=${msg.totalImages}");
+      }
 
       // ✅ STEP 11: NOTIFY UI
       if (_newMessageController.hasListener) {
@@ -1586,39 +1678,38 @@ class ChatService {
       }),
     );
 
-    // ✅ FIX: Send images ONE BY ONE sequentially (WhatsApp style)
-    // ✅ Send first image immediately, then wait for it to complete before sending next
-    print("📤 Sending ${mediaPaths.length} images one by one (WhatsApp style)...");
-    for (int i = 0; i < mediaPaths.length; i++) {
-      print("📤 Sending image ${i + 1}/${mediaPaths.length}...");
-      try {
-        await _processAndSendMedia(
-          mediaPath: mediaPaths[i],
-          chatId: chatId,
-          receiverId: receiverId,
-          tempId: tempMessages[i].messageId,
-          userId: userId,
-          senderName: senderName,
-          receiverName: receiverName,
-          senderPhoneNumber: senderPhoneNumber,
-          receiverPhoneNumber: receiverPhoneNumber,
-          replyToMessageId: replyToMessageId,
-          groupId: groupId,
-          imageIndex: i,
-          totalImages: total,
-        );
-        print("✅ Image ${i + 1}/${mediaPaths.length} sent successfully");
-
-        // ✅ Small delay between images (like WhatsApp) - 200ms
-        if (i < mediaPaths.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 200));
+    // ✅ FIX: Send images IN PARALLEL for fast upload (WhatsApp style - all thumbnails first, then actual images)
+    // ✅ All images are sent simultaneously so server can process thumbnails in parallel
+    print("📤 Sending ${mediaPaths.length} images in PARALLEL (fast upload)...");
+    await Future.wait(
+      mediaPaths.asMap().entries.map((entry) async {
+        final i = entry.key;
+        final path = entry.value;
+        print("📤 Sending image ${i + 1}/${mediaPaths.length} in parallel...");
+        try {
+          await _processAndSendMedia(
+            mediaPath: path,
+            chatId: chatId,
+            receiverId: receiverId,
+            tempId: tempMessages[i].messageId,
+            userId: userId,
+            senderName: senderName,
+            receiverName: receiverName,
+            senderPhoneNumber: senderPhoneNumber,
+            receiverPhoneNumber: receiverPhoneNumber,
+            replyToMessageId: replyToMessageId,
+            groupId: groupId,
+            imageIndex: i,
+            totalImages: total,
+          );
+          print("✅ Image ${i + 1}/${mediaPaths.length} sent successfully");
+        } catch (e) {
+          print("❌ Error sending image ${i + 1}: $e");
+          // Continue with other images even if one fails
         }
-      } catch (e) {
-        print("❌ Error sending image ${i + 1}: $e");
-        // Continue with next image even if one fails
-      }
-    }
-    print("✅ All ${mediaPaths.length} images sent one by one");
+      }),
+    );
+    print("✅ All ${mediaPaths.length} images sent in parallel");
   }
 
   // ------------------- MEDIA UPLOAD FUNCTIONS -------------------

@@ -85,7 +85,15 @@ class MyFirebaseMessagingService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       print('📩 Foreground message received: ${message.notification?.title}');
       if (message.data.isNotEmpty) {
+        // ✅ DEBUG: Log Firebase data to check for group_id
+        print('🔍 [FIREBASE DATA] All keys: ${message.data.keys.toList()}');
+        print('🔍 [FIREBASE DATA] group_id: ${message.data["group_id"]}, image_index: ${message.data["image_index"]}, total_images: ${message.data["total_images"]}');
+        
         final msg = Message.fromMap(message.data);
+        
+        // ✅ DEBUG: Log extracted groupId
+        print('🔍 [FIREBASE MSG] Extracted - groupId: ${msg.groupId}, imageIndex: ${msg.imageIndex}, totalImages: ${msg.totalImages}');
+        
         final box = Hive.box<Message>('messages');
         await box.put(msg.messageId, msg);
         SoundUtils.playReceiveSound();

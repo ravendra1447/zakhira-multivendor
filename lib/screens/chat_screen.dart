@@ -6427,7 +6427,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ DEBUG: Print detailed collage status with thumbnail info
     debugCollageStatus(anchorMsg);
 
-    // ✅ Get messages for thumbnails - map by imageIndex
+    // ✅ CRITICAL FIX: Get messages for thumbnails - map by imageIndex with stable sort
+    // ✅ APP RESTART FIX: Sort messages before mapping to ensure consistent order
     final Map<int, Message> indexToMessage = {};
     final allGroupMessages = _messageBox.values
         .where((m) => m.groupId == groupId && m.chatId == widget.chatId)
@@ -6435,13 +6436,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     allGroupMessages.addAll(_pendingTempMessages.values
         .where((m) => m.groupId == groupId && m.chatId == widget.chatId));
 
-    print('🔍 [COLLAGE] Building collage for group $groupId: totalImages=$totalImages, slotList.length=${slotList.length}');
-    print('🔍 [COLLAGE] Found ${allGroupMessages.length} messages in group');
+    // ✅ CRITICAL FIX: Sort messages by imageIndex with stable sort before mapping
+    // ✅ APP RESTART FIX: Use messageId as secondary key to ensure consistent order
+    allGroupMessages.sort((a, b) {
+      final aIndex = a.imageIndex ?? 9999;
+      final bIndex = b.imageIndex ?? 9999;
+      final indexCompare = aIndex.compareTo(bIndex);
+      // ✅ CRITICAL: If imageIndex is same, use messageId for stable sorting
+      if (indexCompare != 0) {
+        return indexCompare;
+      }
+      // ✅ Secondary sort by messageId to ensure consistent order
+      return a.messageId.toString().compareTo(b.messageId.toString());
+    });
 
+    print('🔍 [COLLAGE] Building collage for group $groupId: totalImages=$totalImages, slotList.length=${slotList.length}');
+    print('🔍 [COLLAGE] Found ${allGroupMessages.length} messages in group (sorted by imageIndex)');
+
+    // ✅ CRITICAL: Map messages to indices - if duplicate imageIndex, keep first one (stable)
     for (final msg in allGroupMessages) {
       if (msg.imageIndex != null && msg.imageIndex! >= 0 && msg.imageIndex! < slotList.length) {
-        indexToMessage[msg.imageIndex!] = msg;
-        print('🔍 [COLLAGE] Mapped message ${msg.messageId} to index ${msg.imageIndex}');
+        // ✅ Only map if not already mapped (prevent overwriting with duplicate imageIndex)
+        if (!indexToMessage.containsKey(msg.imageIndex!)) {
+          indexToMessage[msg.imageIndex!] = msg;
+          print('🔍 [COLLAGE] Mapped message ${msg.messageId} to index ${msg.imageIndex}');
+        } else {
+          print('⚠️ [COLLAGE] Duplicate imageIndex ${msg.imageIndex} - keeping first message ${indexToMessage[msg.imageIndex!]?.messageId}');
+        }
       }
     }
 
@@ -6591,8 +6612,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ RECEIVER SIDE LOG: Log layout selection
     print('📱 [RECEIVER COLLAGE BUILD] Selecting layout - filledCount=$filledCount');
 
-    // ✅ Get image URLs in order
+    // ✅ CRITICAL FIX: Get image URLs in order based on slot indices (0, 1, 2, ...)
+    // ✅ APP RESTART FIX: Always use slotList order to ensure consistent image positions
     final List<String> imageUrls = [];
+    // ✅ CRITICAL: Iterate slots in order (0, 1, 2, ...) to maintain sender's sequence
     for (int i = 0; i < slotList.length; i++) {
       if (slotList[i] != null && slotList[i]!.isNotEmpty) {
         final msg = indexToMessage[i];
@@ -6602,8 +6625,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           url = msg.highQualityUrl!;
         }
         imageUrls.add(url);
+        print('🔍 [COLLAGE URL ORDER] Added image at slot $i: url=${url.length > 50 ? url.substring(0, 50) + "..." : url}, msgId=${msg?.messageId}');
       }
     }
+    
+    // ✅ APP RESTART FIX: Log final image order to verify consistency
+    print('🔍 [COLLAGE URL ORDER] Final imageUrls count: ${imageUrls.length}, order: slots 0-${imageUrls.length - 1}');
 
     // ✅ Build layered book stack widget
     Widget layeredBookStack(List<String> images) {

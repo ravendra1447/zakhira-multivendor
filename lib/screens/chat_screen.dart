@@ -6290,15 +6290,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (!isMe && mediaUrl.startsWith('http')) 
               _buildDownloadControls(msg, mediaUrl),
 
-            Positioned(
-              bottom: 6,
-              left: 6,
-              right: 6,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Photos count on left (only show if totalImages > 1)
-                  if (msg.totalImages != null && msg.totalImages! > 1)
+            // ✅ For single images, time stays on right. For multiple images, show Photos on left
+            if (msg.totalImages != null && msg.totalImages! > 1)
+              // Multiple images: Photos on left, time on right
+              Positioned(
+                bottom: 6,
+                left: 6,
+                right: 6,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Photos count on left
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
@@ -6314,33 +6316,62 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  // Timestamp and ticks on right
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _formatTime(msg.timestamp),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w400,
+                    // Timestamp and ticks on right
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime(msg.timestamp),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                            ),
                           ),
-                        ),
-                        if (isMe) const SizedBox(width: 4),
-                        if (isMe)
-                          _buildMessageTicks(msg, isUploading: isUploading),
-                      ],
+                          if (isMe) const SizedBox(width: 4),
+                          if (isMe)
+                            _buildMessageTicks(msg, isUploading: isUploading),
+                        ],
+                      ),
                     ),
+                  ],
+                ),
+              )
+            else
+              // Single image: time on right only
+              Positioned(
+                bottom: 6,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatTime(msg.timestamp),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      if (isMe) const SizedBox(width: 4),
+                      if (isMe)
+                        _buildMessageTicks(msg, isUploading: isUploading),
+                    ],
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),

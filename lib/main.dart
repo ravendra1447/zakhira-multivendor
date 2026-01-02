@@ -371,15 +371,18 @@ class _SplashGateState extends State<SplashGate> {
         }
       }
 
+      // ✅ Check if MPIN is set AND enabled
       final hasMpin = LocalAuthService.hasMpin();
-      if (hasMpin) {
+      final isMpinEnabled = LocalAuthService.isMpinEnabled();
+      
+      if (hasMpin && isMpinEnabled) {
         // Go to MPIN verification page
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const VerifyMpinPage()),
         );
       } else {
-        // Go to Chat Home page directly
+        // Go to Chat Home page directly (MPIN not set or disabled)
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const ChatHomePage()),

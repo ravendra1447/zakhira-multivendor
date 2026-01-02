@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:hive/hive.dart';
 import '../models/profile_setting.dart';
+import 'package:whatsappchat/services/local_auth_service.dart';
 
 class ApiService {
   // Updated Base URL
@@ -36,7 +37,9 @@ class ApiService {
 
       final data = jsonDecode(res.body);
       if (data["success"] == true) {
-        await _authBox.put("user_id", data["user_id"]);
+        // ✅ Use consistent key 'userId' (same as LocalAuthService)
+        await _authBox.put("userId", data["user_id"]);
+        await _authBox.put("user_id", data["user_id"]); // Keep both for compatibility
         await _authBox.put("phone", phone);
       }
       return data;
@@ -48,7 +51,7 @@ class ApiService {
   /// Set MPIN
   static Future<Map<String, dynamic>> setMpin(String mpin) async {
     try {
-      final userId = _authBox.get("user_id");
+      final userId = LocalAuthService.getUserId();
       final res = await http.post(
         Uri.parse("$baseUrl/set_mpin.php"),
         headers: {"Content-Type": "application/json"},
@@ -63,7 +66,7 @@ class ApiService {
   /// Verify MPIN
   static Future<Map<String, dynamic>> verifyMpin(String mpin) async {
     try {
-      final userId = _authBox.get("user_id");
+      final userId = LocalAuthService.getUserId();
       final res = await http.post(
         Uri.parse("$baseUrl/verify_mpin.php"),
         headers: {"Content-Type": "application/json"},
@@ -75,7 +78,7 @@ class ApiService {
     }
   }
 
-  static bool isLoggedIn() => _authBox.containsKey("user_id");
+  static bool isLoggedIn() => LocalAuthService.isLoggedIn();
   static Future<void> logout() async => _authBox.clear();
 
   /// ================= PROFILE ================= ///
@@ -83,7 +86,7 @@ class ApiService {
   /// Insert Profile
   static Future<Map<String, dynamic>> insertProfile(ProfileSetting profile) async {
     try {
-      final userId = _authBox.get("user_id");
+      final userId = LocalAuthService.getUserId();
       final res = await http.post(
         Uri.parse("$baseUrl/insert_profile.php"),
         headers: {"Content-Type": "application/json"},
@@ -98,7 +101,7 @@ class ApiService {
   /// Update Profile
   static Future<Map<String, dynamic>> updateProfile(ProfileSetting profile) async {
     try {
-      final userId = _authBox.get("user_id");
+      final userId = LocalAuthService.getUserId();
       final res = await http.post(
         Uri.parse("$baseUrl/update_profile.php"),
         headers: {"Content-Type": "application/json"},
@@ -112,21 +115,48 @@ class ApiService {
     }
   }
 
-  /// Get Profile
+  /// Get Profile - Fetch from users table using get_user_by_id.php
   static Future<ProfileSetting?> getProfile() async {
     try {
-      final userId = _authBox.get("user_id");
-      final res = await http.get(
-        Uri.parse("$baseUrl/get_profile.php?id=$userId"),
-      );
-
-      final data = jsonDecode(res.body);
-
-      if (data["success"] == true && data["profile"] != null) {
-        return ProfileSetting.fromJson(data["profile"]);
+      // ✅ Use LocalAuthService to get user ID (consistent with other services)
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        print("❌ User ID is null - User not logged in");
+        return null;
       }
-      return null;
+      
+      // Use get_user_by_id.php (server API)
+      final res = await http.get(
+        Uri.parse("$baseUrl/get_user_by_id.php?user_id=$userId"),
+      );
+      
+      if (res.statusCode != 200) {
+        print("❌ API returned status: ${res.statusCode}");
+        return null;
+      }
+      
+      final data = jsonDecode(res.body);
+      print("📥 API Response: $data");
+      
+      if (data["success"] == true && data["user"] != null) {
+        final user = data["user"];
+        print("✅ User data found - Name: ${user["name"]}, Address: ${user["address"]}");
+        
+        // Convert users table data to ProfileSetting format
+        return ProfileSetting(
+          userId: userId,
+          name: user["name"] ?? "",
+          address: user["address"] ?? "",
+          profileImage: user["profile_photo_url"],
+          userPhone: user["phone"] ?? "",
+          userName: user["name"] ?? "",
+        );
+      } else {
+        print("❌ API returned success=false or user is null");
+        return null;
+      }
     } catch (e) {
+      print("❌ Error fetching profile: $e");
       return null;
     }
   }

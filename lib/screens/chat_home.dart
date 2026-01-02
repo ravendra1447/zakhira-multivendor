@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:hive/hive.dart';
@@ -10,6 +11,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
 
 import '../services/chat_service.dart';
 import '../services/local_auth_service.dart';
@@ -20,37 +22,105 @@ import '../services/my_firebase_messaging_service.dart';
 import 'chat_screen.dart';
 import 'new_chat_page.dart';
 import '../config.dart';
+import 'package:whatsappchat/screens/set_mpin_page.dart';
+import 'package:whatsappchat/screens/user_profile_page.dart';
+import 'package:whatsappchat/services/local_auth_service.dart';
+import '../services/api_service.dart';
+import '../models/profile_setting.dart';
+import 'camera_interface_screen.dart';
+import '../services/product_database_service.dart';
+import '../models/product.dart';
+import 'product/detail/product_detail_screen.dart';
+import 'marketplace/marketplace_tab.dart';
+import 'dart:io';
 
 class ChatHomePage extends StatefulWidget {
-  const ChatHomePage({super.key});
+  final int? initialTabIndex;
+  const ChatHomePage({super.key, this.initialTabIndex});
 
   @override
   State<ChatHomePage> createState() => _ChatHomePageState();
 }
 
 class _ChatHomePageState extends State<ChatHomePage> {
-  int _selectedIndex = 0;
+  late int _selectedIndex;
   final Map<int, String> _userStatus = {};
   late StreamSubscription _userStatusSubscription;
   bool _contactsSynced = false;
-  bool _notificationAsked = false;
+  bool _permissionsAsked = false;
+
+  final GlobalKey<_ProfileTabState> _profileTabKey = GlobalKey<_ProfileTabState>();
 
   late final List<Widget> _screens = [
     ChatsTab(userStatus: _userStatus),
-    const GroupsTab(),
-    const ProfileTab(),
+    const MarketplaceTab(),
+    ProfileTab(key: _profileTabKey),
   ];
 
   @override
   void initState() {
     super.initState();
-    _startContactSync();
+    _selectedIndex = widget.initialTabIndex ?? 0;
     _setupUserStatusListener();
     ChatService.ensureConnected();
 
     final userId = LocalAuthService.getUserId();
     if (userId != null) {
       ChatService.markAllMessagesAsDelivered(userId);
+    }
+
+    // ✅ Request permissions immediately after login (contacts and notifications)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestPermissions();
+      // If navigating to profile tab, refresh products
+      if (widget.initialTabIndex == 2 && _profileTabKey.currentState != null) {
+        _profileTabKey.currentState!.refreshProfile();
+      }
+    });
+  }
+
+  // ✅ Request permissions (contacts and notifications) after login
+  Future<void> _requestPermissions() async {
+    if (_permissionsAsked) return;
+
+    _permissionsAsked = true;
+
+    // Request contact permission
+    final contactPermission = await fc.FlutterContacts.requestPermission();
+
+    // Request notification permission (Firebase Messaging handles this automatically)
+    // Initialize Firebase Messaging for notifications
+    await MyFirebaseMessagingService.initialize();
+
+    // After permissions, start contact sync
+    if (contactPermission) {
+      final userId = LocalAuthService.getUserId();
+      if (userId != null) {
+        setState(() {
+          _contactsSynced = false;
+        });
+        await ContactService.fetchPhoneContacts(ownerUserId: userId);
+        setState(() {
+          _contactsSynced = true;
+        });
+      }
+    } else {
+      // Show dialog if permission denied
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Permission Required"),
+            content: const Text("Please allow contact access to sync your contacts."),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -101,10 +171,49 @@ class _ChatHomePageState extends State<ChatHomePage> {
     await MyFirebaseMessagingService.initialize();
   }
 
+  // ✅ Show menu with Settings option
+  void _showMenu() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.grey),
+              title: const Text("Settings"),
+              onTap: () {
+                Navigator.pop(context);
+                final userId = LocalAuthService.getUserId();
+                if (userId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UserProfilePage(userId: userId),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("User not found. Please login again.")),
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      // ✅ Hide AppBar when Profile or Marketplace tab is selected
+      appBar: (_selectedIndex == 2 || _selectedIndex == 1) ? null : AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: const Color(0xFF075E54),
         title: const Text(
@@ -116,11 +225,14 @@ class _ChatHomePageState extends State<ChatHomePage> {
             letterSpacing: 1.5,
           ),
         ),
-        actions: const [
-          Icon(Icons.search, color: Colors.white),
-          SizedBox(width: 16),
-          Icon(Icons.more_vert, color: Colors.white),
-          SizedBox(width: 8),
+        actions: [
+          const Icon(Icons.search, color: Colors.white),
+          const SizedBox(width: 16),
+          IconButton(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onPressed: _showMenu,
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: IndexedStack(
@@ -135,7 +247,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.chat), label: "Chats"),
-          BottomNavigationBarItem(icon: Icon(Icons.group), label: "Groups"),
+          BottomNavigationBarItem(icon: Icon(Icons.store), label: "Marketplace"),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
         ],
       ),
@@ -866,18 +978,685 @@ class Contact {
   });
 }
 
-class GroupsTab extends StatelessWidget {
-  const GroupsTab({super.key});
+
+class ProfileTab extends StatefulWidget {
+  const ProfileTab({super.key});
+
+  @override
+  State<ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<ProfileTab> {
+  ProfileSetting? _profile;
+  bool _loading = true;
+  final ImagePicker _imagePicker = ImagePicker();
+  String _selectedTab = 'Grid'; // Grid, Reels, or Profile
+  List<dynamic> _publishedProducts = [];
+  bool _loadingProducts = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+    _loadPublishedProducts();
+  }
+
+  // Public method to refresh profile
+  void refreshProfile() {
+    _loadProfile();
+    _loadPublishedProducts();
+  }
+
+  // ✅ Show MPIN menu from hamburger menu
+  void _showMpinMenu(BuildContext context) {
+    final isMpinEnabled = LocalAuthService.isMpinEnabled();
+    final hasMpin = LocalAuthService.hasMpin();
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                "MPIN Settings",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              title: const Text("Enable MPIN"),
+              subtitle: Text(isMpinEnabled ? "MPIN is enabled" : "MPIN is disabled"),
+              trailing: Switch(
+                value: isMpinEnabled,
+                onChanged: (value) async {
+                  Navigator.pop(context);
+                  await LocalAuthService.setMpinEnabled(value);
+                  if (mounted) {
+                    setState(() {});
+                  }
+                  if (value) {
+                    // If enabling, navigate to SetMpinPage if MPIN not set
+                    if (!hasMpin) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SetMpinPage()),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("MPIN enabled.")),
+                      );
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("MPIN disabled.")),
+                    );
+                  }
+                },
+              ),
+            ),
+            if (isMpinEnabled)
+              ListTile(
+                leading: const Icon(Icons.lock),
+                title: const Text("Set MPIN"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SetMpinPage()),
+                  );
+                },
+              ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadProfile() async {
+    setState(() => _loading = true);
+    final profile = await ApiService.getProfile();
+    setState(() {
+      _profile = profile;
+      _loading = false;
+    });
+    // Debug print
+    if (profile != null) {
+      print("✅ Profile loaded - Name: ${profile.name}, Address: ${profile.address}");
+    } else {
+      print("❌ Profile is null - No data found");
+    }
+  }
+
+  Future<void> _loadPublishedProducts() async {
+    setState(() => _loadingProducts = true);
+    try {
+      final products = await ProductDatabaseService().getProducts(
+        status: 'publish',
+      );
+      print("📦 Loaded ${products.length} published products");
+      for (var product in products) {
+        print("  Product: ${product.name}");
+        print("    Main images: ${product.images.length}");
+        print("    Variations: ${product.variations.length}");
+        for (var variation in product.variations) {
+          print("      Variation: ${variation['name']}");
+          print("        Image: ${variation['image']}");
+          print("        allImages type: ${variation['allImages'].runtimeType}");
+          if (variation['allImages'] != null) {
+            if (variation['allImages'] is List) {
+              print("        allImages count: ${(variation['allImages'] as List).length}");
+            } else if (variation['allImages'] is String) {
+              print("        allImages is String, length: ${(variation['allImages'] as String).length}");
+            }
+          }
+        }
+      }
+      setState(() {
+        _publishedProducts = products;
+        _loadingProducts = false;
+      });
+    } catch (e, stackTrace) {
+      print("❌ Error loading products: $e");
+      print("Stack trace: $stackTrace");
+      setState(() {
+        _publishedProducts = [];
+        _loadingProducts = false;
+      });
+    }
+  }
+
+  // Open camera interface directly (full screen)
+  void _showImagePickerOptions() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CameraInterfaceScreen(),
+      ),
+    );
+
+    if (result != null && result is List<File>) {
+      _handleSelectedImages(result);
+    }
+  }
+
+  // Handle selected images
+  void _handleSelectedImages(List<File> images) {
+    if (images.isEmpty) return;
+
+    // Show a snackbar with the number of selected images
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            images.length == 1
+                ? '1 image selected'
+                : '${images.length} images selected',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // TODO: Handle the selected images here
+    // You can add your logic to process/upload/display the images
+    print("Selected ${images.length} image(s)");
+    for (var image in images) {
+      print("Image path: ${image.path}");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const Center(child: Text("Groups will appear here"));
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_profile == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text("No profile found"),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                final userId = LocalAuthService.getUserId();
+                if (userId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UserProfilePage(userId: userId),
+                    ),
+                  ).then((_) {
+                    // Refresh profile after saving
+                    _loadProfile();
+                  });
+                }
+              },
+              child: const Text("Create Profile"),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF128C7E), // Dark blue background like image
+      body: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF128C7E), // Dark blue background (attractive color)
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Top bar with hamburger menu, profile photo, name with arrow, and plus icon
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+                child: Row(
+                  children: [
+                    // Hamburger menu (3 lines) on left
+                    IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white, size: 28),
+                      onPressed: () {
+                        _showMpinMenu(context);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    // Profile photo (circular, small)
+                    if (_profile!.profileImage != null && _profile!.profileImage!.isNotEmpty)
+                      ClipOval(
+                        child: Image.network(
+                          _profile!.profileImage!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white24,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.person, color: Colors.white, size: 24),
+                            );
+                          },
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person, color: Colors.white, size: 24),
+                      ),
+                    const SizedBox(width: 12),
+                    // Name with arrow icon
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _profile!.name ?? "No Name",
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Plus icon in white square (smaller size)
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.add, color: Colors.black, size: 18),
+                        onPressed: () {
+                          _showImagePickerOptions();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+              // Location below name (aligned with profile photo)
+              if (_profile!.address != null && _profile!.address!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 64.0, right: 16.0, top: 4.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on, color: Colors.white, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _profile!.address!,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: Colors.white,
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+              // White content area below (marketplace)
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                  ),
+                  child: Column(
+                    children: [
+                      // Tabs: Grid, Reels, Profile
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            // Grid Tab
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedTab = 'Grid';
+                                });
+                              },
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Icon(
+                                    Icons.grid_on,
+                                    color: _selectedTab == 'Grid' ? Colors.black : Colors.grey,
+                                    size: 28,
+                                  ),
+                                  if (_selectedTab == 'Grid')
+                                    Positioned(
+                                      top: -4,
+                                      right: -4,
+                                      child: Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF25D366),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            // Reels Tab
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedTab = 'Reels';
+                                });
+                              },
+                              child: Icon(
+                                Icons.play_circle_outline,
+                                color: _selectedTab == 'Reels' ? Colors.black : Colors.grey,
+                                size: 28,
+                              ),
+                            ),
+                            // Profile Tab
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedTab = 'Profile';
+                                });
+                              },
+                              child: Icon(
+                                Icons.person_outline,
+                                color: _selectedTab == 'Profile' ? Colors.black : Colors.grey,
+                                size: 28,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Content based on selected tab
+                      Expanded(
+                        child: _selectedTab == 'Grid'
+                            ? _buildProductsGrid()
+                            : _selectedTab == 'Reels'
+                                ? const Center(child: Text('Reels coming soon'))
+                                : const Center(child: Text('Profile content')),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProductsGrid() {
+    if (_loadingProducts) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_publishedProducts.isEmpty) {
+      return const Center(
+        child: Text(
+          'No published products yet',
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
+    // Collect only the last image from each color variation
+    List<Map<String, dynamic>> gridItems = []; // Each item has: product, variation, imageUrl, imageIndex
+    for (var product in _publishedProducts) {
+      if (product is Product) {
+        // Get last image from each variation
+        if (product.variations.isNotEmpty) {
+          for (var variation in product.variations) {
+            // Get allImages from variation
+            List<String> allImages = [];
+            if (variation['allImages'] != null) {
+              dynamic allImagesData = variation['allImages'];
+              
+              // Handle if allImages is a JSON string
+              if (allImagesData is String) {
+                try {
+                  final decoded = jsonDecode(allImagesData);
+                  if (decoded is List) {
+                    allImagesData = decoded;
+                  }
+                } catch (e) {
+                  print('Error decoding allImages JSON in profile grid: $e');
+                }
+              }
+              
+              // Process as List
+              if (allImagesData is List) {
+                for (var img in allImagesData) {
+                  if (img is String && img.isNotEmpty) {
+                    allImages.add(img);
+                  } else if (img != null) {
+                    allImages.add(img.toString());
+                  }
+                }
+              }
+            }
+            
+            // Fallback to single image if allImages not available
+            if (allImages.isEmpty && variation['image'] != null) {
+              final img = variation['image'];
+              if (img is String && img.isNotEmpty) {
+                allImages.add(img);
+              } else if (img != null) {
+                allImages.add(img.toString());
+              }
+            }
+            
+            // Only add if we have images
+            if (allImages.isNotEmpty) {
+              // Get the last image (most recent)
+              final lastImage = allImages.last;
+              final imageIndex = allImages.length - 1;
+              
+              gridItems.add({
+                'product': product,
+                'variation': variation,
+                'imageUrl': lastImage,
+                'imageIndex': imageIndex,
+                'allImages': allImages,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (gridItems.isEmpty) {
+      return const Center(
+        child: Text(
+          'No images found',
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(2.0),
+      child: GridView.builder(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 2,
+          mainAxisSpacing: 2,
+        ),
+        itemCount: gridItems.length,
+        itemBuilder: (context, index) {
+          final item = gridItems[index];
+          final product = item['product'] as Product;
+          final variation = item['variation'] as Map<String, dynamic>;
+          final imageUrl = item['imageUrl'] as String;
+          final imageIndex = item['imageIndex'] as int;
+          
+          final allImages = item['allImages'] as List<String>;
+          final totalImages = allImages.length;
+          
+          return GestureDetector(
+            onTap: () {
+              // Debug: Print variation data before navigation
+              print('🔍 Navigating to product detail:');
+              print('  Variation name: ${variation['name']}');
+              print('  allImages type: ${variation['allImages']?.runtimeType}');
+              if (variation['allImages'] != null) {
+                if (variation['allImages'] is List) {
+                  print('  allImages count: ${(variation['allImages'] as List).length}');
+                } else {
+                  print('  allImages: ${variation['allImages']}');
+                }
+              }
+              print('  Total images in grid: $totalImages');
+              print('  Image index: $imageIndex');
+              
+              // Navigate to product detail page
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ProductDetailScreen(
+                    product: product,
+                    variation: variation,
+                    initialImageIndex: imageIndex,
+                  ),
+                ),
+              );
+            },
+            child: Stack(
+              children: [
+                Container(
+                  color: Colors.grey.shade200,
+                  child: _buildImageWidget(imageUrl),
+                ),
+                // Image count badge on bottom right
+                if (totalImages > 1)
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.photo_library,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$totalImages',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildImageWidget(String imageUrl) {
+    // Handle HTTP/HTTPS URLs
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      return Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            color: Colors.grey.shade200,
+            child: Center(
+              child: CircularProgressIndicator(
+                value: loadingProgress.expectedTotalBytes != null
+                    ? loadingProgress.cumulativeBytesLoaded /
+                        loadingProgress.expectedTotalBytes!
+                    : null,
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          print("Error loading network image: $imageUrl - $error");
+          return Container(
+            color: Colors.grey.shade300,
+            child: const Icon(Icons.broken_image, color: Colors.grey),
+          );
+        },
+      );
+    }
+    
+    // Try as local file path
+    try {
+      final file = File(imageUrl);
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            print("Error loading file image: $imageUrl - $error");
+            return Container(
+              color: Colors.grey.shade300,
+              child: const Icon(Icons.broken_image, color: Colors.grey),
+            );
+          },
+        );
+      }
+    } catch (e) {
+      print("Error checking file: $imageUrl - $e");
+    }
+    
+    // Fallback
+    return Container(
+      color: Colors.grey.shade300,
+      child: const Icon(Icons.broken_image, color: Colors.grey),
+    );
   }
 }
 
-class ProfileTab extends StatelessWidget {
-  const ProfileTab({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return const Center(child: Text("Profile info will appear here"));
-  }
-}

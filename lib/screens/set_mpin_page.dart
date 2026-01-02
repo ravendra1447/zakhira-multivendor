@@ -48,11 +48,10 @@ class _SetMpinPageState extends State<SetMpinPage> {
     setState(() => loading = false);
 
     if (res["success"] == true) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => UserProfilePage(userId: userId), // ✅ FIXED
-        ),
+      // ✅ After setting MPIN, go back to ChatHomePage
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("MPIN set successfully!")),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 import '../services/my_firebase_messaging_service.dart';
 import '../services/local_auth_service.dart';
-import 'set_mpin_page.dart';
-import 'verify_mpin_page.dart';
-import '../services/my_firebase_messaging_service.dart'; // ✅ Added this import
+import 'chat_home.dart';
 
 class OtpVerifyPage extends StatefulWidget {
   final String phone;
@@ -37,18 +35,11 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
       // send the FCM token to the server.
       await MyFirebaseMessagingService.saveFcmTokenToServer();
 
-      // ✅ STEP 2: Navigate to the correct page based on mpin status.
-      if (res["mpin_set"] == true) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const VerifyMpinPage()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const SetMpinPage()),
-        );
-      }
+      // ✅ STEP 2: Direct login to ChatHomePage (no Set MPIN or User Profile pages)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const ChatHomePage()),
+      );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(res["message"] ?? "Invalid OTP")),

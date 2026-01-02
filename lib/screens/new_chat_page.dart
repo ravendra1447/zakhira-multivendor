@@ -486,9 +486,33 @@ class _NewChatPageState extends State<NewChatPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isForForwarding ? "Forward to..." : "New Chat"),
+        title: Text(
+          widget.isForForwarding ? "Forward to..." : "New Chat",
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+          ),
+        ),
         backgroundColor: const Color(0xFF075E54),
         foregroundColor: Colors.white,
+        elevation: 0,
+        shadowColor: Colors.black.withOpacity(0.3),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(2),
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  Colors.white.withOpacity(0.2),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
       body: Column(
         children: [

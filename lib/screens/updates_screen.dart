@@ -7,18 +7,42 @@ class UpdatesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Updates"),
-        backgroundColor: const Color(0xFF075E54),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            onPressed: () {},
+        title: const Text(
+          "Updates",
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
           ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {},
+        ),
+        backgroundColor: const Color(0xFF075E54),
+        elevation: 0,
+        shadowColor: Colors.black.withOpacity(0.3),
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+              onPressed: () {},
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.search, color: Colors.white),
+              onPressed: () {},
+            ),
           ),
           PopupMenuButton<String>(
+            iconColor: Colors.white,
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: "status_privacy",
@@ -31,6 +55,21 @@ class UpdatesScreen extends StatelessWidget {
             ],
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(2),
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  Colors.white.withOpacity(0.2),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
       body: ListView(
         children: [

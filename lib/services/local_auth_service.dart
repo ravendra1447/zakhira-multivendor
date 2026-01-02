@@ -28,6 +28,14 @@ class LocalAuthService {
   /// ✅ New: check if MPIN exists locally
   static bool hasMpin() => _authBox.containsKey('mpin');
 
+  /// ✅ Check if MPIN is enabled
+  static bool isMpinEnabled() => _authBox.get('mpin_enabled', defaultValue: false) as bool;
+
+  /// ✅ Enable/Disable MPIN
+  static Future<void> setMpinEnabled(bool enabled) async {
+    await _authBox.put('mpin_enabled', enabled);
+  }
+
   /// ---------------- API CALLS ----------------
 
   /// 1️⃣ Send OTP

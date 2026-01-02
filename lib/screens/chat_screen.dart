@@ -197,7 +197,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Message> _cachedMessages = [];
   bool _needsRefresh = true;
   Timer? _updateTimer;
-  
+
   // ✅ CRITICAL: ValueNotifier to trigger UI rebuild when collage is ready
   // Step: Last image aayi → version.value++ → ValueListenableBuilder rebuild → Collage turant draw
   final ValueNotifier<int> _collageVersionNotifier = ValueNotifier<int>(0);
@@ -216,7 +216,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final Map<String, int> _imageLoadStages = {};
   final Map<String, Timer> _loadTimers = {};
   final Set<String> _fullyLoadedMessages = {};
-  
+
   // ✅ DOWNLOAD STATE TRACKING (WhatsApp style)
   final Set<String> _downloadingMessages = {}; // Messages currently downloading
   final Map<String, double> _downloadProgress = {}; // Download progress 0.0-100.0
@@ -463,7 +463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // The stream message might not have these fields set yet
         final hiveMsg = _messageBox.get(msg.messageId);
         final Message messageToUse = hiveMsg ?? msg;
-        
+
         // ✅ DEBUG: Log ALL media messages to check if they have groupId
         if (messageToUse.messageType == 'media' || messageToUse.messageType == 'encrypted_media') {
           print("📱 [ONNEWMESSAGE] Media message received: messageId=${messageToUse.messageId}");
@@ -539,14 +539,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (filledSlots >= 2 && totalImages >= 2) {
                 final isAllImages = filledSlots == totalImages;
                 print("✅ [TEMP BUNDLE] ${isAllImages ? 'All' : '$filledSlots'} $totalImages images received for group $gid - triggering immediate bundle creation");
-                
+
                 // ✅ CRITICAL FIX: Clear "recent" markers for all messages in this group to allow bundle to show
                 final allGroupMsgs = _messageBox.values
                     .where((m) => m.groupId == gid && m.chatId == widget.chatId)
                     .toList();
                 allGroupMsgs.addAll(_pendingTempMessages.values
                     .where((m) => m.groupId == gid && m.chatId == widget.chatId));
-                
+
                 for (final m in allGroupMsgs) {
                   final msgIdStr = m.messageId.toString();
                   _recentlyReceivedMessages.remove(msgIdStr);
@@ -554,17 +554,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _recentMessageTimers.remove(msgIdStr);
                 }
                 print("🧹 [TEMP ALL IMAGES] Cleared recent markers for ${allGroupMsgs.length} messages in group $gid");
-                
+
                 // ✅ Clear all rendering flags and cache to force fresh bundle creation
                 final String groupAnchorKey = 'group_${gid}_anchor';
                 _renderedGroups.remove(gid);
                 _renderedAnchorMessages.remove(groupAnchorKey);
                 _builtGroups.remove(gid);
                 _slotsSyncedForGroup.remove(gid);
-                
+
                 // ✅ CRITICAL: Mark group for forced rebuild (even if cache exists later)
                 _forceBundleRebuild.add(gid);
-                
+
                 for (final m in allGroupMsgs) {
                   if ((m.imageIndex ?? 0) == 0) {
                     final anchorKey = m.messageId.toString();
@@ -573,22 +573,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     _renderedAnchorMessages.remove(anchorKey);
                   }
                 }
-                
+
                 _reinitializeSlotsForGroup(gid, widget.chatId);
-                
+
                 // ✅ CRITICAL: Clear message list cache to force full rebuild
                 _cachedMessages.clear();
                 _needsRefresh = true;
-                
+
                 // ✅ CRITICAL: Force rebuild message list immediately to include new messages
                 // This ensures bundle check sees all messages including temp ones
                 final currentMessages = _getOptimizedMessages();
                 print("🔄 [BUNDLE REBUILD] Forced message list rebuild - found ${currentMessages.length} messages");
-                
+
                 // ✅ STEP: Last image aayi → version.value++ 🔥 → ValueListenableBuilder rebuild → Collage turant draw
                 _collageVersionNotifier.value = _collageVersionNotifier.value + 1;
                 print("🔥 [COLLAGE VERSION] Incremented collage version to ${_collageVersionNotifier.value} for group $gid (filledSlots=$filledSlots/$totalImages)");
-                
+
                 // ✅ INSTANT UI REBUILD: Direct setState to force immediate UI update (SYNCHRONOUS)
                 if (mounted) {
                   // ✅ CRITICAL: Use SchedulerBinding to ensure setState happens after current frame
@@ -599,7 +599,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         _cachedMessages.clear(); // Clear cache again to force rebuild
                       });
                       print("🔄 [BUNDLE REBUILD] Triggered setState in postFrame callback (synchronous)");
-                      
+
                       // ✅ Also trigger in next frame as backup
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (mounted) {
@@ -611,7 +611,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       });
                     }
                   });
-                  
+
                   // ✅ Also trigger immediate setState for instant update
                   setState(() {
                     _needsRefresh = true;
@@ -619,7 +619,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   });
                   print("🔄 [BUNDLE REBUILD] Triggered immediate setState for instant UI update");
                 }
-                
+
                 // ✅ CRITICAL FIX: Force Hive box update by touching extraData to trigger ValueListenableBuilder
                 Future.microtask(() async {
                   if (mounted) {
@@ -839,7 +839,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               .toList();
           allGroupMsgs.addAll(_pendingTempMessages.values
               .where((m) => m.groupId == groupId && m.chatId == widget.chatId));
-          
+
           for (final m in allGroupMsgs) {
             final msgIdStr = m.messageId.toString();
             _recentlyReceivedMessages.remove(msgIdStr);
@@ -854,10 +854,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _renderedAnchorMessages.remove(groupAnchorKey);
           _builtGroups.remove(groupId);
           _slotsSyncedForGroup.remove(groupId);
-          
+
           // ✅ CRITICAL: Mark group for forced rebuild (even if cache exists later)
           _forceBundleRebuild.add(groupId);
-          
+
           for (final m in allGroupMsgs) {
             if ((m.imageIndex ?? 0) == 0) {
               final anchorKey = m.messageId.toString();
@@ -941,7 +941,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _needsRefresh = true; // Force refresh
       _cachedMessages.clear(); // Clear cache to force rebuild
     }
-    
+
     if (!_needsRefresh && _cachedMessages.isNotEmpty) {
       // ✅ CRITICAL: Still include pending temp messages for instant display
       final pendingToAdd = _pendingTempMessages.values
@@ -1130,7 +1130,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final anchorIdx = entry.value;
           final groupMsgs = deduplicatedMessages.where((m) => m.groupId == gid).toList();
           print('🧩 [ANCHOR DEBUG] Group $gid: anchor=$anchorIdx, messages=${groupMsgs.map((m) => '${m.messageId}(idx=${m.imageIndex})').join(', ')}');
-          
+
           // ✅ DEBUG: Check if anchor message exists in the list
           final anchorMsg = groupMsgs.firstWhereOrNull((m) => (m.imageIndex ?? 0) == anchorIdx);
           if (anchorMsg != null) {
@@ -1454,11 +1454,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _recentlyReceivedMessages.clear();
       _recentMessageTimers.values.forEach((timer) => timer.cancel());
       _recentMessageTimers.clear();
-      
+
       // ✅ Clear cache and force rebuild to show bundles
       _cachedMessages.clear();
       _needsRefresh = true;
-      
+
       // ✅ Trigger UI rebuild
       if (mounted) {
         setState(() {
@@ -2847,14 +2847,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (filledSlots >= 2 && totalImages >= 2) {
           final isAllImages = filledSlots == totalImages;
           print("✅ [BUNDLE CREATION] ${isAllImages ? 'All' : '$filledSlots'} $totalImages images received for group $groupId - triggering immediate bundle creation");
-          
+
           // ✅ CRITICAL FIX: Clear "recent" markers for all messages in this group to allow bundle to show
           final allGroupMsgs = _messageBox.values
               .where((m) => m.groupId == groupId && m.chatId == chatIdForGroup)
               .toList();
           allGroupMsgs.addAll(_pendingTempMessages.values
               .where((m) => m.groupId == groupId && m.chatId == chatIdForGroup));
-          
+
           for (final m in allGroupMsgs) {
             final msgIdStr = m.messageId.toString();
             _recentlyReceivedMessages.remove(msgIdStr);
@@ -2862,17 +2862,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _recentMessageTimers.remove(msgIdStr);
           }
           print("🧹 [ALL IMAGES ARRIVED] Cleared recent markers for ${allGroupMsgs.length} messages in group $groupId");
-          
+
           // ✅ Clear all rendering flags and cache to force fresh bundle creation
           final String groupAnchorKey = 'group_${groupId}_anchor';
           _renderedGroups.remove(groupId);
           _renderedAnchorMessages.remove(groupAnchorKey);
           _builtGroups.remove(groupId);
           _slotsSyncedForGroup.remove(groupId);
-          
+
           // ✅ CRITICAL: Mark group for forced rebuild (even if cache exists later)
           _forceBundleRebuild.add(groupId);
-          
+
           for (final m in allGroupMsgs) {
             if ((m.imageIndex ?? 0) == 0) {
               final anchorKey = m.messageId.toString();
@@ -2881,14 +2881,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _renderedAnchorMessages.remove(anchorKey);
             }
           }
-          
+
           // Trigger immediate bundle creation
           _reinitializeSlotsForGroup(groupId, chatIdForGroup);
-          
+
           // ✅ CRITICAL: Clear message list cache to force full rebuild
           _cachedMessages.clear();
           _needsRefresh = true;
-          
+
           // ✅ STEP: Last image aayi → version.value++ 🔥 → ValueListenableBuilder rebuild → Collage turant draw
           _collageVersionNotifier.value = _collageVersionNotifier.value + 1;
           print("🔥 [COLLAGE VERSION] Incremented collage version to ${_collageVersionNotifier.value} for group $groupId (filledSlots=$filledSlots/$totalImages)");
@@ -3040,12 +3040,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // ✅ RECEIVER SIDE: Mark receiver messages as recently received (ONLY if not all images received)
       if (isReceiver && (msg.groupId ?? '').isNotEmpty && msg.imageIndex != null && msg.totalImages != null) {
         final gid = msg.groupId!;
-        
+
         // ✅ Check if 2+ images have arrived for this group
         if (_collageMap.containsKey(gid)) {
           final slotList = _collageMap[gid]!;
           final filledSlots = slotList.where((url) => url != null && url.isNotEmpty).length;
-          
+
           // ✅ FIX: Create bundle when 2+ images arrive (not just when all arrive)
           if (filledSlots >= 2 && msg.totalImages! >= 2) {
             final isAllImages = filledSlots == msg.totalImages;
@@ -3055,7 +3055,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 .toList();
             allGroupMsgs.addAll(_pendingTempMessages.values
                 .where((m) => m.groupId == gid && m.chatId == msg.chatId));
-            
+
             for (final m in allGroupMsgs) {
               final msgIdStr2 = m.messageId.toString();
               _recentlyReceivedMessages.remove(msgIdStr2);
@@ -3063,13 +3063,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _recentMessageTimers.remove(msgIdStr2);
             }
             print("🧹 [SAVE] Cleared recent markers for group $gid (${isAllImages ? 'all' : '$filledSlots'} $filledSlots images received) - bundle will show");
-            
+
             // ✅ CRITICAL: Trigger immediate bundle creation
             _forceBundleRebuild.add(gid);
             _renderedGroups.remove(gid);
             _builtGroups.remove(gid);
             _slotsSyncedForGroup.remove(gid);
-            
+
             // ✅ Clear collage cache to force fresh rebuild
             final String groupAnchorKey = 'group_${gid}_anchor';
             _renderedAnchorMessages.remove(groupAnchorKey);
@@ -3084,20 +3084,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _renderedAnchorMessages.remove(anchorKey);
               }
             }
-            
+
             _cachedMessages.clear();
-            
+
             // ✅ STEP: Last image aayi → version.value++ 🔥 → ValueListenableBuilder rebuild → Collage turant draw
             _collageVersionNotifier.value = _collageVersionNotifier.value + 1;
             print("🔥 [COLLAGE VERSION] Incremented collage version to ${_collageVersionNotifier.value} for group $gid (filledSlots=$filledSlots/${msg.totalImages})");
-            
+
             // ✅ INSTANT UI REBUILD: Direct setState to force immediate UI update (SYNCHRONOUS)
             if (mounted) {
               setState(() {
                 _needsRefresh = true;
               });
               print("🔄 [SAVE BUNDLE] Triggered direct setState for instant UI update (synchronous)");
-              
+
               // ✅ Also trigger in next frame as backup
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
@@ -3110,16 +3110,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           } else if (filledSlots < 2) {
             // Less than 2 images - mark as recent (show individually)
-        final msgIdStr = msg.messageId.toString();
-        _recentlyReceivedMessages.add(msgIdStr);
-        // Cancel existing timer if any
-        _recentMessageTimers[msgIdStr]?.cancel();
-        // Set timer to remove from recent set after 10 seconds
-        _recentMessageTimers[msgIdStr] = Timer(const Duration(seconds: 10), () {
-          _recentlyReceivedMessages.remove(msgIdStr);
-          _recentMessageTimers.remove(msgIdStr);
-          print("⏰ [RECENT] Removed receiver message $msgIdStr from recently received set");
-        });
+            final msgIdStr = msg.messageId.toString();
+            _recentlyReceivedMessages.add(msgIdStr);
+            // Cancel existing timer if any
+            _recentMessageTimers[msgIdStr]?.cancel();
+            // Set timer to remove from recent set after 10 seconds
+            _recentMessageTimers[msgIdStr] = Timer(const Duration(seconds: 10), () {
+              _recentlyReceivedMessages.remove(msgIdStr);
+              _recentMessageTimers.remove(msgIdStr);
+              print("⏰ [RECENT] Removed receiver message $msgIdStr from recently received set");
+            });
             print("✅ [RECENT] Marked receiver message $msgIdStr as recently received (groupId=$gid, imageIndex=${msg.imageIndex}, waiting for more: $filledSlots/${msg.totalImages})");
           }
         } else {
@@ -3174,19 +3174,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // ✅ CRITICAL: Check if 2+ images have arrived, trigger immediate bundle creation
           final filledSlots = slotList.where((url) => url != null && url.isNotEmpty).length;
           final totalImagesCount = totalImages ?? slotList.length;
-          
+
           // ✅ FIX: Create bundle immediately when 2+ images arrive (not just when all arrive)
           if (filledSlots >= 2 && totalImagesCount >= 2) {
             final isAllImages = filledSlots == totalImagesCount;
             print("✅ [RECEIVER BUNDLE] ${isAllImages ? 'All' : '$filledSlots'} $totalImagesCount images received for group $groupId - triggering immediate bundle creation");
-            
+
             // ✅ CRITICAL FIX: Clear "recent" markers for all messages in this group to allow bundle to show
             final allGroupMsgs = _messageBox.values
                 .where((m) => m.groupId == groupId && m.chatId == msg.chatId)
                 .toList();
             allGroupMsgs.addAll(_pendingTempMessages.values
                 .where((m) => m.groupId == groupId && m.chatId == msg.chatId));
-            
+
             for (final m in allGroupMsgs) {
               final msgIdStr = m.messageId.toString();
               _recentlyReceivedMessages.remove(msgIdStr);
@@ -3194,18 +3194,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _recentMessageTimers.remove(msgIdStr);
             }
             print("🧹 [RECEIVER ALL IMAGES] Cleared recent markers for ${allGroupMsgs.length} messages in group $groupId");
-            
+
             // ✅ Clear all rendering flags and cache to force fresh bundle creation
             final String groupAnchorKey = 'group_${groupId}_anchor';
             _renderedGroups.remove(groupId);
             _renderedAnchorMessages.remove(groupAnchorKey);
             _builtGroups.remove(groupId);
             _slotsSyncedForGroup.remove(groupId);
-            
+
             // ✅ CRITICAL: Mark group for forced rebuild (even if cache exists later)
             _forceBundleRebuild.add(groupId);
             print("🔄 [FORCE REBUILD] Added group $groupId to _forceBundleRebuild set. Current set: ${_forceBundleRebuild.toList()}");
-            
+
             for (final m in allGroupMsgs) {
               if ((m.imageIndex ?? 0) == 0) {
                 final anchorKey = m.messageId.toString();
@@ -3214,14 +3214,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _renderedAnchorMessages.remove(anchorKey);
               }
             }
-            
+
             // Trigger immediate bundle creation
             _reinitializeSlotsForGroup(groupId, msg.chatId);
-            
+
             // ✅ CRITICAL: Clear message list cache to force full rebuild
             _cachedMessages.clear();
             _needsRefresh = true;
-            
+
             // ✅ CRITICAL: Force rebuild message list immediately to include new messages
             // This ensures bundle check sees all messages including temp ones
             final currentMessages = _getOptimizedMessages();
@@ -3241,7 +3241,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     _cachedMessages.clear(); // Clear cache again to force rebuild
                   });
                   print("🔄 [RECEIVER BUNDLE REBUILD] Triggered setState in postFrame callback (synchronous)");
-                  
+
                   // ✅ Also trigger in next frame as backup
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) {
@@ -3253,7 +3253,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   });
                 }
               });
-              
+
               // ✅ Also trigger immediate setState for instant update
               setState(() {
                 _needsRefresh = true;
@@ -3283,29 +3283,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             return; // Early return - bundle created, no need to continue
           } else {
             // ✅ NEW: Mark this message as recently received (for individual display) ONLY if not all images received
-        final msgIdStr = msg.messageId.toString();
-        _recentlyReceivedMessages.add(msgIdStr);
-        // Cancel existing timer if any
-        _recentMessageTimers[msgIdStr]?.cancel();
-        // Set timer to remove from recent set after 10 seconds
-        _recentMessageTimers[msgIdStr] = Timer(const Duration(seconds: 10), () {
-          _recentlyReceivedMessages.remove(msgIdStr);
-          _recentMessageTimers.remove(msgIdStr);
-          print("⏰ [RECENT] Removed message $msgIdStr from recently received set");
-        });
+            final msgIdStr = msg.messageId.toString();
+            _recentlyReceivedMessages.add(msgIdStr);
+            // Cancel existing timer if any
+            _recentMessageTimers[msgIdStr]?.cancel();
+            // Set timer to remove from recent set after 10 seconds
+            _recentMessageTimers[msgIdStr] = Timer(const Duration(seconds: 10), () {
+              _recentlyReceivedMessages.remove(msgIdStr);
+              _recentMessageTimers.remove(msgIdStr);
+              print("⏰ [RECENT] Removed message $msgIdStr from recently received set");
+            });
             print("✅ [RECENT] Marked message $msgIdStr as recently received (will show individually until all images arrive: $filledSlots/$totalImagesCount)");
 
-        // ✅ CRITICAL FIX: Re-initialize slots for this group (same as when navigating back)
-        // This ensures ALL images show immediately in real-time, not just 2
-        _reinitializeSlotsForGroup(groupId, msg.chatId);
+            // ✅ CRITICAL FIX: Re-initialize slots for this group (same as when navigating back)
+            // This ensures ALL images show immediately in real-time, not just 2
+            _reinitializeSlotsForGroup(groupId, msg.chatId);
 
-        // ✅ CRITICAL: Also clear cache immediately to force rebuild
+            // ✅ CRITICAL: Also clear cache immediately to force rebuild
             final String groupAnchorKey2 = 'group_${groupId}_anchor';
-        _renderedGroups.remove(groupId);
+            _renderedGroups.remove(groupId);
             _renderedAnchorMessages.remove(groupAnchorKey2);
-        _builtGroups.remove(groupId);
+            _builtGroups.remove(groupId);
 
-        // Clear cache for all anchor messages in this group
+            // Clear cache for all anchor messages in this group
             final allGroupMsgs2 = _messageBox.values
                 .where((m) => m.groupId == groupId && m.chatId == msg.chatId)
                 .toList();
@@ -3855,7 +3855,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         msg.messageType == 'encrypted_media' ||
         (msg.lowQualityUrl != null && msg.lowQualityUrl!.isNotEmpty) ||
         (msg.highQualityUrl != null && msg.highQualityUrl!.isNotEmpty);
-    
+
     // ✅ DEBUG: Log media message check
     //final hasGroupId = (msg.groupId ?? '').isNotEmpty;
     if (hasGroupId) {
@@ -4002,9 +4002,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         totalImages2 = msg.totalImages!;
                         filledSlots2 = 1; // At least this one image
                       }
-                      
+
                       final bool showCountingBadge2 = totalImages2 > 1 && filledSlots2 < totalImages2;
-                      
+
                       return Stack(
                         children: [
                           ClipRRect(
@@ -4644,11 +4644,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   } else {
                                     filledSlots = 1; // At least this one image
                                   }
-                                  
+
                                   final bool showCountingBadge = totalImages > 1 && filledSlots < totalImages;
-                                  
+
                                   if (!showCountingBadge) return const SizedBox.shrink();
-                                  
+
                                   return Positioned(
                                     top: 8,
                                     right: 8,
@@ -4736,7 +4736,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final slotList = _collageMap[gid]!;
       // ✅ CRITICAL: Sync slots from messages to get accurate count (same logic as _buildMediaMessage)
       final updatedSlotList = List<String?>.from(slotList);
-      
+
       // ✅ ONSCREEN FIX: Always update slots from all messages to ensure accurate count
       for (final m in groupMessages) {
         if (m.imageIndex != null && m.imageIndex! >= 0 && m.imageIndex! < updatedSlotList.length) {
@@ -4751,7 +4751,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
       actualFilledSlots = updatedSlotList.where((url) => url != null && url.isNotEmpty).length;
-      
+
       // ✅ ONSCREEN FIX: Update actual slotList in _collageMap to keep it in sync
       // This ensures that slots are always up-to-date when checking
       bool slotsChanged = false;
@@ -5242,7 +5242,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final int filledSlotsAfterSync = updatedSlotList.where((url) => url != null && url.isNotEmpty).length;
         // Use the synced count if available, otherwise use original
         final int actualFilledSlots = slotsUpdated ? filledSlotsAfterSync : filledSlots;
-        
+
         print('🔍 [DEBUG] Group $gid: filledSlots=$filledSlots (before sync), filledSlotsAfterSync=$filledSlotsAfterSync (after sync), actualFilledSlots=$actualFilledSlots (using), totalImages=$totalImages, imageIndex=${msg.imageIndex}, messageId=${msg.messageId}');
         print('🔍 [DEBUG] Slot list (before sync): ${slotList.map((url) => url != null ? "filled" : "empty").toList()}');
         print('🔍 [DEBUG] Slot list (after sync): ${updatedSlotList.map((url) => url != null ? "filled" : "empty").toList()}');
@@ -5293,7 +5293,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // ✅ CRITICAL FIX: If 2+ images arrived, ALWAYS show bundle (ignore recent status completely)
           // Only show individually if less than 2 images OR if explicitly marked as recent AND less than 2 images
           bool shouldShowBundle = actualFilledSlots >= 2;
-          
+
           if (!shouldShowBundle && allRecent && allGroupMsgs.length >= 2) {
             // Less than 2 images but all recent - show individually
             print('✅ [INDIVIDUAL] Showing message ${msg.messageId} individually (less than 2 images and all recent) - isMe=$isMe');
@@ -5358,7 +5358,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
               // ✅ CRITICAL FIX: Check if forced rebuild is needed BEFORE lock check
               final bool needsForceRebuild = _forceBundleRebuild.contains(gid);
-              
+
               // ✅ CRITICAL FIX: If group is locked AND all images received, sync = false (UNLESS forced rebuild)
               final bool isGroupLocked = _slotsSyncedForGroup.contains(gid);
               final bool allImagesReceived = actualFilledSlots == totalImages;
@@ -5413,10 +5413,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
               // ✅ Note: needsForceRebuild already declared above
 
-                // ✅ RECEIVER SIDE FIX: Always rebuild if cache is incomplete or has wrong count
-                // ✅ CRITICAL: On receiver side, NEVER return cached immediately after all images arrive - force fresh rebuild
-                // This ensures bundle shows immediately when all images arrive
-                if (hasCache && !cacheIsIncomplete && !cacheHasWrongCount && !slotsUpdated && !slotsCountChanged && !slotsNeedSync && actualFilledSlots == totalImages && cachedFilledSlots == actualFilledSlots && !needsForceRebuild) {
+              // ✅ RECEIVER SIDE FIX: Always rebuild if cache is incomplete or has wrong count
+              // ✅ CRITICAL: On receiver side, NEVER return cached immediately after all images arrive - force fresh rebuild
+              // This ensures bundle shows immediately when all images arrive
+              if (hasCache && !cacheIsIncomplete && !cacheHasWrongCount && !slotsUpdated && !slotsCountChanged && !slotsNeedSync && actualFilledSlots == totalImages && cachedFilledSlots == actualFilledSlots && !needsForceRebuild) {
                 // ✅ RECEIVER SIDE FIX: Don't return cached immediately - force rebuild for instant visibility
                 // Only return cached if NOT receiver side OR if we're sure UI has already been updated
                 if (!isReceiver2) {
@@ -5490,7 +5490,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 // ✅ CRITICAL: Check if forced rebuild is needed BEFORE caching
                 final bool needsForceRebuild = _forceBundleRebuild.contains(gid);
                 print("🔍 [CACHE CHECK] Group $gid - needsForceRebuild=$needsForceRebuild, _forceBundleRebuild contains: ${_forceBundleRebuild.toList()}");
-                
+
                 if (actualFilledSlots == totalImages && allSlotsVerified && !needsForceRebuild) {
                   // All images received AND verified AND NOT forced rebuild - safe to cache
                   _collageWidgetCache[anchorKey] = collageWidget;
@@ -5522,7 +5522,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           _cachedMessages.clear();
                         });
                         print("🔄 [FORCE REBUILD] Triggered setState (postFrame) for group $gid to force UI rebuild");
-                        
+
                         // ✅ Also trigger in next frame as backup to ensure UI updates
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted) {
@@ -5580,7 +5580,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 .toList();
             allGroupMsgsForSync.addAll(_pendingTempMessages.values
                 .where((m) => m.groupId == gid && m.chatId == widget.chatId));
-            
+
             // Update slots from messages
             final updatedSlotListElse = List<String?>.from(slotList);
             for (final m in allGroupMsgsForSync) {
@@ -5591,7 +5591,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 }
               }
             }
-            
+
             // ✅ CRITICAL: Recalculate filledSlots from synced slots
             final int actualFilledSlotsElse = updatedSlotListElse.where((url) => url != null && url.isNotEmpty).length;
             print('📱 [RECEIVER ELSE] Recalculated filledSlots: original=$filledSlots, after sync=$actualFilledSlotsElse, totalImages=$totalImages');
@@ -5625,7 +5625,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             // ✅ CRITICAL FIX: If 2+ images arrived, ALWAYS show bundle (ignore recent status completely)
             // Only show individually if less than 2 images OR if explicitly marked as recent AND less than 2 images
             bool shouldShowBundle = actualFilledSlotsElse >= 2;
-            
+
             if (!shouldShowBundle && allRecent && allGroupMsgs.length >= 2) {
               // Less than 2 images but all recent - show individually
               print('✅ [RECEIVER INDIVIDUAL] Showing message ${msg.messageId} individually (less than 2 images and all recent)');
@@ -6287,12 +6287,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
 
             // ✅ RECEIVER SIDE: Download button and loading indicator (WhatsApp style)
-            if (!isMe && mediaUrl.startsWith('http')) 
+            if (!isMe && mediaUrl.startsWith('http'))
               _buildDownloadControls(msg, mediaUrl),
 
             // ✅ For single images, time stays on right. For multiple images, show Photos on left
             if (msg.totalImages != null && msg.totalImages! > 1)
-              // Multiple images: Photos on left, time on right
+            // Multiple images: Photos on left, time on right
               Positioned(
                 bottom: 6,
                 left: 6,
@@ -6344,7 +6344,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               )
             else
-              // Single image: time on right only
+            // Single image: time on right only
               Positioned(
                 bottom: 6,
                 right: 6,
@@ -6638,23 +6638,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final bool isRemoteSlot = fullImageUrl.startsWith('http');
       final userId = LocalAuthService.getUserId();
       final bool isMeSlot = msg?.senderId == userId;
-      
+
       return Stack(
         children: [
           GestureDetector(
-        onTap: () {
-          if (msg != null) {
+            onTap: () {
+              if (msg != null) {
                 _openImageFullScreen(msg!);
-          } else {
-            // ✅ If message not found, try to open from URL directly
-            print('⚠️ [COLLAGE] Message not found for slot $slotIndex, opening URL directly');
-            // You can add a fallback image viewer here if needed
-          }
-        },
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(0), // ✅ No border
-          child: imageWidget,
-        ),
+              } else {
+                // ✅ If message not found, try to open from URL directly
+                print('⚠️ [COLLAGE] Message not found for slot $slotIndex, opening URL directly');
+                // You can add a fallback image viewer here if needed
+              }
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(0), // ✅ No border
+              child: imageWidget,
+            ),
           ),
           // ✅ RECEIVER SIDE: Download button for collage images (WhatsApp style)
           if (!isMeSlot && isRemoteSlot && msg != null)
@@ -6683,7 +6683,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         print('🔍 [COLLAGE URL ORDER] Added image at slot $i: url=${url.length > 50 ? url.substring(0, 50) + "..." : url}, msgId=${msg?.messageId}');
       }
     }
-    
+
     // ✅ APP RESTART FIX: Log final image order to verify consistency
     print('🔍 [COLLAGE URL ORDER] Final imageUrls count: ${imageUrls.length}, order: slots 0-${imageUrls.length - 1}');
 
@@ -7399,7 +7399,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // ✅ Track image load for auto-hiding download button
     final messageId = msg.messageId.toString();
-   // final isRemote = mediaUrl.startsWith('http');
+    // final isRemote = mediaUrl.startsWith('http');
 
     return OrientationAwareImage(
       provider: ResizeImage(
@@ -7548,52 +7548,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ DOWNLOAD FUNCTION - Download image to local storage (WhatsApp style)
   Future<void> _downloadImage(Message msg, String imageUrl) async {
     final messageId = msg.messageId.toString();
-    
+
     // Check if already downloading
     if (_downloadingMessages.contains(messageId)) {
       print("⚠️ Image $messageId is already being downloaded");
       return;
     }
-    
+
     // Check if already downloaded
     if (_downloadedMessages.contains(messageId)) {
       print("✅ Image $messageId is already downloaded");
       return;
     }
-    
+
     try {
       // Mark as downloading
       _downloadingMessages.add(messageId);
       _downloadProgress[messageId] = 0.0;
       if (mounted) setState(() {});
-      
+
       print("⬇️ Starting download for message $messageId from $imageUrl");
-      
+
       // Get downloads directory
       final directory = await getApplicationDocumentsDirectory();
       final downloadDir = Directory('${directory.path}/downloads');
       if (!await downloadDir.exists()) {
         await downloadDir.create(recursive: true);
       }
-      
+
       // Generate filename
       final uri = Uri.parse(imageUrl);
       final filename = uri.pathSegments.last;
       final ext = filename.contains('.') ? filename.substring(filename.lastIndexOf('.')) : '.jpg';
       final downloadPath = '${downloadDir.path}/${messageId}$ext';
-      
+
       // Download file with progress tracking
       final request = http.Request('GET', Uri.parse(imageUrl));
       final streamedResponse = await http.Client().send(request);
-      
+
       if (streamedResponse.statusCode == 200) {
         final contentLength = streamedResponse.contentLength ?? 0;
         final file = File(downloadPath);
         final sink = file.openWrite();
         int downloaded = 0;
-        
+
         await streamedResponse.stream.listen(
-          (chunk) {
+              (chunk) {
             sink.add(chunk);
             downloaded += chunk.length;
             if (contentLength > 0 && mounted) {
@@ -7604,18 +7604,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           },
           onDone: () async {
             await sink.close();
-            
+
             // Update message with local path
             msg.messageContent = downloadPath; // Update to local path
             await _messageBox.put(msg.messageId, msg);
-            
+
             // Mark as downloaded
             _downloadedMessages.add(messageId);
             _downloadingMessages.remove(messageId);
             _downloadProgress.remove(messageId);
-            
+
             print("✅ Image downloaded successfully: $downloadPath");
-            
+
             if (mounted) {
               setState(() {
                 _needsRefresh = true;
@@ -7636,7 +7636,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _downloadingMessages.remove(messageId);
       _downloadProgress.remove(messageId);
       if (mounted) setState(() {});
-      
+
       // Show error to user
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7645,7 +7645,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
   }
-  
+
   // ✅ CANCEL DOWNLOAD FUNCTION
   void _cancelDownload(String messageId) {
     _downloadingMessages.remove(messageId);
@@ -7659,17 +7659,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final messageId = msg.messageId.toString();
     final isDownloading = _downloadingMessages.contains(messageId);
     // Check if already downloaded (not a remote URL or file exists locally)
-    final isDownloaded = _downloadedMessages.contains(messageId) || 
-                        (!mediaUrl.startsWith('http') && File(mediaUrl).existsSync());
+    final isDownloaded = _downloadedMessages.contains(messageId) ||
+        (!mediaUrl.startsWith('http') && File(mediaUrl).existsSync());
     // ✅ Check if image is fully loaded/cached (auto-hide download button like WhatsApp)
     final isImageLoaded = _loadedImages.contains(messageId);
     final downloadProgress = _downloadProgress[messageId] ?? 0.0;
-    
+
     // ✅ WhatsApp style: Hide download button if image is downloaded OR fully loaded
     if (isDownloaded || isImageLoaded) {
       return const SizedBox.shrink(); // Completely hide like WhatsApp
     }
-    
+
     // ✅ WhatsApp style: Center the download button in the middle of image
     // ✅ FIX: Allow image tap even when downloading (open full screen like WhatsApp)
     return Positioned.fill(
@@ -7704,38 +7704,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   shape: BoxShape.circle,
                 ),
                 child: isDownloading
-                  ? Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Circular progress indicator
-                        SizedBox(
-                          width: 32,
-                          height: 32,
-                          child: CircularProgressIndicator(
-                            value: downloadProgress > 0 ? downloadProgress / 100 : null,
-                            strokeWidth: 3,
-                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        ),
-                        // Cancel button (cross icon)
-                        const Icon(
-                          Icons.close,
-                          size: 18,
-                          color: Colors.white,
-                        ),
-                      ],
-                    )
-                  : isDownloaded
-                      ? const Icon(
-                          Icons.download_done,
-                          size: 28,
-                          color: Colors.white,
-                        )
-                  : const Icon(
-                      Icons.download,
-                      size: 28,
+                    ? Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Circular progress indicator
+                    SizedBox(
+                      width: 32,
+                      height: 32,
+                      child: CircularProgressIndicator(
+                        value: downloadProgress > 0 ? downloadProgress / 100 : null,
+                        strokeWidth: 3,
+                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
+                    // Cancel button (cross icon)
+                    const Icon(
+                      Icons.close,
+                      size: 18,
                       color: Colors.white,
                     ),
+                  ],
+                )
+                    : isDownloaded
+                    ? const Icon(
+                  Icons.download_done,
+                  size: 28,
+                  color: Colors.white,
+                )
+                    : const Icon(
+                  Icons.download,
+                  size: 28,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
@@ -8431,11 +8431,11 @@ class _SingleImageBubbleState extends State<SingleImageBubble> {
               widget.onImageLoaded?.call();
             });
             return Image(
-            image: imageProvider,
-            fit: fitMode,
-            alignment: align,
-            width: maxWidth,
-            height: height,
+              image: imageProvider,
+              fit: fitMode,
+              alignment: align,
+              width: maxWidth,
+              height: height,
             );
           },
           placeholder: (context, url) {

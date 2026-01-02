@@ -18,6 +18,8 @@ import 'package:shared_preferences/shared_preferences.dart'; // Add this import 
 import '../models/chat_model.dart';
 import 'chat_home.dart';
 import '../config.dart'; // Make sure you have this new config.dart file in the same lib folder
+import '../services/local_auth_service.dart';
+import 'package:whatsappchat/screens/set_mpin_page.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int userId;
@@ -30,10 +32,8 @@ class UserProfilePage extends StatefulWidget {
 class _UserProfilePageState extends State<UserProfilePage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _dobController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
 
-  String? _gender;
-  DateTime? _dob;
   bool _loading = false;
 
   // UI and upload state
@@ -353,15 +353,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
   // Call create_basic_profile.php (PHP API)
   // -------------------------
   Future<void> _callCreateProfile({String? profileFileId}) async {
-    final dobIso = _dob != null
-        ? "${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}"
-        : "";
-
     final resp = await http.post(Uri.parse("${Config.basePhpApiUrl}/create_basic_profile.php"), body: {
       "user_id": widget.userId.toString(),
       "name": _nameController.text.trim(),
-      "gender": _gender ?? "",
-      "dob": dobIso,
+      "address": _locationController.text.trim(),
       "profile_file_id": profileFileId ?? "",
     });
 
@@ -531,7 +526,17 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   void _navigateToChatHomePage() {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ChatHomePage()));
+    // ✅ If accessed from menu, just pop back. Otherwise replace.
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Profile saved successfully!")),
+      );
+      // Trigger profile refresh in ProfileTab
+      // This will be handled by the parent widget
+    } else {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ChatHomePage()));
+    }
   }
 
   // --- MODIFIED _saveProfile() to include the new flow ---
@@ -575,14 +580,72 @@ class _UserProfilePageState extends State<UserProfilePage> {
   @override
   void dispose() {
     _nameController.dispose();
-    _dobController.dispose();
+    _locationController.dispose();
     super.dispose();
+  }
+
+  // ✅ Show menu with MPIN enable/disable and Set MPIN options
+  void _showMenu() {
+    final isMpinEnabled = LocalAuthService.isMpinEnabled();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SwitchListTile(
+              title: const Text("Enable MPIN"),
+              subtitle: Text(isMpinEnabled ? "MPIN is enabled" : "MPIN is disabled"),
+              value: isMpinEnabled,
+              onChanged: (value) async {
+                await LocalAuthService.setMpinEnabled(value);
+                Navigator.pop(context);
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(value 
+                      ? "MPIN enabled. You can set MPIN now." 
+                      : "MPIN disabled. MPIN will not work on app restart."),
+                  ),
+                );
+              },
+            ),
+            if (isMpinEnabled)
+              ListTile(
+                leading: const Icon(Icons.lock, color: Colors.grey),
+                title: const Text("Set MPIN"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SetMpinPage(),
+                    ),
+                  );
+                },
+              ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("User Profile Details")),
+      appBar: AppBar(
+        title: const Text("User Profile Details"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: _showMenu,
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -648,33 +711,22 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 validator: (value) => value!.isEmpty ? "Full Name is required" : null,
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _gender,
-                decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
-                items: ["Male", "Female", "Other"].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-                onChanged: (value) => setState(() => _gender = value),
-                validator: (value) => value == null ? "Please select gender" : null,
-              ),
-              const SizedBox(height: 16),
               TextFormField(
-                controller: _dobController,
-                readOnly: true,
-                decoration: const InputDecoration(labelText: "Date of Birth", border: OutlineInputBorder()),
-                onTap: () async {
-                  DateTime? picked = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime(2000),
-                    firstDate: DateTime(1900),
-                    lastDate: DateTime.now(),
-                  );
-                  if (picked != null) {
-                    setState(() {
-                      _dob = picked;
-                      _dobController.text = "${picked.day}-${picked.month}-${picked.year}";
-                    });
-                  }
-                },
-                validator: (value) => _dob == null ? "Date of Birth is required" : null,
+                controller: _locationController,
+                decoration: InputDecoration(
+                  labelText: "Location/Address",
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.location_on),
+                    onPressed: () {
+                      // TODO: Add automatic location fetching here if geolocator is available
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Enter location manually or enable location services")),
+                      );
+                    },
+                  ),
+                ),
+                validator: (value) => value!.isEmpty ? "Location is required" : null,
               ),
               const SizedBox(height: 24),
               ElevatedButton(

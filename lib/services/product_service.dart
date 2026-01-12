@@ -46,12 +46,39 @@ class ProductService {
       List<Map<String, dynamic>> processedVariations = [];
       if (productData['variations'] != null) {
         final variations = productData['variations'] as List<dynamic>;
+        final stockMode = productData['stockMode'] as String? ?? 'simple';
+        final stockByColorSize = productData['stockByColorSize'] as Map<String, dynamic>?;
+        
         processedVariations = variations.map((variation) {
           final variationMap = Map<String, dynamic>.from(variation);
           // Keep file paths as-is for local storage
           // They will be uploaded in background
+          // Include stock_mode metadata in first variation for easy retrieval
+          if (variations.indexOf(variation) == 0) {
+            variationMap['stock_mode'] = stockMode;
+            if (stockMode == 'color_size' && stockByColorSize != null) {
+              variationMap['stock_by_color_size'] = stockByColorSize;
+            }
+          }
           return variationMap;
         }).toList();
+      }
+
+      // Extract stock data
+      final stockMode = productData['stockMode'] as String? ?? 'simple';
+      final stockByColorSize = productData['stockByColorSize'] as Map<String, dynamic>?;
+      
+      // Convert stockByColorSize to proper format if needed
+      Map<String, Map<String, int>>? stockByColorSizeTyped;
+      if (stockByColorSize != null) {
+        stockByColorSizeTyped = stockByColorSize.map(
+          (color, sizeMap) => MapEntry(
+            color.toString(),
+            (sizeMap as Map<String, dynamic>).map(
+              (size, qty) => MapEntry(size.toString(), (qty as num).toInt()),
+            ),
+          ),
+        );
       }
 
       // Create Product model with file paths (not URLs yet)
@@ -84,6 +111,8 @@ class ProductService {
                 : [],
         images: imagePaths, // File paths for now
         marketplaceEnabled: productData['marketplaceEnabled'] == true,
+        stockMode: stockMode,
+        stockByColorSize: stockByColorSizeTyped,
       );
 
       // Save to local database IMMEDIATELY (INSTANT)
@@ -216,6 +245,19 @@ class ProductService {
           
           // Try to sync with server
           try {
+            // Use stock data directly from Product model (now stored in separate fields)
+            final stockMode = updatedProduct.stockMode;
+            final stockByColorSize = updatedProduct.stockByColorSize;
+            
+            // Build variations for server (keep stock data in variations for compatibility)
+            final variationsForServer = updatedProduct.variations.map((v) {
+              final varMap = Map<String, dynamic>.from(v);
+              // Remove metadata fields if present
+              varMap.remove('stock_mode');
+              varMap.remove('stock_by_color_size');
+              return varMap;
+            }).toList();
+            
             final productPayload = {
               'user_id': userId,
               'name': updatedProduct.name,
@@ -226,9 +268,11 @@ class ProductService {
               'price_slabs': jsonEncode(updatedProduct.priceSlabs),
               'attributes': jsonEncode(updatedProduct.attributes),
               'selected_attribute_values': jsonEncode(updatedProduct.selectedAttributeValues),
-              'variations': jsonEncode(updatedProduct.variations),
+              'variations': jsonEncode(variationsForServer),
               'sizes': jsonEncode(updatedProduct.sizes),
               'images': jsonEncode(updatedProduct.images),
+              'stock_mode': stockMode,
+              'stock_by_color_size': stockByColorSize != null ? jsonEncode(stockByColorSize) : null,
             };
 
             final response = await http.post(

@@ -47,18 +47,6 @@ class _OrientationAwareImageState extends State<OrientationAwareImage> {
       final h = image.height.toDouble();
 
       BoxFit f = BoxFit.cover; // Always cover to fill the box without white space
-      /*
-      if (w > h) {
-        // Horizontal image - fit height to show full width
-        f = BoxFit.fitHeight;
-      } else if (h > w) {
-        // Vertical image - fit width to show full height
-        f = BoxFit.fitWidth;
-      } else {
-        // Square image - contain to fit
-        f = BoxFit.contain;
-      }
-      */
 
       image.dispose();
 
@@ -84,8 +72,16 @@ class _OrientationAwareImageState extends State<OrientationAwareImage> {
       return Container(
         width: widget.width,
         height: widget.height,
-        color: Colors.grey.shade300,
-        child: const Center(child: CircularProgressIndicator()),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade800
+            : Colors.grey.shade300,
+        child: Center(
+          child: CircularProgressIndicator(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white
+                : Colors.grey.shade700,
+          ),
+        ),
       );
     }
 
@@ -125,17 +121,42 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     'White',
     'Yellow',
   ];
-  //final List<String> _models = ['Model A', 'Model B', 'Model C', 'Model D'];
-
-  // Combined list for variant dropdown (Models first as default, then Colors)
-  List<String> get _variantOptions => [..._colors];
 
   // Map to store color images: color name -> list of image files (max 5 per color)
   Map<String, List<File>> _colorImages = {};
   static const int _maxImagesPerColor = 5;
-  
-  // List to track recently added colors (last 5)
+
+  // List to track recently added colors (last 20)
   List<String> _recentColors = [];
+
+  // Theme colors for light and dark mode
+  Color get _backgroundColor => Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF121212)
+      : const Color(0xFFF5F5F5);
+
+  Color get _cardColor => Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF1E1E1E)
+      : Colors.white;
+
+  Color get _textColor => Theme.of(context).brightness == Brightness.dark
+      ? Colors.white
+      : Colors.black87;
+
+  Color get _hintTextColor => Theme.of(context).brightness == Brightness.dark
+      ? Colors.grey.shade400
+      : Colors.grey.shade600;
+
+  Color get _borderColor => Theme.of(context).brightness == Brightness.dark
+      ? Colors.grey.shade700
+      : Colors.grey.shade300;
+
+  Color get _disabledButtonColor => Theme.of(context).brightness == Brightness.dark
+      ? Colors.grey.shade700
+      : Colors.grey.shade400;
+
+  Color get _placeholderColor => Theme.of(context).brightness == Brightness.dark
+      ? Colors.grey.shade800
+      : Colors.grey.shade200;
 
   // Helper function to get color from color name
   Color _getColorFromName(String colorName) {
@@ -148,9 +169,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       case 'green':
         return Colors.green;
       case 'black':
-        return Colors.black;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade900
+            : Colors.black;
       case 'white':
-        return Colors.white;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade300
+            : Colors.white;
       case 'yellow':
         return Colors.yellow;
       case 'orange':
@@ -165,7 +190,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       case 'gray':
         return Colors.grey;
       default:
-        return Colors.grey.shade400;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade600
+            : Colors.grey.shade400;
     }
   }
 
@@ -215,7 +242,15 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
               SnackBar(
                 content: Text(
                   'Maximum $_maxImagesPerColor images allowed for $colorName',
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : Colors.black87,
+                  ),
                 ),
+                backgroundColor: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.grey.shade800
+                    : Colors.white,
               ),
             );
             break;
@@ -236,7 +271,19 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding images: $e')),
+          SnackBar(
+            content: Text(
+              'Error adding images: $e',
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Colors.black87,
+              ),
+            ),
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.grey.shade800
+                : Colors.white,
+          ),
         );
       }
     }
@@ -266,6 +313,11 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   void initState() {
     super.initState();
     _selectedImages = List<File>.from(widget.selectedImages);
+
+    // Initialize recent colors from existing color images
+    // This ensures previously added colors show in the recently added section
+    _recentColors = _colorImages.keys.toList();
+
     // Listen to text field changes to update display image and enable Add button
     _colorController.addListener(() {
       setState(() {
@@ -285,7 +337,6 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     super.dispose();
   }
 
-
   Future<void> _addMoreImages() async {
     try {
       final List<XFile>? pickedFiles = await _picker.pickMultiImage(
@@ -304,7 +355,21 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Error adding images: $e')));
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error adding images: $e',
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Colors.black87,
+              ),
+            ),
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.grey.shade800
+                : Colors.white,
+          ),
+        );
       }
     }
   }
@@ -334,7 +399,21 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Error opening camera: $e')));
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error opening camera: $e',
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Colors.black87,
+              ),
+            ),
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.grey.shade800
+                : Colors.white,
+          ),
+        );
       }
     }
   }
@@ -353,11 +432,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _cardColor,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.black.withOpacity(0.3)
+                  : Colors.black.withOpacity(0.05),
               blurRadius: 8,
               offset: const Offset(0, 1),
             ),
@@ -369,29 +450,29 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Product Image',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Colors.black87,
+                    color: _textColor,
                   ),
                 ),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.check_circle,
-                      color: Color(0xFF25D366),
+                      color: const Color(0xFF25D366),
                       size: 18,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       '${_selectedImages.length}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF25D366),
+                        color: const Color(0xFF25D366),
                       ),
                     ),
                   ],
@@ -405,7 +486,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.black, Colors.grey.shade900],
+                  colors: Theme.of(context).brightness == Brightness.dark
+                      ? [Colors.grey.shade900, Colors.black]
+                      : [Colors.black, Colors.grey.shade900],
                 ),
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -435,11 +518,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.black.withOpacity(0.3)
+                : Colors.black.withOpacity(0.05),
             blurRadius: 8,
             offset: const Offset(0, 1),
           ),
@@ -451,35 +536,37 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Product Image',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.black87,
+                  color: _textColor,
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.check_circle,
-                      color: Color(0xFF25D366),
+                      color: const Color(0xFF25D366),
                       size: 16,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       '${_selectedImages.length}/5',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: Colors.black87,
+                        color: _textColor,
                       ),
                     ),
                   ],
@@ -511,15 +598,15 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                           width: imageWidth,
                           height: imageHeight,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: _cardColor,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey.shade300, width: 1),
+                            border: Border.all(color: _borderColor, width: 1),
                           ),
-                          child: const Center(
+                          child: Center(
                             child: Icon(
                               Icons.add,
                               size: 28,
-                              color: Color(0xFF25D366),
+                              color: const Color(0xFF25D366),
                             ),
                           ),
                         ),
@@ -530,7 +617,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                     margin: EdgeInsets.only(right: spacing, top: 8, bottom: 8),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300, width: 1),
+                      border: Border.all(color: _borderColor, width: 1),
                     ),
                     child: Stack(
                       children: [
@@ -577,20 +664,26 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             width: 24,
                             height: 24,
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey.shade800
+                                  : Colors.white,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.black,
+                                color: Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.white
+                                    : Colors.black,
                                 width: 1.5,
                               ),
                             ),
                             child: Center(
                               child: Text(
                                 '${index + 1}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white
+                                      : Colors.black,
                                 ),
                               ),
                             ),
@@ -611,7 +704,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
               Text(
                 '(Max 5 | JPG/PNG)',
                 style: TextStyle(
-                  color: Colors.grey.shade600,
+                  color: _hintTextColor,
                   fontSize: 11,
                 ),
               ),
@@ -668,21 +761,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   // Get all variant images (flatten all color images)
   List<File> get _allVariantImages {
     final List<File> allImages = [];
-    print('=== GETTING ALL VARIANT IMAGES ===');
-    print('Color images map has ${_colorImages.length} colors');
     _colorImages.forEach((colorName, images) {
-      print('Color "$colorName" has ${images.length} images');
       for (var img in images) {
-        print('  Checking image: ${img.path}');
         if (img.existsSync()) {
-          print('  Adding image: ${img.path}');
           allImages.add(img);
-        } else {
-          print('  WARNING: Image does not exist: ${img.path}');
         }
       }
     });
-    print('Total variant images collected: ${allImages.length}');
     return allImages;
   }
 
@@ -691,7 +776,21 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     if (allImages.isEmpty && _selectedImages.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Please add images first')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please add images first',
+            style: TextStyle(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : Colors.black87,
+            ),
+          ),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? Colors.grey.shade800
+              : Colors.white,
+        ),
+      );
       return;
     }
     Navigator.push(
@@ -708,12 +807,16 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: _backgroundColor,
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1F1F1F),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF1A1A1A)
+            : const Color(0xFF1F1F1F),
         elevation: 0,
-        shadowColor: Colors.black.withOpacity(0.3),
+        shadowColor: Theme.of(context).brightness == Brightness.dark
+            ? Colors.black.withOpacity(0.5)
+            : Colors.black.withOpacity(0.3),
         leading: Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
@@ -772,11 +875,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: _cardColor,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.black.withOpacity(0.3)
+                              : Colors.black.withOpacity(0.05),
                           blurRadius: 8,
                           offset: const Offset(0, 1),
                         ),
@@ -789,12 +894,12 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
+                            Text(
                               'Variant Type',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: Colors.black87,
+                                color: _textColor,
                               ),
                             ),
                             Row(
@@ -817,27 +922,27 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                           border: Border.all(
                                             color: _selectedVariantType == 'Color'
                                                 ? const Color(0xFF25D366)
-                                                : Colors.grey.shade400,
+                                                : _borderColor,
                                             width: 2,
                                           ),
                                         ),
                                         child: _selectedVariantType == 'Color'
                                             ? const Center(
-                                                child: Icon(
-                                                  Icons.circle,
-                                                  size: 10,
-                                                  color: Color(0xFF25D366),
-                                                ),
-                                              )
+                                          child: Icon(
+                                            Icons.circle,
+                                            size: 10,
+                                            color: Color(0xFF25D366),
+                                          ),
+                                        )
                                             : null,
                                       ),
                                       const SizedBox(width: 6),
-                                      const Text(
+                                      Text(
                                         'Color',
                                         style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w500,
-                                          color: Colors.black87,
+                                          color: _textColor,
                                         ),
                                       ),
                                     ],
@@ -857,19 +962,19 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                 decoration: InputDecoration(
                                   hintText: 'Enter color name',
                                   hintStyle: TextStyle(
-                                    color: Colors.grey.shade400,
+                                    color: _hintTextColor,
                                     fontSize: 14,
                                   ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                     borderSide: BorderSide(
-                                      color: Colors.grey.shade300,
+                                      color: _borderColor,
                                     ),
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                     borderSide: BorderSide(
-                                      color: Colors.grey.shade300,
+                                      color: _borderColor,
                                     ),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -879,14 +984,19 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       width: 2,
                                     ),
                                   ),
+                                  fillColor: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.grey.shade900
+                                      : Colors.grey.shade50,
+                                  filled: true,
                                   contentPadding: const EdgeInsets.symmetric(
                                     horizontal: 12,
                                     vertical: 10,
                                   ),
                                 ),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
+                                  color: _textColor,
                                 ),
                                 onChanged: (value) {
                                   setState(() {
@@ -904,17 +1014,17 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                               decoration: BoxDecoration(
                                 gradient: _isAddButtonDisabled
                                     ? LinearGradient(
-                                        colors: [
-                                          Colors.grey.shade400,
-                                          Colors.grey.shade500,
-                                        ],
-                                      )
+                                  colors: [
+                                    _disabledButtonColor,
+                                    _disabledButtonColor.withOpacity(0.8),
+                                  ],
+                                )
                                     : const LinearGradient(
-                                        colors: [
-                                          Color(0xFF25D366),
-                                          Color(0xFF128C7E),
-                                        ],
-                                      ),
+                                  colors: [
+                                    Color(0xFF25D366),
+                                    Color(0xFF128C7E),
+                                  ],
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Material(
@@ -927,16 +1037,36 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                     final colorName = _colorController.text.trim();
                                     if (colorName.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Please enter a color name'),
+                                        SnackBar(
+                                          content: Text(
+                                            'Please enter a color name',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
                                         ),
                                       );
                                       return;
                                     }
                                     if (_selectedImages.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Please add an image first'),
+                                        SnackBar(
+                                          content: Text(
+                                            'Please add an image first',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
                                         ),
                                       );
                                       return;
@@ -946,7 +1076,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       if (!_colorImages.containsKey(colorName)) {
                                         _colorImages[colorName] = [];
                                       }
-                                      
+
                                       // Add ALL selected images to this color variant
                                       int addedCount = 0;
                                       for (var image in _selectedImages) {
@@ -955,7 +1085,15 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                             SnackBar(
                                               content: Text(
                                                 'Maximum $_maxImagesPerColor images allowed for $colorName. Added $addedCount images.',
+                                                style: TextStyle(
+                                                  color: Theme.of(context).brightness == Brightness.dark
+                                                      ? Colors.white
+                                                      : Colors.black87,
+                                                ),
                                               ),
+                                              backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.grey.shade800
+                                                  : Colors.white,
                                             ),
                                           );
                                           break;
@@ -968,8 +1106,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                         _colorImages[colorName]!.add(copiedFile);
                                         addedCount++;
                                       }
-                                      
+
                                       setState(() {
+                                        // Remove if already exists and add to top
                                         _recentColors.remove(colorName);
                                         _recentColors.insert(0, colorName);
                                         if (_recentColors.length > 20) {
@@ -978,16 +1117,36 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                         _colorController.clear();
                                         _isAddButtonDisabled = true;
                                       });
-                                      
+
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text('Added $addedCount image(s) to $colorName variation'),
+                                          content: Text(
+                                            'Added $addedCount image(s) to $colorName variation',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
                                         ),
                                       );
                                     } catch (e) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text('Error adding color: $e'),
+                                          content: Text(
+                                            'Error adding color: $e',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
                                         ),
                                       );
                                     }
@@ -998,19 +1157,23 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       horizontal: 16,
                                       vertical: 10,
                                     ),
-                                    child: const Row(
+                                    child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(
                                           Icons.add,
-                                          color: Colors.white,
+                                          color: _isAddButtonDisabled
+                                              ? Colors.grey.shade300
+                                              : Colors.white,
                                           size: 16,
                                         ),
-                                        SizedBox(width: 4),
+                                        const SizedBox(width: 4),
                                         Text(
                                           'Add',
                                           style: TextStyle(
-                                            color: Colors.white,
+                                            color: _isAddButtonDisabled
+                                                ? Colors.grey.shade300
+                                                : Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -1026,12 +1189,12 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                         const SizedBox(height: 12),
                         // Recently Added Colors section
                         if (_recentColors.isNotEmpty) ...[
-                          const Text(
+                          Text(
                             'Recently Added Colors (Last 20)',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              color: _textColor,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -1069,9 +1232,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           if (isSelected) ...[
-                                            const Icon(
+                                            Icon(
                                               Icons.check_circle,
-                                              color: Colors.white,
+                                              color: _getTextColorForBackground(color),
                                               size: 16,
                                             ),
                                             const SizedBox(width: 4),
@@ -1112,9 +1275,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                     width: 100,
                                     margin: const EdgeInsets.only(right: 12),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      color: _cardColor,
                                       border: Border.all(
-                                        color: Colors.grey.shade300,
+                                        color: _borderColor,
                                         width: 1,
                                       ),
                                       borderRadius: BorderRadius.circular(12),
@@ -1143,10 +1306,10 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                               Expanded(
                                                 child: Text(
                                                   colorName,
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w600,
-                                                    color: Colors.white,
+                                                    color: _getTextColorForBackground(color),
                                                   ),
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,
@@ -1160,13 +1323,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                                   width: 16,
                                                   height: 16,
                                                   decoration: BoxDecoration(
-                                                    color: Colors.white.withOpacity(0.3),
+                                                    color: _getTextColorForBackground(color).withOpacity(0.3),
                                                     borderRadius: BorderRadius.circular(3),
                                                   ),
-                                                  child: const Icon(
+                                                  child: Icon(
                                                     Icons.close,
                                                     size: 12,
-                                                    color: Colors.white,
+                                                    color: _getTextColorForBackground(color),
                                                   ),
                                                 ),
                                               ),
@@ -1194,7 +1357,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                                     fit: BoxFit.cover,
                                                   )
                                                       : Container(
-                                                    color: Colors.grey.shade200,
+                                                    color: _placeholderColor,
                                                   ),
                                                 ),
                                               ),
@@ -1333,4 +1496,3 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     );
   }
 }
-

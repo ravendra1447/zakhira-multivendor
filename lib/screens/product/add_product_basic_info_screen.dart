@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../camera_interface_screen.dart';
 import 'category_selection_screen.dart';
 import 'attributes_management_screen.dart';
@@ -30,17 +31,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   final Set<String> _selectedSizes = {};
   final List<Map<String, dynamic>> _colorItems = [];
   Map<String, List<String>> _attributes = {
-    'Fabric': ['Cotton'],
-    'Fit': ['Regular'],
-    'Sleeve': ['Half Sleeve'],
-    'Pattern': ['Solid'],
+    'Fabric': ['Cotton', 'Silk', 'Wool', 'Polyester', 'Linen'],
+    'Fit': ['Regular', 'Slim', 'Loose', 'Tight'],
+    'Sleeve': ['Half Sleeve', 'Full Sleeve', 'Sleeveless', 'Short Sleeve'],
+    'Pattern': ['Solid', 'Striped', 'Printed', 'Checked', 'Floral'],
   };
-  Map<String, String> _selectedAttributeValues = {
-    'Fabric': 'Cotton',
-    'Fit': 'Regular',
-    'Sleeve': 'Half Sleeve',
-    'Pattern': 'Solid',
-  };
+  Map<String, String> _selectedAttributeValues = {};
   final TextEditingController _descController = TextEditingController();
   bool _attributesExpanded = false;
   final Map<String, bool> _expandedAttributeItems = {};
@@ -48,17 +44,26 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   final TextEditingController _tempNameController = TextEditingController();
   final TextEditingController _tempValueController = TextEditingController();
   bool _showAddAttributeFields = false;
-  bool _marketplaceEnabled = false; // Marketplace toggle
+  bool _marketplaceEnabled = true; // Marketplace toggle
   // Stock management
-  String _stockMode = 'simple'; // 'simple' or 'color_size'
+  String _stockMode = 'simple'; // 'simple', 'color_size', or 'always_available'
   String? _selectedColorForStock;
   final Map<String, Map<String, int>> _stockByColorSize = {}; // {color: {size: qty}}
   final TextEditingController _quickStockController = TextEditingController();
   bool _applyQuickToAllColors = false;
+  // Always Available / On Demand fields
+  final TextEditingController _dispatchTimeController = TextEditingController();
+  bool _showMadeOnOrderBadge = false;
+
+  // Recently selected items
+  List<String> _recentCategories = [];
+  List<String> _recentSizes = [];
+  List<String> _recentColors = [];
 
   @override
   void initState() {
     super.initState();
+    _loadRecentlySelectedItems();
     // Initialize color items from colorImagesMap if available
     if (widget.colorImagesMap != null && widget.colorImagesMap!.isNotEmpty) {
       // Use color names from map - store all images for each color
@@ -82,6 +87,68 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         });
       }
     }
+  }
+
+  // Load recently selected items from SharedPreferences
+  Future<void> _loadRecentlySelectedItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _recentCategories = prefs.getStringList('recent_categories') ?? [];
+      _recentSizes = prefs.getStringList('recent_sizes') ?? [];
+      _recentColors = prefs.getStringList('recent_colors') ?? [];
+    });
+  }
+
+  // Save recently selected category
+  Future<void> _saveRecentCategory(String category) async {
+    final prefs = await SharedPreferences.getInstance();
+    _recentCategories.remove(category); // Remove if exists
+    _recentCategories.insert(0, category); // Add to beginning
+    if (_recentCategories.length > 10) {
+      _recentCategories = _recentCategories.take(10).toList(); // Keep only 10
+    }
+    await prefs.setStringList('recent_categories', _recentCategories);
+    setState(() {});
+  }
+
+  // Save recently selected size
+  Future<void> _saveRecentSize(String size) async {
+    final prefs = await SharedPreferences.getInstance();
+    _recentSizes.remove(size); // Remove if exists
+    _recentSizes.insert(0, size); // Add to beginning
+    if (_recentSizes.length > 10) {
+      _recentSizes = _recentSizes.take(10).toList(); // Keep only 10
+    }
+    await prefs.setStringList('recent_sizes', _recentSizes);
+    setState(() {});
+  }
+
+  // Save recently added color
+  Future<void> _saveRecentColor(String color) async {
+    final prefs = await SharedPreferences.getInstance();
+    _recentColors.remove(color); // Remove if exists
+    _recentColors.insert(0, color); // Add to beginning
+    if (_recentColors.length > 20) {
+      _recentColors = _recentColors.take(20).toList(); // Keep only 20
+    }
+    await prefs.setStringList('recent_colors', _recentColors);
+    setState(() {});
+  }
+
+  void _selectRecentColor(String colorName) {
+    // Create a new color item with the selected recent color
+    final newColorItem = {
+      'name': colorName,
+      'image': null, // No image initially
+      'allImages': <File>[],
+    };
+
+    setState(() {
+      _colorItems.add(newColorItem);
+    });
+
+    // Optionally, save this new color to recent colors again
+    _saveRecentColor(colorName);
   }
 
   // Helper function to get color from color name
@@ -116,6 +183,15 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
     }
   }
 
+  // Helper function to get text color for background
+  Color _getTextColorForBackground(Color backgroundColor) {
+    // Calculate luminance to determine if text should be white or black
+    double luminance = (0.299 * backgroundColor.red +
+        0.587 * backgroundColor.green +
+        0.114 * backgroundColor.blue) / 255;
+    return luminance > 0.5 ? Colors.black : Colors.white;
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -124,6 +200,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
     _descController.dispose();
     _tempNameController.dispose();
     _tempValueController.dispose();
+    _dispatchTimeController.dispose();
     super.dispose();
   }
 
@@ -417,6 +494,124 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
+                      // Recently selected sizes section
+                      if (_recentSizes.isNotEmpty) ...[
+                        const Text(
+                          'Recently Selected',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        ..._recentSizes.map((s) {
+                          final selected = tempSelectedSizes.contains(s);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: GestureDetector(
+                              onTap: () {
+                                setModalState(() {
+                                  if (selected) {
+                                    tempSelectedSizes.remove(s);
+                                  } else {
+                                    tempSelectedSizes.add(s);
+                                  }
+                                });
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: selected
+                                        ? const Color(0xFF25D366).withOpacity(0.6)
+                                        : Colors.grey.shade200,
+                                    width: selected ? 1.5 : 1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                  color: selected
+                                      ? const Color(0xFF25D366).withOpacity(0.08)
+                                      : Colors.white,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? const Color(
+                                          0xFF25D366,
+                                        ).withOpacity(0.8)
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(
+                                            0xFF25D366,
+                                          ).withOpacity(0.6)
+                                              : Colors.grey.shade300,
+                                          width: 1.5,
+                                        ),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: selected
+                                          ? const Icon(
+                                        Icons.check,
+                                        size: 10,
+                                        color: Colors.white,
+                                      )
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      s,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color: selected
+                                            ? const Color(
+                                          0xFF25D366,
+                                        ).withOpacity(0.8)
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'Recent',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.blue.shade700,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'All Sizes',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       // Size checkboxes - one per line
                       ..._sizes.map((s) {
                         final selected = tempSelectedSizes.contains(s);
@@ -458,14 +653,14 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                     decoration: BoxDecoration(
                                       color: selected
                                           ? const Color(
-                                              0xFF25D366,
-                                            ).withOpacity(0.8)
+                                        0xFF25D366,
+                                      ).withOpacity(0.8)
                                           : Colors.transparent,
                                       border: Border.all(
                                         color: selected
                                             ? const Color(
-                                                0xFF25D366,
-                                              ).withOpacity(0.6)
+                                          0xFF25D366,
+                                        ).withOpacity(0.6)
                                             : Colors.grey.shade300,
                                         width: 1.5,
                                       ),
@@ -473,10 +668,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                     ),
                                     child: selected
                                         ? const Icon(
-                                            Icons.check,
-                                            size: 10,
-                                            color: Colors.white,
-                                          )
+                                      Icons.check,
+                                      size: 10,
+                                      color: Colors.white,
+                                    )
                                         : null,
                                   ),
                                   const SizedBox(width: 10),
@@ -487,8 +682,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       fontWeight: FontWeight.w500,
                                       color: selected
                                           ? const Color(
-                                              0xFF25D366,
-                                            ).withOpacity(0.8)
+                                        0xFF25D366,
+                                      ).withOpacity(0.8)
                                           : Colors.black87,
                                     ),
                                   ),
@@ -509,6 +704,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               _selectedSizes.clear();
                               _selectedSizes.addAll(tempSelectedSizes);
                             });
+                            // Save recently selected sizes
+                            for (final size in tempSelectedSizes) {
+                              _saveRecentSize(size);
+                            }
                             Navigator.pop(ctx);
                           },
                           style: ElevatedButton.styleFrom(
@@ -589,7 +788,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ..._attributes.entries.map((e) {
                         final selectedValue =
                             _selectedAttributeValues[e.key] ??
-                            (e.value.isNotEmpty ? e.value.first : '');
+                                (e.value.isNotEmpty ? e.value.first : '');
                         return Container(
                           margin: const EdgeInsets.only(bottom: 6),
                           padding: const EdgeInsets.symmetric(
@@ -756,10 +955,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 ),
                                 suffixIcon: valueOptions.isEmpty
                                     ? Icon(
-                                        Icons.keyboard_arrow_down,
-                                        color: Colors.grey.shade400,
-                                        size: 16,
-                                      )
+                                  Icons.keyboard_arrow_down,
+                                  color: Colors.grey.shade400,
+                                  size: 16,
+                                )
                                     : null,
                               ),
                             ),
@@ -926,9 +1125,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   Future<void> _showValueDropdown(
-    String attributeName,
-    List<String> values,
-  ) async {
+      String attributeName,
+      List<String> values,
+      ) async {
     await showDialog<void>(
       context: context,
       builder: (ctx) {
@@ -980,9 +1179,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   Future<void> _showEditAttributeAndValue(
-    String attributeName,
-    String currentValue,
-  ) async {
+      String attributeName,
+      String currentValue,
+      ) async {
     final nameController = TextEditingController(text: attributeName);
     final valueController = TextEditingController(text: currentValue);
     await showDialog<void>(
@@ -1061,7 +1260,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           if (newName != attributeName) {
                             final values = _attributes[attributeName]!;
                             final selectedValue =
-                                _selectedAttributeValues[attributeName];
+                            _selectedAttributeValues[attributeName];
                             _attributes.remove(attributeName);
                             _attributes[newName] = values;
                             if (selectedValue != null) {
@@ -1158,7 +1357,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         setState(() {
                           final values = _attributes[attributeName]!;
                           final selectedValue =
-                              _selectedAttributeValues[attributeName];
+                          _selectedAttributeValues[attributeName];
                           _attributes.remove(attributeName);
                           _attributes[newName] = values;
                           if (selectedValue != null) {
@@ -1212,9 +1411,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   Future<void> _showEditAttributeValue(
-    String attributeName,
-    String currentValue,
-  ) async {
+      String attributeName,
+      String currentValue,
+      ) async {
     final valueController = TextEditingController(text: currentValue);
     await showDialog<void>(
       context: context,
@@ -1528,7 +1727,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
       context,
       MaterialPageRoute(
         builder: (context) =>
-            const CameraInterfaceScreen(returnImagesDirectly: true),
+        const CameraInterfaceScreen(returnImagesDirectly: true),
       ),
     );
     File? picked;
@@ -1543,6 +1742,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
           title: const Text('Add Color'),
           content: TextField(
             controller: ctrl,
+            textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(hintText: 'Enter color name'),
           ),
           actions: [
@@ -1559,9 +1759,24 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
       },
     );
     if (name != null && name.isNotEmpty) {
-      setState(() {
-        _colorItems.add({'name': name, 'image': picked});
-      });
+      // Check for duplicate colors (case-insensitive)
+      final isDuplicate = _colorItems.any((item) =>
+      item['name'].toString().toLowerCase() == name.toLowerCase());
+
+      if (!isDuplicate) {
+        setState(() {
+          _colorItems.add({'name': name, 'image': picked});
+        });
+        _saveRecentColor(name); // Save to recent colors
+      } else {
+        // Show error message for duplicate color
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Color "$name" already exists!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -1573,16 +1788,17 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
           context: context,
           barrierDismissible: false,
           builder: (context) =>
-              const Center(child: CircularProgressIndicator()),
+          const Center(child: CircularProgressIndicator()),
         );
       }
 
       // Convert _colorItems to JSON-serializable format (File objects to paths)
       final variations = _colorItems.map((item) {
+        final colorName = item['name'] as String;
         final Map<String, dynamic> variation = {
-          'name': item['name'] as String,
+          'name': colorName,
         };
-        
+
         // Convert File to path string
         if (item['image'] != null) {
           final image = item['image'];
@@ -1592,7 +1808,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
             variation['image'] = image.toString();
           }
         }
-        
+
         // Convert allImages List<File> to List<String>
         if (item['allImages'] != null) {
           final allImages = item['allImages'] as List;
@@ -1603,7 +1819,15 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
             return img.toString();
           }).toList();
         }
-        
+
+        // If stock mode is color_size, include stock data for this color
+        if (_stockMode == 'color_size' && _stockByColorSize.containsKey(colorName)) {
+          variation['stock'] = Map<String, int>.from(_stockByColorSize[colorName]!);
+          // Calculate total stock for this color
+          final totalStock = _stockByColorSize[colorName]!.values.fold<int>(0, (a, b) => a + b);
+          variation['totalStock'] = totalStock;
+        }
+
         return variation;
       }).toList();
 
@@ -1611,7 +1835,16 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
       final productData = {
         'name': _nameController.text.trim(),
         'category': _category ?? '',
-        'availableQty': _availableQtyController.text.trim(),
+        // For simple stock, use availableQty. For color_size, calculate total from all colors. For always_available, set to empty or special value
+        'availableQty': _stockMode == 'simple'
+            ? _availableQtyController.text.trim()
+            : _stockMode == 'color_size'
+            ? _stockByColorSize.values
+            .expand((sizeMap) => sizeMap.values)
+            .fold<int>(0, (a, b) => a + b)
+            .toString()
+            : '0', // For always_available, set to 0 or empty
+        'stockMode': _stockMode, // 'simple', 'color_size', or 'always_available'
         'priceSlabs': _priceSlabs,
         'variations': variations,
         'attributes': _attributes,
@@ -1619,6 +1852,14 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         'description': _descController.text.trim(),
         'sizes': _selectedSizes, // Keep as Set<String> - ProductService expects Set<String>?
         'marketplaceEnabled': _marketplaceEnabled,
+        // Include full stock data for color_size mode
+        'stockByColorSize': _stockMode == 'color_size'
+            ? _stockByColorSize.map((color, sizeMap) =>
+            MapEntry(color, Map<String, int>.from(sizeMap)))
+            : null,
+        // Always Available / On Demand fields
+        'dispatchTime': _stockMode == 'always_available' ? _dispatchTimeController.text.trim() : null,
+        'showMadeOnOrderBadge': _stockMode == 'always_available' ? _showMadeOnOrderBadge : false,
       };
 
       // Save to database using ProductService
@@ -1645,7 +1886,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          
+
           // If published, navigate to profile tab
           if (type == 'publish') {
             // Pop all screens and navigate to ChatHomePage with profile tab
@@ -1654,7 +1895,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
               MaterialPageRoute(
                 builder: (context) => const ChatHomePage(initialTabIndex: 2),
               ),
-              (route) => false,
+                  (route) => false,
             );
           } else {
             Navigator.pop(context); // Go back for draft
@@ -1702,29 +1943,33 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   Widget _sectionTitle(String title) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Colors.black87,
+          color: textColor,
         ),
       ),
     );
   }
 
   Widget _card(Widget child) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withOpacity(isDark ? 0.3 : 0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1736,8 +1981,15 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scaffoldBg = isDark ? const Color(0xFF121212) : const Color(0xFFF5F5F5);
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final hintColor = isDark ? Colors.grey.shade400 : Colors.grey.shade600;
+    final borderColor = isDark ? Colors.grey.shade700 : Colors.grey.shade300;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: scaffoldBg,
       appBar: _header(),
       body: SingleChildScrollView(
         child: Column(
@@ -1750,19 +2002,19 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                   TextField(
                     controller: _nameController,
                     textCapitalization: TextCapitalization.words,
-                    style: const TextStyle(fontSize: 14),
+                    style: TextStyle(fontSize: 14, color: textColor),
                     decoration: InputDecoration(
                       hintText: 'Enter product name',
-                      hintStyle: const TextStyle(fontSize: 14),
+                      hintStyle: TextStyle(fontSize: 14, color: hintColor),
                       filled: true,
-                      fillColor: Colors.grey.shade50,
+                      fillColor: isDark ? const Color(0xFF2E2E2E) : Colors.grey.shade50,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: borderColor),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: borderColor),
                       ),
                       focusedBorder: const OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(8)),
@@ -1790,7 +2042,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       );
                       if (picked != null) {
                         setState(() => _category = picked);
-                        // Auto focus to Available Quantity after category selection
+                        _saveRecentCategory(picked); // Save to recent categories
                         Future.delayed(const Duration(milliseconds: 300), () {
                           _availableQtyFocusNode.requestFocus();
                         });
@@ -1802,9 +2054,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
+                        color: isDark ? const Color(0xFF2E2E2E) : Colors.grey.shade50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(color: borderColor),
                       ),
                       child: Row(
                         children: [
@@ -1813,16 +2065,74 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               _category ?? 'Select category',
                               style: TextStyle(
                                 color: (_category == null)
-                                    ? Colors.grey.shade600
-                                    : Colors.black87,
+                                    ? hintColor
+                                    : textColor,
                               ),
                             ),
                           ),
-                          const Icon(Icons.chevron_right, color: Colors.grey),
+                          Icon(Icons.chevron_right, color: hintColor),
                         ],
                       ),
                     ),
                   ),
+                  // Recently selected categories
+                  if (_recentCategories.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.green.shade900.withOpacity(0.3) : Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark ? Colors.green.shade700 : Colors.green.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recently Selected Categories',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: _recentCategories.take(5).map((category) {
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() => _category = category);
+                                  _saveRecentCategory(category);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF2E2E2E) : Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isDark ? Colors.green.shade600 : Colors.green.shade300,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    category,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1831,112 +2141,348 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _sectionTitle('Available Quantity'),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
+                  // Modern segmented control
                   Container(
-                    padding: const EdgeInsets.all(8),
+                    height: 48,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        // Segmented control
-                        Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _stockMode = 'color_size';
-                                    // init selected color
-                                    if (_selectedColorForStock == null && _colorItems.isNotEmpty) {
-                                      _selectedColorForStock = _colorItems.first['name'] as String;
-                                    }
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: _stockMode == 'color_size' ? const Color(0xFF25D366) : Colors.grey.shade300),
-                                    color: _stockMode == 'color_size' ? const Color(0xFF25D366).withOpacity(0.08) : Colors.white,
-                                  ),
-                                  child: Center(
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text('Color & Size Stock', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                        const SizedBox(width: 6),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _stockMode = 'simple';
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: _stockMode == 'simple' ? const Color(0xFF25D366) : Colors.grey.shade300),
-                                    color: _stockMode == 'simple' ? const Color(0xFF25D366).withOpacity(0.08) : Colors.white,
-                                  ),
-                                  child: const Center(
-                                    child: Text('Simple Stock', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        if (_stockMode == 'simple') ...[
-                          TextField(
-                            controller: _availableQtyController,
-                            focusNode: _availableQtyFocusNode,
-                            keyboardType: TextInputType.number,
-                            style: const TextStyle(fontSize: 14),
-                            decoration: InputDecoration(
-                              hintText: 'Enter available quantity',
-                              hintStyle: const TextStyle(fontSize: 14),
-                              suffixText: 'PCS',
-                              suffixStyle: const TextStyle(fontSize: 14),
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _stockMode = 'color_size';
+                                if (_selectedColorForStock == null &&
+                                    _colorItems.isNotEmpty) {
+                                  _selectedColorForStock =
+                                  _colorItems.first['name'] as String;
+                                }
+                              });
+                            },
+                            child: Container(
+                              height: 40,
+                              margin: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: _stockMode == 'color_size'
+                                    ? Colors.white
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
+                                boxShadow: _stockMode == 'color_size'
+                                    ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                                    : null,
                               ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              focusedBorder: const OutlineInputBorder(
-                                borderRadius: BorderRadius.all(Radius.circular(8)),
-                                borderSide: BorderSide(
-                                  color: Color(0xFF25D366),
-                                  width: 2,
+                              child: Center(
+                                child: Text(
+                                  'Color & Size',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _stockMode == 'color_size'
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: _stockMode == 'color_size'
+                                        ? const Color(0xFF25D366)
+                                        : Colors.grey.shade600,
+                                  ),
                                 ),
                               ),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             ),
                           ),
-                        ] else ...[
-                          const SizedBox.shrink(),
-                        ],
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _stockMode = 'simple';
+                              });
+                            },
+                            child: Container(
+                              height: 40,
+                              margin: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: _stockMode == 'simple'
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: _stockMode == 'simple'
+                                    ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                                    : null,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Simple',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _stockMode == 'simple'
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: _stockMode == 'simple'
+                                        ? const Color(0xFF25D366)
+                                        : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _stockMode = 'always_available';
+                              });
+                            },
+                            child: Container(
+                              height: 40,
+                              margin: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: _stockMode == 'always_available'
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: _stockMode == 'always_available'
+                                    ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                                    : null,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Unlimited',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _stockMode == 'always_available'
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: _stockMode == 'always_available'
+                                        ? const Color(0xFF25D366)
+                                        : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  if (_stockMode == 'simple') ...[
+                    Container(
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: TextField(
+                        controller: _availableQtyController,
+                        focusNode: _availableQtyFocusNode,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '0',
+                          hintStyle: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade400,
+                          ),
+                          suffixIcon: Container(
+                            margin: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade200,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'PCS',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blueGrey,
+                              ),
+                            ),
+                          ),
+                          filled: true,
+                          fillColor: Colors.transparent,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ] else if (_stockMode == 'always_available') ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  Icons.inventory_2_outlined,
+                                  color: Colors.green.shade700,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Unlimited Stock',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Accept orders without tracking inventory',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          // Show Made on Order badge checkbox
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: _showMadeOnOrderBadge,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _showMadeOnOrderBadge = value ?? false;
+                                    });
+                                  },
+                                  activeColor: const Color(0xFF25D366),
+                                ),
+                                const Expanded(
+                                  child: Text(
+                                    'Show "Made on Order" badge',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_showMadeOnOrderBadge) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'This label will highlight that the product is manufactured after order confirmation.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Dispatch Time',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _dispatchTimeController,
+                              keyboardType: TextInputType.text,
+                              style: const TextStyle(fontSize: 14),
+                              decoration: InputDecoration(
+                                hintText: 'Enter dispatch time (e.g., 5-7 days)',
+                                hintStyle: const TextStyle(fontSize: 14),
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                  BorderSide(color: Colors.grey.shade300),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                  BorderSide(color: Colors.grey.shade300),
+                                ),
+                                focusedBorder: const OutlineInputBorder(
+                                  borderRadius:
+                                  BorderRadius.all(Radius.circular(8)),
+                                  borderSide: BorderSide(
+                                    color: Color(0xFF25D366),
+                                    width: 2,
+                                  ),
+                                ),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1956,9 +2502,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             final index = entry.key;
                             final slab = entry.value;
                             final sizes = slab['sizes'] as List<dynamic>? ?? [];
-                            final sizesText = sizes.isNotEmpty
-                                ? sizes.join(' ')
-                                : '';
+                            final sizesText = sizes.isNotEmpty ? sizes.join(' ') : '';
                             return Container(
                               margin: const EdgeInsets.only(right: 10),
                               child: SizedBox(
@@ -2156,6 +2700,75 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ],
                     ),
                   ),
+                  // Recently selected sizes
+                  if (_recentSizes.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark ? Colors.blue.shade700 : Colors.blue.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recently Selected Sizes',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: _recentSizes.take(8).map((size) {
+                              final isSelected = _selectedSizes.contains(size);
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    if (!_selectedSizes.contains(size)) {
+                                      _selectedSizes.add(size);
+                                      _saveRecentSize(size);
+                                    }
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? (isDark ? Colors.blue.shade700 : Colors.blue.shade100)
+                                        : (isDark ? const Color(0xFF2E2E2E) : Colors.white),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? (isDark ? Colors.blue.shade400 : Colors.blue.shade400)
+                                          : (isDark ? Colors.blue.shade600 : Colors.blue.shade300),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    size,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isDark
+                                          ? (isSelected ? Colors.white : Colors.blue.shade300)
+                                          : Colors.blue.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2248,6 +2861,91 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // Recently added colors - show before variation items if no colors added yet
+                  if (_recentColors.isNotEmpty && _colorItems.isEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark ? Colors.purple.shade700 : Colors.purple.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.history,
+                                size: 14,
+                                color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Recent Colors (Tap to add)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: _recentColors.take(10).map((color) {
+                              final isAdded = _colorItems.any((item) =>
+                              item['name'].toString().toLowerCase() == color.toLowerCase());
+                              return GestureDetector(
+                                onTap: isAdded ? null : () {
+                                  setState(() {
+                                    _colorItems.add({'name': color, 'image': null});
+                                    _saveRecentColor(color);
+                                  });
+                                },
+                                child: Opacity(
+                                  opacity: isAdded ? 0.5 : 1.0,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: _getColorFromName(color),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade300,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (isAdded) ...[
+                                          const Icon(Icons.check, size: 14, color: Colors.white),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          color,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: _getTextColorForBackground(_getColorFromName(color)),
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -2257,6 +2955,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           final colorName = item['name'] as String;
                           final color = _getColorFromName(colorName);
                           final isSelected = colorName == _selectedColorForStock;
+                          final isRecentColor = _recentColors.contains(colorName);
                           return GestureDetector(
                             onTap: () {
                               setState(() {
@@ -2267,10 +2966,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               width: 100,
                               margin: const EdgeInsets.only(right: 12),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                                 border: Border.all(
-                                  color: isSelected ? Colors.black : Colors.grey.shade300,
-                                  width: isSelected ? 1.5 : 1,
+                                  color: isSelected
+                                      ? Colors.black
+                                      : (isRecentColor ? Colors.purple.shade400 : (isDark ? Colors.grey.shade700 : Colors.grey.shade300)),
+                                  width: isSelected ? 1.5 : (isRecentColor ? 1.5 : 1),
                                 ),
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -2280,7 +2981,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 children: [
                                   // Header with color name and units badge
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 6),
                                     decoration: BoxDecoration(
                                       color: color,
                                       borderRadius: const BorderRadius.only(
@@ -2289,31 +2991,51 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       ),
                                     ),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                       children: [
                                         Expanded(
-                                          child: Text(
-                                            colorName,
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.white,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (isRecentColor) ...[
+                                                const Icon(
+                                                  Icons.history,
+                                                  size: 12,
+                                                  color: Colors.white,
+                                                ),
+                                                const SizedBox(width: 4),
+                                              ],
+                                              Flexible(
+                                                child: Text(
+                                                  colorName,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.white,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                         Builder(
                                           builder: (context) {
-                                            final totalUnits = (_stockByColorSize[colorName] ?? {})
+                                            final totalUnits = (_stockByColorSize[
+                                            colorName] ??
+                                                {})
                                                 .values
                                                 .fold<int>(0, (a, b) => a + b);
                                             if (totalUnits > 0) {
                                               return Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                padding: const EdgeInsets.symmetric(
+                                                    horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
                                                   color: Colors.green,
-                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderRadius:
+                                                  BorderRadius.circular(12),
                                                 ),
                                                 child: Text(
                                                   '+$totalUnits',
@@ -2341,7 +3063,19 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       height: 100,
                                       child: f != null
                                           ? Image.file(f, fit: BoxFit.cover)
-                                          : Container(color: Colors.grey.shade200),
+                                          : Container(
+                                        color: color,
+                                        child: Center(
+                                          child: Text(
+                                            colorName.substring(0, 1).toUpperCase(),
+                                            style: TextStyle(
+                                              fontSize: 24,
+                                              fontWeight: FontWeight.bold,
+                                              color: _getTextColorForBackground(color),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -2352,13 +3086,80 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ],
                     ),
                   ),
+                  // Recently added colors
+                  if (_recentColors.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark ? Colors.purple.shade700 : Colors.purple.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recently Added Colors (Last 20)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: _recentColors.take(20).map((color) {
+                              final isDuplicate = _colorItems.any((item) =>
+                              item['name'].toString().toLowerCase() == color.toLowerCase());
+
+                              return GestureDetector(
+                                onTap: isDuplicate ? null : () {
+                                  // Add color from recent list
+                                  setState(() {
+                                    _colorItems.add({'name': color, 'image': null});
+                                  });
+                                },
+                                child: Opacity(
+                                  opacity: isDuplicate ? 0.5 : 1.0,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: _getColorFromName(color),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade300,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      color,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: _getTextColorForBackground(_getColorFromName(color)),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (_stockMode == 'color_size') ...[
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         const Text(
                           'Quick Stock Entry',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -2369,14 +3170,17 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             decoration: InputDecoration(
                               hintText: 'Enter Qty',
                               isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 8),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
+                                borderSide:
+                                BorderSide(color: Colors.grey.shade300),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
+                                borderSide:
+                                BorderSide(color: Colors.grey.shade300),
                               ),
                             ),
                           ),
@@ -2384,22 +3188,29 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         const SizedBox(width: 8),
                         OutlinedButton(
                           onPressed: () {
-                            final q = int.tryParse(_quickStockController.text.trim()) ?? 0;
+                            final q = int.tryParse(
+                                _quickStockController.text.trim()) ??
+                                0;
                             final color = _selectedColorForStock;
                             if (q > 0 && color != null) {
                               setState(() {
-                                _stockByColorSize.putIfAbsent(color, () => {});
-                                for (final s in (_selectedSizes.isNotEmpty ? _selectedSizes : _sizes)) {
+                                _stockByColorSize.putIfAbsent(
+                                    color, () => {});
+                                for (final s in (_selectedSizes.isNotEmpty
+                                    ? _selectedSizes
+                                    : _sizes)) {
                                   _stockByColorSize[color]![s] = q;
                                 }
                               });
                             }
                           },
                           style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
                             side: const BorderSide(color: Color(0xFF25D366)),
                             foregroundColor: const Color(0xFF25D366),
-                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                            textStyle: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600),
                           ),
                           child: const Text('Apply to all sizes'),
                         ),
@@ -2413,12 +3224,17 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           onChanged: (v) {
                             setState(() {
                               _applyQuickToAllColors = v ?? false;
-                              final q = int.tryParse(_quickStockController.text.trim()) ?? 0;
+                              final q = int.tryParse(
+                                  _quickStockController.text.trim()) ??
+                                  0;
                               if (_applyQuickToAllColors && q > 0) {
                                 for (final item in _colorItems) {
                                   final color = item['name'] as String;
-                                  _stockByColorSize.putIfAbsent(color, () => {});
-                                  for (final s in (_selectedSizes.isNotEmpty ? _selectedSizes : _sizes)) {
+                                  _stockByColorSize.putIfAbsent(
+                                      color, () => {});
+                                  for (final s in (_selectedSizes.isNotEmpty
+                                      ? _selectedSizes
+                                      : _sizes)) {
                                     _stockByColorSize[color]![s] = q;
                                   }
                                 }
@@ -2442,35 +3258,47 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Stock for: ${_selectedColorForStock!}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text('Stock for: ${_selectedColorForStock!}',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: Colors.green,
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
                               '${(_stockByColorSize[_selectedColorForStock!] ?? {}).values.fold<int>(0, (a, b) => a + b)} Units',
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 6),
                       Column(
-                        children: (_selectedSizes.isNotEmpty ? _selectedSizes : _sizes).map((s) {
-                          final cs = _stockByColorSize.putIfAbsent(_selectedColorForStock!, () => {});
+                        children:
+                        (_selectedSizes.isNotEmpty ? _selectedSizes : _sizes)
+                            .map((s) {
+                          final cs = _stockByColorSize.putIfAbsent(
+                              _selectedColorForStock!, () => {});
                           final qty = cs[s] ?? 0;
                           return Container(
                             margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
                             decoration: BoxDecoration(
                               border: Border.all(color: Colors.grey.shade300),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
                               children: [
-                                Expanded(child: Text(s, style: const TextStyle(fontSize: 13))),
+                                Expanded(
+                                    child:
+                                    Text(s, style: const TextStyle(fontSize: 13))),
                                 Row(
                                   children: [
                                     IconButton(
@@ -2480,9 +3308,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                           if (cur > 0) cs[s] = cur - 1;
                                         });
                                       },
-                                      icon: const Icon(Icons.remove_circle_outline),
+                                      icon:
+                                      const Icon(Icons.remove_circle_outline),
                                     ),
-                                    Text('$qty', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                    Text('$qty',
+                                        style:
+                                        const TextStyle(fontWeight: FontWeight.w600)),
                                     IconButton(
                                       onPressed: () {
                                         setState(() {
@@ -2523,8 +3354,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           children: [
                             GestureDetector(
                               onTap: () async {
-                                final result =
-                                await Navigator.push<Map<String, dynamic>>(
+                                final result = await Navigator.push<
+                                    Map<String, dynamic>>(
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) =>
@@ -2582,9 +3413,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     const SizedBox(height: 6),
                     ..._attributes.entries.map((e) {
                       final values = e.value;
-                      final selectedValue =
-                          _selectedAttributeValues[e.key] ??
-                              (values.isNotEmpty ? values.first : '');
+                      final selectedValue = _selectedAttributeValues[e.key] ?? '';
                       return Container(
                         margin: const EdgeInsets.only(bottom: 6),
                         padding: const EdgeInsets.symmetric(
@@ -2609,7 +3438,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             GestureDetector(
                               onTap: () => _showValueDropdown(e.key, values),
                               child: Container(
-                                width: 120, // Fixed width for all value boxes
+                                width: 120,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
                                   vertical: 5,
@@ -2647,8 +3476,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               onTap: () {
                                 setState(() {
                                   _expandedAttributeItems[e.key] =
-                                  !(_expandedAttributeItems[e.key] ??
-                                      false);
+                                  !(_expandedAttributeItems[e.key] ?? false);
                                 });
                               },
                               child: Icon(
@@ -2664,7 +3492,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               const SizedBox(width: 4),
                               // + button
                               GestureDetector(
-                                onTap: () => _showAddValueToAttribute(e.key),
+                                onTap: () =>
+                                    _showAddValueToAttribute(e.key),
                                 child: Container(
                                   width: 24,
                                   height: 24,
@@ -2785,7 +3614,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                   const SizedBox(height: 16),
                   // Marketplace Toggle
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade50,
                       borderRadius: BorderRadius.circular(8),
@@ -2796,7 +3626,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.store, color: Color(0xFF25D366), size: 20),
+                            Icon(Icons.store,
+                                color: Color(0xFF25D366), size: 20),
                             SizedBox(width: 8),
                             Text(
                               'Marketplace',
@@ -2929,16 +3760,79 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
   };
   final TextEditingController _descController = TextEditingController();
   final List<Map<String, dynamic>> _colorItems = [];
+  List<String> _recentColors = []; // Add recent colors list
 
   @override
   void initState() {
     super.initState();
+    _loadRecentlySelectedItems(); // Load recent colors
     for (int i = 0; i < _colors.length; i++) {
       _colorItems.add({
         'name': _colors[i],
         'image': i < widget.images.length ? widget.images[i] : null,
       });
     }
+  }
+
+  // Load recently selected items from SharedPreferences
+  Future<void> _loadRecentlySelectedItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _recentColors = prefs.getStringList('recent_colors') ?? [];
+    });
+  }
+
+  // Save recently added color
+  Future<void> _saveRecentColor(String color) async {
+    final prefs = await SharedPreferences.getInstance();
+    _recentColors.remove(color); // Remove if exists
+    _recentColors.insert(0, color); // Add to beginning
+    if (_recentColors.length > 20) {
+      _recentColors = _recentColors.take(20).toList(); // Keep only 20
+    }
+    await prefs.setStringList('recent_colors', _recentColors);
+    setState(() {});
+  }
+
+  // Helper function to get color from color name
+  Color _getColorFromName(String colorName) {
+    final name = colorName.toLowerCase();
+    switch (name) {
+      case 'red':
+        return Colors.red;
+      case 'blue':
+        return Colors.blue;
+      case 'green':
+        return Colors.green;
+      case 'black':
+        return Colors.black;
+      case 'white':
+        return Colors.white;
+      case 'yellow':
+        return Colors.yellow;
+      case 'orange':
+        return Colors.orange;
+      case 'purple':
+        return Colors.purple;
+      case 'pink':
+        return Colors.pink;
+      case 'brown':
+        return Colors.brown;
+      case 'grey':
+      case 'gray':
+        return Colors.grey;
+      default:
+        return Colors.grey.shade400;
+    }
+  }
+
+  // Helper function to get text color for background
+  Color _getTextColorForBackground(Color backgroundColor) {
+    // Calculate luminance to determine if text should be white or black
+    double luminance = (0.299 * backgroundColor.red +
+        0.587 * backgroundColor.green +
+        0.114 * backgroundColor.blue) / 255;
+    return luminance > 0.5 ? Colors.black : Colors.white;
   }
 
   Widget _buildImageStrip() {
@@ -3116,7 +4010,7 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
       context,
       MaterialPageRoute(
         builder: (context) =>
-            const CameraInterfaceScreen(returnImagesDirectly: true),
+        const CameraInterfaceScreen(returnImagesDirectly: true),
       ),
     );
     File? picked;
@@ -3131,6 +4025,7 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
           title: const Text('Add Color'),
           content: TextField(
             controller: ctrl,
+            textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(hintText: 'Enter color name'),
           ),
           actions: [
@@ -3147,10 +4042,25 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
       },
     );
     if (name != null && name.isNotEmpty) {
-      setState(() {
-        _colors.add(name);
-        _colorItems.add({'name': name, 'image': picked});
-      });
+      // Check for duplicate colors (case-insensitive)
+      final isDuplicate = _colorItems.any((item) =>
+      item['name'].toString().toLowerCase() == name.toLowerCase());
+
+      if (!isDuplicate) {
+        setState(() {
+          _colors.add(name);
+          _colorItems.add({'name': name, 'image': picked});
+        });
+        _saveRecentColor(name); // Save to recent colors
+      } else {
+        // Show error message for duplicate color
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Color "$name" already exists!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -3332,33 +4242,33 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                     children: _priceSlabs
                         .map(
                           (slab) => Container(
-                            width: 150,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.orange.shade300),
-                              borderRadius: BorderRadius.circular(12),
-                              color: Colors.orange.shade50,
+                        width: 150,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.orange.shade300),
+                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.orange.shade50,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '₹ ${slab['price']}/pc',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '₹ ${slab['price']}/pc',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Min. order: ${slab['moq']} pcs',
-                                  style: TextStyle(
-                                    color: Colors.orange.shade700,
-                                  ),
-                                ),
-                              ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Min. order: ${slab['moq']} pcs',
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                              ),
                             ),
-                          ),
-                        )
+                          ],
+                        ),
+                      ),
+                    )
                         .toList(),
                   ),
                   const SizedBox(height: 8),
@@ -3556,45 +4466,45 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                   ..._attributes.entries
                       .map(
                         (e) => Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade50,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(e.key)),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: Colors.grey.shade300,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(e.value),
-                                    const Icon(
-                                      Icons.keyboard_arrow_down,
-                                      size: 16,
-                                    ),
-                                  ],
-                                ),
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(e.key)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.grey.shade300,
                               ),
-                            ],
+                            ),
+                            child: Row(
+                              children: [
+                                Text(e.value),
+                                const Icon(
+                                  Icons.keyboard_arrow_down,
+                                  size: 16,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      )
+                        ],
+                      ),
+                    ),
+                  )
                       .toList(),
                 ],
               ),
@@ -3895,10 +4805,10 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                                 ),
                                 suffixIcon: valueOptions.isEmpty
                                     ? Icon(
-                                        Icons.keyboard_arrow_down,
-                                        color: Colors.grey.shade400,
-                                        size: 16,
-                                      )
+                                  Icons.keyboard_arrow_down,
+                                  color: Colors.grey.shade400,
+                                  size: 16,
+                                )
                                     : null,
                               ),
                             ),
@@ -4270,7 +5180,7 @@ class _AddProductMoqSetScreenState extends State<AddProductMoqSetScreen> {
                           'pcs': int.tryParse(_pcsController.text) ?? 3,
                           'selectedSizes': _selectedSizes.toList(),
                           'setCount':
-                              int.tryParse(_setCountController.text) ?? 1,
+                          int.tryParse(_setCountController.text) ?? 1,
                         };
                         Navigator.pop(context, result);
                       },

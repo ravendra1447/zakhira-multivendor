@@ -6,7 +6,7 @@ import 'package:whatsappchat/services/local_auth_service.dart';
 
 class ApiService {
   // Updated Base URL
-  static const baseUrl = "http://184.168.126.71/api";
+  static const baseUrl = "https://bangkokmart.in/api";
 
   static final _authBox = Hive.box("authBox");
 

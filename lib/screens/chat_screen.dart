@@ -1662,6 +1662,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ SELECTION BOTTOM BAR (WHATSAPP STYLE) - UPDATED WITH COPY
   Widget _buildSelectionBottomBar() {
     if (!_selectionMode) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Positioned(
       bottom: 0,
@@ -1670,7 +1671,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       child: Container(
         height: 60,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.1),
@@ -3465,6 +3466,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // ✅ BUILD REPLY PREVIEW
   Widget _buildReplyPreview() {
     if (_replyingToMessage == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final replyMsg = _replyingToMessage!;
     final isMe = replyMsg.senderId == LocalAuthService.getUserId();
@@ -3474,9 +3476,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       key: _replyPreviewKey,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: isDark ? Colors.grey[800] : Colors.grey[100],
         border: Border(
-          bottom: BorderSide(color: Colors.grey[300]!),
+          bottom: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
       ),
       child: Row(
@@ -3496,7 +3498,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 4),
                 Text(
                   _getReplyPreviewText(replyMsg),
-                  style: const TextStyle(fontSize: 14),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -3504,7 +3509,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 20),
+            icon: Icon(Icons.close, size: 20, color: isDark ? Colors.white70 : Colors.black87),
             onPressed: _cancelReply,
           ),
         ],
@@ -3738,6 +3743,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final bool isSelected = selectedMessageIds.contains(msgId);
     final userId = LocalAuthService.getUserId();
     final bool isMe = msg.senderId == userId;
+    // ✅ Dark mode support: Get theme-aware text color
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black;
 
     // ✅ FIX: Hide non-anchor messages in grouped media (prevent dots and duplication)
     // ✅ CRITICAL: This check happens BEFORE any rendering, so non-anchor messages never appear
@@ -3905,7 +3913,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                          child: _buildMediaMessage(msg, msg.messageContent, textColor),
                         ),
                         // ✅ SELECTION CHECKBOX for grouped images
                         if (_selectionMode && isSelected)
@@ -3920,10 +3928,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 height: 20,
 
                                 decoration: BoxDecoration(
-                                  color: isSelected ? Colors.green : Colors.white,
+                                  color: isSelected 
+                                      ? Colors.green 
+                                      : (Theme.of(context).brightness == Brightness.dark 
+                                          ? Colors.grey[700]! 
+                                          : Colors.white),
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isSelected ? Colors.green : Colors.grey,
+                                    color: isSelected 
+                                        ? Colors.green 
+                                        : (Theme.of(context).brightness == Brightness.dark 
+                                            ? Colors.grey[600]! 
+                                            : Colors.grey),
                                     width: 2,
                                   ),
                                 ),
@@ -4009,7 +4025,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                            child: _buildMediaMessage(msg, msg.messageContent, textColor),
                           ),
                           // ✅ COUNTING BADGE: Show "1/3", "2/3" etc. when multiple images expected (updates in real-time)
                           if (showCountingBadge2)
@@ -4044,10 +4060,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                    color: isSelected ? Colors.green : Colors.white,
+                                    color: isSelected 
+                                        ? Colors.green 
+                                        : (Theme.of(context).brightness == Brightness.dark 
+                                            ? Colors.grey[700]! 
+                                            : Colors.white),
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: isSelected ? Colors.green : Colors.grey,
+                                      color: isSelected 
+                                          ? Colors.green 
+                                          : (Theme.of(context).brightness == Brightness.dark 
+                                              ? Colors.grey[600]! 
+                                              : Colors.grey),
                                       width: 2,
                                     ),
                                   ),
@@ -4174,8 +4198,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     //   );
     // }
 
-    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
-    final textColor = Colors.black;
+    //final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = isMe 
+        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6)) 
+        : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
 
     final bool contentDeleted = !isMe && msg.isDeletedSender == 1;
     final String content = contentDeleted ? '❌ This message was deleted' : msg.messageContent;
@@ -4277,7 +4303,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               children: [
                                 Text(
                                   _formatTime(msg.timestamp),
-                                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white70 : Colors.black54, 
+                                    fontSize: 12
+                                  ),
                                 ),
                                 if (isMe) const SizedBox(width: 4),
                                 if (isMe)
@@ -4326,6 +4355,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // ✅ BUILD REPLY IN MESSAGE
   Widget _buildReplyInMessage(Message msg) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final repliedMessage = _messageBox.values.firstWhereOrNull(
           (m) => m.messageId == msg.replyToMessageId,
     );
@@ -4334,13 +4364,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.grey[200],
+          color: isDark ? Colors.grey[800] : Colors.grey[200],
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
-        child: const Text(
+        child: Text(
           "Original message not found",
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+          style: TextStyle(
+            fontSize: 12, 
+            color: isDark ? Colors.grey[400] : Colors.grey,
+          ),
         ),
       );
     }
@@ -4358,9 +4391,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         padding: const EdgeInsets.all(8),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: Colors.grey[200],
+          color: isDark ? Colors.grey[800] : Colors.grey[200],
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4376,7 +4409,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             const SizedBox(height: 4),
             Text(
               _getReplyPreviewText(repliedMessage),
-              style: const TextStyle(fontSize: 12),
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -4552,7 +4588,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     //   );
     // }
 
-    final color = isMe ? const Color(0xFFDCF8C6) : Colors.white;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = isMe 
+        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6)) 
+        : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
+    final textColor = isDark ? Colors.white : Colors.black;
 
     return GestureDetector(
       onHorizontalDragStart: (details) => _handleSwipeStart(details, msg),
@@ -4629,7 +4669,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
                         Stack(
                           children: [
-                            _buildMediaMessage(msg, msg.messageContent, Colors.black),
+                            _buildMediaMessage(msg, msg.messageContent, textColor),
                             // ✅ COUNTING BADGE: Show "1/3", "2/3" etc. when multiple images expected
                             if (msg.groupId != null && msg.groupId!.isNotEmpty && msg.totalImages != null && msg.totalImages! > 1)
                               Builder(
@@ -7450,7 +7490,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.65,
                 height: 300, // ✅ SAME HEIGHT MAINTAINED
-                color: Colors.grey[300],
+                color: Theme.of(context).brightness == Brightness.dark 
+                    ? Colors.grey[800]! 
+                    : Colors.grey[300]!,
                 child: Image.file(
                   File(localPath),
                   fit: BoxFit.cover,
@@ -7520,27 +7562,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return Icon(
         Icons.access_time,
         size: 12,
-        color: Colors.grey[300],
+        color: Theme.of(context).brightness == Brightness.dark 
+            ? Colors.grey[500] 
+            : Colors.grey[300],
       );
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (msg.isRead == 1) {
-      return const Icon(
+      return Icon(
         Icons.done_all,
         size: 12,
         color: Colors.blue,
       );
     } else if (msg.isDelivered == 1) {
-      return const Icon(
+      return Icon(
         Icons.done_all,
         size: 12,
-        color: Colors.grey,
+        color: isDark ? Colors.grey[400] : Colors.grey,
       );
     } else {
-      return const Icon(
+      return Icon(
         Icons.done,
         size: 12,
-        color: Colors.grey,
+        color: isDark ? Colors.grey[400] : Colors.grey,
       );
     }
   }
@@ -7806,24 +7851,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildEncryptionNotice() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: isDark ? Colors.grey[900] : Colors.grey[100],
         border: Border(
-          top: BorderSide(color: Colors.grey[300]!),
-          bottom: BorderSide(color: Colors.grey[300]!),
+          top: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+          bottom: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.lock_outline, size: 14, color: Colors.grey),
+          Icon(
+            Icons.lock_outline, 
+            size: 14, 
+            color: isDark ? Colors.grey[400] : Colors.grey
+          ),
           const SizedBox(width: 8),
           Text(
             'Messages and calls are end-to-end encrypted',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 12, 
+              color: isDark ? Colors.grey[400] : Colors.grey[600]
+            ),
           ),
         ],
       ),
@@ -7865,6 +7918,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildInputArea() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       children: [
         // ✅ REPLY PREVIEW
@@ -7872,7 +7926,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
         Container(
           padding: const EdgeInsets.all(8),
-          color: Colors.grey[100],
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
           child: Row(
             children: [
               Expanded(
@@ -7880,16 +7934,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   constraints: const BoxConstraints(maxHeight: 100),
                   padding: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? Colors.grey[800] : Colors.white,
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.grey[300]!),
+                    border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
                         onPressed: () {},
-                        icon: Icon(Icons.emoji_emotions_outlined, color: Colors.grey[600]),
+                        icon: Icon(
+                          Icons.emoji_emotions_outlined, 
+                          color: isDark ? Colors.grey[400] : Colors.grey[600]
+                        ),
                       ),
                       Expanded(
                         child: TextField(
@@ -7899,15 +7956,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           maxLines: null,
                           onChanged: (_) => _startTyping(),
                           textCapitalization: TextCapitalization.sentences,
-                          decoration: const InputDecoration(
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                          ),
+                          decoration: InputDecoration(
                             hintText: "Type a message...",
+                            hintStyle: TextStyle(
+                              color: isDark ? Colors.grey[500] : Colors.grey[600],
+                            ),
                             border: InputBorder.none,
                           ),
                         ),
                       ),
                       // ✅ FIX: Add camera option alongside gallery
                       PopupMenuButton<String>(
-                        icon: Icon(Icons.add_circle_outline, color: Colors.grey[600]),
+                        icon: Icon(
+                          Icons.add_circle_outline, 
+                          color: isDark ? Colors.grey[400] : Colors.grey[600]
+                        ),
                         onSelected: (value) async {
                           if (value == 'gallery') {
                             _openMultiPicker();
@@ -7916,23 +7982,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           }
                         },
                         itemBuilder: (context) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'camera',
                             child: Row(
                               children: [
-                                Icon(Icons.camera_alt, color: Colors.grey),
-                                SizedBox(width: 8),
-                                Text('Camera'),
+                                Icon(Icons.camera_alt, color: isDark ? Colors.grey[400] : Colors.grey),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Camera',
+                                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                                ),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'gallery',
                             child: Row(
                               children: [
-                                Icon(Icons.photo_library, color: Colors.grey),
-                                SizedBox(width: 8),
-                                Text('Gallery'),
+                                Icon(Icons.photo_library, color: isDark ? Colors.grey[400] : Colors.grey),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Gallery',
+                                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                                ),
                               ],
                             ),
                           ),
@@ -8118,7 +8190,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return -1;
   }
 
-  @override
+
   @override
   Widget build(BuildContext context) {
     final titleText =
@@ -8135,44 +8207,54 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: Colors.grey[300],
-              child: Text(
-                initial,
-                style: const TextStyle(color: Color(0xFF075E54)),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    titleText,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _isOtherUserTyping
-                        ? 'Typing...'
-                        : (_userStatus == "online"
-                        ? "online"
-                        : "offline"),
+        title: Builder(
+          builder: (context) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            return Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: isDark ? Colors.grey[700] : Colors.grey[300],
+                  child: Text(
+                    initial,
                     style: TextStyle(
-                      fontSize: 12,
-                      color: _isOtherUserTyping || _userStatus == "online"
-                          ? Colors.greenAccent
-                          : Colors.white.withOpacity(0.7),
+                      color: isDark ? Colors.white : const Color(0xFF075E54)
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
-            ),
-          ],
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titleText,
+                        style: TextStyle(
+                          fontSize: 16, 
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _isOtherUserTyping
+                            ? 'Typing...'
+                            : (_userStatus == "online"
+                            ? "online"
+                            : "offline"),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isOtherUserTyping || _userStatus == "online"
+                              ? Colors.greenAccent
+                              : Colors.white.withOpacity(0.7),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         actions: [
           IconButton(
@@ -8212,92 +8294,104 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (_focusNode.hasFocus) _focusNode.unfocus();
               if (_selectionMode) _clearSelection();
             },
-            child: Container(
-              decoration: const BoxDecoration(
-                image: DecorationImage(
-                  image: AssetImage('assets/chat_bg.png'),
-                  fit: BoxFit.cover,
-                ),
-              ),
-              child: Column(
-                children: [
-                  _buildEncryptionNotice(),
+            child: Builder(
+              builder: (context) {
+                final isDark = Theme.of(context).brightness == Brightness.dark;
+                return Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF121212) : null,
+                    image: isDark ? null : const DecorationImage(
+                      image: AssetImage('assets/chat_bg.png'),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildEncryptionNotice(),
 
-                  /// 🔥 COLLAGE + MESSAGE LIST
-                  Expanded(
-                    child: ValueListenableBuilder<int>(
-                      valueListenable: _collageVersionNotifier,
-                      builder: (context, _, __) {
-                        return ValueListenableBuilder<Box<Message>>(
-                          valueListenable: _messageBox.listenable(),
-                          builder: (context, box, __) {
-                            final messages = _getOptimizedMessages();
+                      /// 🔥 COLLAGE + MESSAGE LIST
+                      Expanded(
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: _collageVersionNotifier,
+                          builder: (context, _, __) {
+                            return ValueListenableBuilder<Box<Message>>(
+                              valueListenable: _messageBox.listenable(),
+                              builder: (context, box, __) {
+                                final messages = _getOptimizedMessages();
 
-                            if (messages.isEmpty) {
-                              return const Center(
-                                child:
-                                Text("Say hi to start the conversation!"),
-                              );
-                            }
-
-                            WidgetsBinding.instance
-                                .addPostFrameCallback((_) {
-                              if (_shouldScrollToBottom &&
-                                  _hasInitialScrollDone) {
-                                _scrollToBottomSmooth();
-                              }
-                            });
-
-                            return ListView.builder(
-                              controller: _scrollController,
-                              padding: const EdgeInsets.all(8),
-                              itemCount:
-                              messages.length + (_isLoadingMore ? 1 : 0),
-                              physics:
-                              const ClampingScrollPhysics(),
-                              itemBuilder: (context, index) {
-                                if (_isLoadingMore && index == 0) {
-                                  return const Padding(
-                                    padding: EdgeInsets.all(8),
-                                    child: Center(
-                                      child: SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2),
+                                if (messages.isEmpty) {
+                                  return Center(
+                                    child: Text(
+                                      "Say hi to start the conversation!",
+                                      style: TextStyle(
+                                        color: Theme.of(context).brightness == Brightness.dark
+                                            ? Colors.white70
+                                            : Colors.black54,
                                       ),
                                     ),
                                   );
                                 }
 
-                                final adjustedIndex =
-                                _isLoadingMore ? index - 1 : index;
-                                if (adjustedIndex >= messages.length) {
-                                  return const SizedBox.shrink();
-                                }
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (_shouldScrollToBottom &&
+                                      _hasInitialScrollDone) {
+                                    _scrollToBottomSmooth();
+                                  }
+                                });
 
-                                final msg = messages[adjustedIndex];
-                                // ✅ DEBUG: Log when rendering message in list
-                                final hasGroupId = (msg.groupId ?? '').isNotEmpty;
-                                if (hasGroupId) {
-                                  print('🔍 [LIST RENDER] Rendering message ${msg.messageId} in list at index $adjustedIndex, groupId=${msg.groupId}, imageIndex=${msg.imageIndex}');
-                                }
-                                return _buildMessageBubble(
-                                  msg,
-                                  key: _getMessageKey(msg),
+                                return ListView.builder(
+                                  controller: _scrollController,
+                                  padding: const EdgeInsets.all(8),
+                                  itemCount:
+                                  messages.length + (_isLoadingMore ? 1 : 0),
+                                  physics:
+                                  const ClampingScrollPhysics(),
+                                  itemBuilder: (context, index) {
+                                    if (_isLoadingMore && index == 0) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: Center(
+                                          child: SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    final adjustedIndex =
+                                    _isLoadingMore ? index - 1 : index;
+                                    if (adjustedIndex >= messages.length) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    final msg = messages[adjustedIndex];
+                                    // ✅ DEBUG: Log when rendering message in list
+                                    final hasGroupId = (msg.groupId ?? '').isNotEmpty;
+                                    if (hasGroupId) {
+                                      print('🔍 [LIST RENDER] Rendering message ${msg.messageId} in list at index $adjustedIndex, groupId=${msg.groupId}, imageIndex=${msg.imageIndex}');
+                                    }
+                                    return _buildMessageBubble(
+                                      msg,
+                                      key: _getMessageKey(msg),
+                                    );
+                                  },
                                 );
                               },
                             );
                           },
-                        );
-                      },
-                    ),
-                  ),
+                        ),
+                      ),
 
-                  _buildImagePreview(),
-                  _buildInputArea(),
-                ],
-              ),
+                      _buildImagePreview(),
+                      _buildInputArea(),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
 

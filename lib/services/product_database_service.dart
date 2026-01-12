@@ -26,7 +26,7 @@ class ProductDatabaseService {
 
     return await openDatabase(
       path,
-      version: 2, // Increment version for migration
+      version: 3, // Increment version for migration (added stock fields)
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -40,6 +40,22 @@ class ProductDatabaseService {
           ALTER TABLE products ADD COLUMN marketplace_enabled INTEGER DEFAULT 0
         ''');
         print('✅ Database migrated: Added marketplace_enabled column');
+      } catch (e) {
+        // Column might already exist
+        print('⚠️ Migration note: $e');
+      }
+    }
+    
+    if (oldVersion < 3) {
+      // Add stock_mode and stock_by_color_size columns
+      try {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN stock_mode TEXT DEFAULT 'simple'
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN stock_by_color_size TEXT
+        ''');
+        print('✅ Database migrated: Added stock_mode and stock_by_color_size columns');
       } catch (e) {
         // Column might already exist
         print('⚠️ Migration note: $e');
@@ -64,6 +80,8 @@ class ProductDatabaseService {
         sizes TEXT,
         images TEXT,
         marketplace_enabled INTEGER DEFAULT 0,
+        stock_mode TEXT DEFAULT 'simple',
+        stock_by_color_size TEXT,
         created_at TEXT,
         updated_at TEXT,
         server_id INTEGER,
@@ -97,6 +115,10 @@ class ProductDatabaseService {
     map['sizes'] = jsonEncode(product.sizes);
     map['images'] = jsonEncode(product.images);
     map['marketplace_enabled'] = product.marketplaceEnabled ? 1 : 0;
+    map['stock_mode'] = product.stockMode;
+    map['stock_by_color_size'] = product.stockByColorSize != null
+        ? jsonEncode(product.stockByColorSize)
+        : null;
     map['created_at'] = DateTime.now().toIso8601String();
     map['updated_at'] = DateTime.now().toIso8601String();
     map['synced'] = 0; // Not synced yet

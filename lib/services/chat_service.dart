@@ -30,7 +30,7 @@ class ChatService {
   static Box get _authBox => Hive.box('authBox');
   static Box<Message> get _messageBox => Hive.box<Message>('messages');
 
-  static const String apiBase = "http://184.168.126.71/api";
+  static const String apiBase = "https://bangkokmart.in/api";
   static const String socketBase = "http://184.168.126.71:3000";
   static final Dio _dio = Dio();
 

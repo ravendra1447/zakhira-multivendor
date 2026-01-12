@@ -9,7 +9,7 @@ class LocalAuthService {
   // Emulator: http://10.0.2.2/api
   // Mobile Device: http://<your-ip>/api\
   //http://sbr.181.mytemp.website/api
-  static const String baseUrl = "http://184.168.126.71/api";
+  static const String baseUrl = "https://bangkokmart.in/api";
 
   /// ---------------- Local Storage ----------------
 

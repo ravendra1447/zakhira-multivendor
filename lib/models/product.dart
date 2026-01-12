@@ -15,6 +15,8 @@ class Product {
   final List<String> sizes;
   final List<String> images; // Image URLs
   final bool marketplaceEnabled; // Show in marketplace or not
+  final String stockMode; // 'simple', 'color_size', or 'always_available'
+  final Map<String, Map<String, int>>? stockByColorSize; // {color: {size: qty}}
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -33,6 +35,8 @@ class Product {
     required this.sizes,
     required this.images,
     this.marketplaceEnabled = false,
+    this.stockMode = 'simple',
+    this.stockByColorSize,
     this.createdAt,
     this.updatedAt,
   });
@@ -54,6 +58,8 @@ class Product {
       'sizes': sizes,
       'images': images,
       'marketplace_enabled': marketplaceEnabled ? 1 : 0,
+      'stock_mode': stockMode,
+      'stock_by_color_size': stockByColorSize,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
@@ -142,6 +148,30 @@ class Product {
       marketplaceEnabled: map['marketplace_enabled'] != null
           ? (map['marketplace_enabled'] == 1 || map['marketplace_enabled'] == true)
           : false,
+      stockMode: map['stock_mode'] as String? ?? 'simple',
+      stockByColorSize: (map['stock_by_color_size'] is String)
+          ? (map['stock_by_color_size'] as String).isNotEmpty
+              ? Map<String, Map<String, int>>.from(
+                  (jsonDecode(map['stock_by_color_size'] as String) as Map).map(
+                    (k, v) => MapEntry(
+                      k.toString(),
+                      Map<String, int>.from(
+                        (v as Map).map((sk, sv) => MapEntry(sk.toString(), (sv as num).toInt())),
+                      ),
+                    ),
+                  ))
+              : null
+          : (map['stock_by_color_size'] != null && map['stock_by_color_size'] is Map)
+              ? Map<String, Map<String, int>>.from(
+                  (map['stock_by_color_size'] as Map).map(
+                    (k, v) => MapEntry(
+                      k.toString(),
+                      Map<String, int>.from(
+                        (v as Map).map((sk, sv) => MapEntry(sk.toString(), (sv as num).toInt())),
+                      ),
+                    ),
+                  ))
+              : null,
       createdAt: map['created_at'] != null
           ? DateTime.parse(map['created_at'] as String)
           : null,
@@ -168,6 +198,8 @@ class Product {
       'sizes': sizes,
       'images': images,
       'marketplace_enabled': marketplaceEnabled ? 1 : 0,
+      'stock_mode': stockMode,
+      'stock_by_color_size': stockByColorSize,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
@@ -189,6 +221,8 @@ class Product {
     List<String>? sizes,
     List<String>? images,
     bool? marketplaceEnabled,
+    String? stockMode,
+    Map<String, Map<String, int>>? stockByColorSize,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -207,6 +241,8 @@ class Product {
       sizes: sizes ?? this.sizes,
       images: images ?? this.images,
       marketplaceEnabled: marketplaceEnabled ?? this.marketplaceEnabled,
+      stockMode: stockMode ?? this.stockMode,
+      stockByColorSize: stockByColorSize ?? this.stockByColorSize,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

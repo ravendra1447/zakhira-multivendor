@@ -12,6 +12,7 @@ class CategorySelectionScreen extends StatefulWidget {
 
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   String _selectedCategory = 'Popular';
+  String? _selectedSubcategory;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _showSearch = false;
@@ -31,6 +32,20 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     {'name': 'Footwear', 'icon': '👠'},
   ];
 
+  // Map of categories to their subcategories
+  final Map<String, List<String>> _subcategories = {
+    'Popular': ['Kurtis & Dress Materials', 'Sarees', 'Westernwear', 'Jewellery', 'Men Fashion', 'Kids', 'Footwear', 'Beauty & Personal Care', 'Grocery'],
+    'Kurti, Saree & Lehenga': ['Kurtis', 'Sarees', 'Lehengas', 'Dress Materials', 'Dupattas', 'Anarkali Suits'],
+    'Women Western': ['Tops', 'Shirts', 'Jeans', 'Dresses', 'Skirts', 'Shorts', 'Jackets', 'Blazers'],
+    'Lingerie': ['Bras', 'Panties', 'Lingerie Sets', 'Shapewear', 'Nightwear'],
+    'Men': ['Men Fashion', 'Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Formal Wear', 'Casual Wear', 'Accessories'],
+    'Kids & Toys': ['Kids Clothing', 'Toys', 'Baby Care', 'School Supplies', 'Games'],
+    'Home & Kitchen': ['Kitchenware', 'Home Decor', 'Furniture', 'Bedding', 'Bath', 'Storage'],
+    'Electronics': ['Mobiles', 'Laptops', 'Accessories', 'Audio', 'Cameras', 'Gaming'],
+    'Beauty & Personal Care': ['Skincare', 'Makeup', 'Hair Care', 'Fragrances', 'Personal Hygiene'],
+    'Footwear': ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sandals', 'Boots', 'Slippers'],
+  };
+
   @override
   void initState() {
     super.initState();
@@ -43,22 +58,45 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     if (recentJson != null) {
       final List<dynamic> recentList = json.decode(recentJson);
       setState(() {
-        _recentItems = recentList.map((item) => {
-          'name': item['name'],
-          'image': item['image'] ?? _getIconForCategory(item['name']),
-          'badges': item['badges'] ?? [],
+        _recentItems = recentList.map((item) {
+          final name = item['name'] as String;
+          // Parse category and subcategory from name if not already present
+          String? category = item['category'] as String?;
+          String? subcategory = item['subcategory'] as String?;
+          
+          if (category == null && name.contains(' > ')) {
+            final parts = name.split(' > ');
+            category = parts[0];
+            subcategory = parts.length > 1 ? parts[1] : null;
+          } else if (category == null) {
+            category = name;
+          }
+          
+          return {
+            'name': name,
+            'category': category,
+            'subcategory': subcategory,
+            'image': item['image'] ?? _getIconForCategory(category),
+            'badges': item['badges'] ?? [],
+          };
         }).toList();
       });
     }
   }
 
-  Future<void> _saveRecentCategory(String categoryName) async {
+  Future<void> _saveRecentCategory(String categoryName, String? subcategoryName) async {
+    final displayName = subcategoryName != null 
+        ? '$categoryName > $subcategoryName' 
+        : categoryName;
+    
     // Remove if already exists
-    _recentItems.removeWhere((item) => item['name'] == categoryName);
+    _recentItems.removeWhere((item) => item['name'] == displayName);
     
     // Add to beginning
     _recentItems.insert(0, {
-      'name': categoryName,
+      'name': displayName,
+      'category': categoryName,
+      'subcategory': subcategoryName,
       'image': _getIconForCategory(categoryName),
       'badges': [],
     });
@@ -83,17 +121,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     return category['icon']!;
   }
 
-  final List<Map<String, dynamic>> _allPopularItems = [
-    {'name': 'Kurtis & Dress Materials', 'image': '👗'},
-    {'name': 'Sarees', 'image': '👘'},
-    {'name': 'Westernwear', 'image': '👚'},
-    {'name': 'Jewellery', 'image': '💍'},
-    {'name': 'Men Fashion', 'image': '👔'},
-    {'name': 'Kids', 'image': '👶'},
-    {'name': 'Footwear', 'image': '👠'},
-    {'name': 'Beauty & Personal Care', 'image': '💄'},
-    {'name': 'Grocery', 'image': '🛒'},
-  ];
+  List<String> get _currentSubcategories {
+    return _subcategories[_selectedCategory] ?? [];
+  }
 
   List<Map<String, String>> get _filteredCategories {
     if (_searchQuery.isEmpty) {
@@ -200,9 +230,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                       final isSelected = _selectedCategory == category['name'];
                       return GestureDetector(
                         onTap: () {
-                          setState(() {
-                            _selectedCategory = category['name']!;
-                          });
+                      setState(() {
+                        _selectedCategory = category['name']!;
+                        _selectedSubcategory = null; // Reset subcategory when category changes
+                      });
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -261,7 +292,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                     },
                   ),
                 ),
-                // Main Content Area
+                // Main Content Area - Show Subcategories
                 Expanded(
                   child: SingleChildScrollView(
                     padding: EdgeInsets.zero,
@@ -298,9 +329,14 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                   final item = _displayedRecentItems[index];
                                   return GestureDetector(
                                     onTap: () async {
-                                      await _saveRecentCategory(item['name'] as String);
+                                      final category = item['category'] as String? ?? item['name'] as String;
+                                      final subcategory = item['subcategory'] as String?;
+                                      await _saveRecentCategory(category, subcategory);
                                       if (mounted) {
-                                        Navigator.pop(context, item['name']);
+                                        Navigator.pop(context, {
+                                          'category': category,
+                                          'subcategory': subcategory,
+                                        });
                                       }
                                     },
                                     child: Column(
@@ -401,15 +437,15 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // All Popular Section
+                        // Subcategories Section
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'All Popular',
-                                style: TextStyle(
+                              Text(
+                                'All ${_selectedCategory}',
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.black87,
@@ -426,14 +462,18 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                       mainAxisSpacing: 12,
                                       childAspectRatio: 0.75,
                                     ),
-                                itemCount: _allPopularItems.length,
+                                itemCount: _currentSubcategories.length,
                                 itemBuilder: (context, index) {
-                                  final item = _allPopularItems[index];
+                                  final subcategory = _currentSubcategories[index];
+                                  final isSelected = _selectedSubcategory == subcategory;
                                   return GestureDetector(
                                     onTap: () async {
-                                      await _saveRecentCategory(item['name'] as String);
+                                      await _saveRecentCategory(_selectedCategory, subcategory);
                                       if (mounted) {
-                                        Navigator.pop(context, item['name']);
+                                        Navigator.pop(context, {
+                                          'category': _selectedCategory,
+                                          'subcategory': subcategory,
+                                        });
                                       }
                                     },
                                     child: Column(
@@ -443,12 +483,17 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                           width: 70,
                                           height: 70,
                                           decoration: BoxDecoration(
-                                            color: Colors.grey.shade200,
+                                            color: isSelected 
+                                                ? Colors.purple.shade100 
+                                                : Colors.grey.shade200,
                                             shape: BoxShape.circle,
+                                            border: isSelected 
+                                                ? Border.all(color: Colors.purple, width: 2)
+                                                : null,
                                           ),
                                           child: Center(
                                             child: Text(
-                                              item['image'] as String,
+                                              _getIconForCategory(_selectedCategory),
                                               style: const TextStyle(
                                                 fontSize: 32,
                                               ),
@@ -458,11 +503,15 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                         const SizedBox(height: 6),
                                         Flexible(
                                           child: Text(
-                                            item['name'] as String,
-                                            style: const TextStyle(
+                                            subcategory,
+                                            style: TextStyle(
                                               fontSize: 11,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.black87,
+                                              fontWeight: isSelected 
+                                                  ? FontWeight.w600 
+                                                  : FontWeight.w500,
+                                              color: isSelected 
+                                                  ? Colors.purple 
+                                                  : Colors.black87,
                                             ),
                                             textAlign: TextAlign.center,
                                             maxLines: 2,
@@ -509,9 +558,13 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                 final category = _filteredCategories[index];
                 return GestureDetector(
                   onTap: () async {
-                    await _saveRecentCategory(category['name']!);
+                    // For search, just return category without subcategory
+                    await _saveRecentCategory(category['name']!, null);
                     if (mounted) {
-                      Navigator.pop(context, category['name']);
+                      Navigator.pop(context, {
+                        'category': category['name'],
+                        'subcategory': null,
+                      });
                     }
                   },
                   child: Column(

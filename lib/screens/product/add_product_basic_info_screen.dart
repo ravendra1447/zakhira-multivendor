@@ -25,6 +25,7 @@ class AddProductBasicInfoScreen extends StatefulWidget {
 class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   final TextEditingController _nameController = TextEditingController();
   String? _category;
+  String? _subcategory;
   final TextEditingController _availableQtyController = TextEditingController();
   final FocusNode _availableQtyFocusNode = FocusNode();
   final List<Map<String, dynamic>> _priceSlabs = [];
@@ -1832,9 +1833,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
       }).toList();
 
       // Prepare product data
+      // Debug: Print category and subcategory before saving
+      print('📦 Saving product with category: $_category, subcategory: $_subcategory');
       final productData = {
         'name': _nameController.text.trim(),
         'category': _category ?? '',
+        'subcategory': _subcategory?.trim().isNotEmpty == true ? _subcategory!.trim() : null,
         // For simple stock, use availableQty. For color_size, calculate total from all colors. For always_available, set to empty or special value
         'availableQty': _stockMode == 'simple'
             ? _availableQtyController.text.trim()
@@ -2034,15 +2038,26 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                   _sectionTitle('Category'),
                   InkWell(
                     onTap: () async {
-                      final picked = await Navigator.push<String>(
+                      final picked = await Navigator.push<Map<String, String?>>(
                         context,
                         MaterialPageRoute(
                           builder: (context) => const CategorySelectionScreen(),
                         ),
                       );
                       if (picked != null) {
-                        setState(() => _category = picked);
-                        _saveRecentCategory(picked); // Save to recent categories
+                        setState(() {
+                          _category = picked['category'];
+                          _subcategory = picked['subcategory'];
+                        });
+                        // Debug: Print category and subcategory to verify
+                        print('✅ Category selected: $_category');
+                        print('✅ Subcategory selected: $_subcategory');
+                        final displayName = _subcategory != null 
+                            ? '$_category > $_subcategory' 
+                            : _category;
+                        if (displayName != null) {
+                          _saveRecentCategory(displayName); // Save to recent categories
+                        }
                         Future.delayed(const Duration(milliseconds: 300), () {
                           _availableQtyFocusNode.requestFocus();
                         });
@@ -2062,7 +2077,11 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              _category ?? 'Select category',
+                              _category == null 
+                                  ? 'Select category'
+                                  : _subcategory != null 
+                                      ? '$_category > $_subcategory'
+                                      : _category!,
                               style: TextStyle(
                                 color: (_category == null)
                                     ? hintColor
@@ -2102,11 +2121,19 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           Wrap(
                             spacing: 6,
                             runSpacing: 4,
-                            children: _recentCategories.take(5).map((category) {
+                            children: _recentCategories.take(5).map((categoryDisplay) {
+                              // Parse category display string (format: "Category > Subcategory" or just "Category")
+                              final parts = categoryDisplay.split(' > ');
+                              final category = parts[0];
+                              final subcategory = parts.length > 1 ? parts[1] : null;
+                              
                               return GestureDetector(
                                 onTap: () {
-                                  setState(() => _category = category);
-                                  _saveRecentCategory(category);
+                                  setState(() {
+                                    _category = category;
+                                    _subcategory = subcategory;
+                                  });
+                                  _saveRecentCategory(categoryDisplay);
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2118,7 +2145,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    category,
+                                    categoryDisplay,
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: isDark ? Colors.green.shade300 : Colors.green.shade700,

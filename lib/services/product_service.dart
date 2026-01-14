@@ -82,10 +82,22 @@ class ProductService {
       }
 
       // Create Product model with file paths (not URLs yet)
+      // Handle subcategory - ensure it's not empty string
+      final subcategoryValue = productData['subcategory'];
+      final subcategory = (subcategoryValue is String && subcategoryValue.trim().isNotEmpty) 
+          ? subcategoryValue.trim() 
+          : (subcategoryValue != null && subcategoryValue.toString().trim().isNotEmpty)
+              ? subcategoryValue.toString().trim()
+              : null;
+      
+      // Debug: Print subcategory value
+      print('📦 ProductService: Saving subcategory: $subcategory');
+      
       final product = Product(
         userId: userId,
         name: productData['name'] ?? '',
         category: productData['category'],
+        subcategory: subcategory,
         availableQty: productData['availableQty'] ?? '0',
         description: productData['description'] ?? '',
         status: status,
@@ -258,10 +270,17 @@ class ProductService {
               return varMap;
             }).toList();
             
+            // Debug: Print subcategory before sending to server
+            final subcategoryForServer = (updatedProduct.subcategory != null && updatedProduct.subcategory!.trim().isNotEmpty) 
+                ? updatedProduct.subcategory!.trim() 
+                : null;
+            print('📤 Sending to server - category: ${updatedProduct.category}, subcategory: $subcategoryForServer');
+            
             final productPayload = {
               'user_id': userId,
               'name': updatedProduct.name,
               'category': updatedProduct.category ?? '',
+              'subcategory': subcategoryForServer,
               'available_qty': updatedProduct.availableQty,
               'description': updatedProduct.description,
               'status': updatedProduct.status,
@@ -496,11 +515,20 @@ class ProductService {
       }
 
       // Prepare update data
+      // Handle subcategory - ensure it's not empty string
+      final subcategoryValue = productData['subcategory'];
+      final subcategory = (subcategoryValue is String && subcategoryValue.trim().isNotEmpty) 
+          ? subcategoryValue.trim() 
+          : (subcategoryValue != null && subcategoryValue.toString().trim().isNotEmpty)
+              ? subcategoryValue.toString().trim()
+              : null;
+      
       final updatePayload = {
         'user_id': userId,
         'product_id': productId,
         'name': productData['name'] ?? '',
         'category': productData['category'] ?? '',
+        'subcategory': subcategory,
         'available_qty': productData['availableQty'] ?? '0',
         'description': productData['description'] ?? '',
         'price_slabs': jsonEncode(productData['priceSlabs'] ?? []),

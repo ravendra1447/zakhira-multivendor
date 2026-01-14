@@ -5,6 +5,7 @@ class Product {
   final int userId;
   final String name;
   final String? category;
+  final String? subcategory;
   final String availableQty;
   final String description;
   final String status; // 'draft' or 'publish'
@@ -25,6 +26,7 @@ class Product {
     required this.userId,
     required this.name,
     this.category,
+    this.subcategory,
     required this.availableQty,
     required this.description,
     required this.status,
@@ -48,6 +50,7 @@ class Product {
       'user_id': userId,
       'name': name,
       'category': category,
+      'subcategory': subcategory,
       'available_qty': availableQty,
       'description': description,
       'status': status,
@@ -72,6 +75,7 @@ class Product {
       userId: map['user_id'] as int,
       name: map['name'] as String,
       category: map['category'] as String?,
+      subcategory: map['subcategory'] as String?,
       availableQty: map['available_qty'] as String? ?? '0',
       description: map['description'] as String? ?? '',
       status: map['status'] as String? ?? 'draft',
@@ -188,6 +192,7 @@ class Product {
       'user_id': userId,
       'name': name,
       'category': category,
+      'subcategory': subcategory,
       'available_qty': availableQty,
       'description': description,
       'status': status,
@@ -211,6 +216,7 @@ class Product {
     int? userId,
     String? name,
     String? category,
+    String? subcategory,
     String? availableQty,
     String? description,
     String? status,
@@ -231,6 +237,7 @@ class Product {
       userId: userId ?? this.userId,
       name: name ?? this.name,
       category: category ?? this.category,
+      subcategory: subcategory ?? this.subcategory,
       availableQty: availableQty ?? this.availableQty,
       description: description ?? this.description,
       status: status ?? this.status,

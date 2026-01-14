@@ -26,7 +26,7 @@ class ProductDatabaseService {
 
     return await openDatabase(
       path,
-      version: 3, // Increment version for migration (added stock fields)
+      version: 4, // Increment version for migration (added subcategory field)
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -61,6 +61,19 @@ class ProductDatabaseService {
         print('⚠️ Migration note: $e');
       }
     }
+    
+    if (oldVersion < 4) {
+      // Add subcategory column
+      try {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN subcategory TEXT
+        ''');
+        print('✅ Database migrated: Added subcategory column');
+      } catch (e) {
+        // Column might already exist
+        print('⚠️ Migration note: $e');
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -70,6 +83,7 @@ class ProductDatabaseService {
         user_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         category TEXT,
+        subcategory TEXT,
         available_qty TEXT NOT NULL,
         description TEXT,
         status TEXT NOT NULL DEFAULT 'draft',

@@ -959,6 +959,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             Expanded(
                               child: TextField(
                                 controller: _colorController,
+                                textCapitalization: TextCapitalization.words,
                                 decoration: InputDecoration(
                                   hintText: 'Enter color name',
                                   hintStyle: TextStyle(
@@ -1035,6 +1036,33 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       : () async {
                                     FocusScope.of(context).unfocus();
                                     final colorName = _colorController.text.trim();
+
+                                    // DUPLICATE CHECK - YEH CODE ADD KIYA HAI
+                                    final existingColor = _colorImages.keys.firstWhere(
+                                          (key) => key.toLowerCase() == colorName.toLowerCase(),
+                                      orElse: () => '',
+                                    );
+
+                                    if (existingColor.isNotEmpty) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '$colorName already exists',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    // DUPLICATE CHECK END
+
                                     if (colorName.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
@@ -1053,6 +1081,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       );
                                       return;
                                     }
+
                                     if (_selectedImages.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
@@ -1071,6 +1100,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                       );
                                       return;
                                     }
+
                                     try {
                                       final colorDir = await _getColorFolder(colorName);
                                       if (!_colorImages.containsKey(colorName)) {
@@ -1150,7 +1180,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                         ),
                                       );
                                     }
-                                  },
+                                  },  // <-- YEH SIRF EK COMMA HAI
                                   borderRadius: BorderRadius.circular(8),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(

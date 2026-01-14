@@ -1556,12 +1556,16 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               );
             },
-            child: Stack(
-              children: [
-                Container(
-                  color: Colors.grey.shade200,
-                  child: _buildImageWidget(imageUrl),
-                ),
+            child: ClipRect(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.grey.shade200,
+                      child: _buildImageWidget(imageUrl),
+                    ),
+                  ),
                 // Image count badge on bottom right
                 if (totalImages > 1)
                   Positioned(
@@ -1594,7 +1598,8 @@ class _ProfileTabState extends State<ProfileTab> {
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -1605,9 +1610,10 @@ class _ProfileTabState extends State<ProfileTab> {
   Widget _buildImageWidget(String imageUrl) {
     // Handle HTTP/HTTPS URLs
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      return Image.network(
-        imageUrl,
-        fit: BoxFit.cover,
+      return SizedBox.expand(
+        child: Image.network(
+          imageUrl,
+          fit: BoxFit.cover,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
           return Container(
@@ -1629,6 +1635,7 @@ class _ProfileTabState extends State<ProfileTab> {
             child: const Icon(Icons.broken_image, color: Colors.grey),
           );
         },
+        ),
       );
     }
     
@@ -1636,9 +1643,10 @@ class _ProfileTabState extends State<ProfileTab> {
     try {
       final file = File(imageUrl);
       if (file.existsSync()) {
-        return Image.file(
-          file,
-          fit: BoxFit.cover,
+        return SizedBox.expand(
+          child: Image.file(
+            file,
+            fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             print("Error loading file image: $imageUrl - $error");
             return Container(
@@ -1646,6 +1654,7 @@ class _ProfileTabState extends State<ProfileTab> {
               child: const Icon(Icons.broken_image, color: Colors.grey),
             );
           },
+          ),
         );
       }
     } catch (e) {

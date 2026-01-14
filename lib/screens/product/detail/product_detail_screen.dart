@@ -1209,6 +1209,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           // Variations tab
           GestureDetector(
             onTap: () {
+              setState(() {
+                _mediaTab = 'Variations';
+              });
               _openVariationsSheet();
             },
             child: Padding(
@@ -1234,6 +1237,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       onPageChanged: (index) {
         setState(() {
           _currentImageIndex = index;
+          // If user slides to last image, open variations tab
+          if (index == images.length - 1 && images.length > 1) {
+            // Open variations sheet after a short delay
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) {
+                _openVariationsSheet();
+              }
+            });
+          }
         });
         if (index < images.length) {
           _setImageHeightFor(images[index], index);
@@ -1315,9 +1327,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
         }
         
-        // Get current variation's size quantities
+        // Get current variation's size quantities - use currently selected variation
         Map<String, int> getCurrentSizeQuantities() {
-          return _variationSizeQuantities[currentVarName] ?? {};
+          final selectedVarName = _currentVariation['name']?.toString() ?? '';
+          if (!_variationSizeQuantities.containsKey(selectedVarName)) {
+            _variationSizeQuantities[selectedVarName] = {};
+            for (final s in sizes) {
+              _variationSizeQuantities[selectedVarName]![s] = 0;
+            }
+          }
+          return _variationSizeQuantities[selectedVarName] ?? {};
         }
         
         // Function to get quantity for a variation
@@ -1442,6 +1461,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               initialChildSize: 0.92,
               maxChildSize: 0.95,
               builder: (context, scrollController) {
+                // Scroll to selected color when sheet opens
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  final selectedIndex = variations.indexWhere((v) => 
+                    (v['name']?.toString() ?? '') == currentVarName
+                  );
+                  if (selectedIndex >= 0 && scrollController.hasClients) {
+                    // Calculate approximate scroll position for selected color
+                    // Assuming each color item is about 100px wide with spacing
+                    final scrollPosition = (selectedIndex ~/ 3) * 120.0;
+                    scrollController.animateTo(
+                      scrollPosition.clamp(0.0, scrollController.position.maxScrollExtent),
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                });
+                
                 return Column(
                   children: [
                     Container(

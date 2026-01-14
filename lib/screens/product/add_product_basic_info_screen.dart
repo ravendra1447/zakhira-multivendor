@@ -1892,6 +1892,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
           );
 
           // If published, navigate to profile tab
+          // Marketplace will auto-refresh when tab is selected
           if (type == 'publish') {
             // Pop all screens and navigate to ChatHomePage with profile tab
             Navigator.pushAndRemoveUntil(
@@ -2178,6 +2179,50 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     ),
                     child: Row(
                       children: [
+                        // Simple - First
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _stockMode = 'simple';
+                              });
+                            },
+                            child: Container(
+                              height: 40,
+                              margin: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: _stockMode == 'simple'
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: _stockMode == 'simple'
+                                    ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                                    : null,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Simple',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _stockMode == 'simple'
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: _stockMode == 'simple'
+                                        ? const Color(0xFF25D366)
+                                        : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Color & Size - Second
                         Expanded(
                           child: GestureDetector(
                             onTap: () {
@@ -2225,48 +2270,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             ),
                           ),
                         ),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _stockMode = 'simple';
-                              });
-                            },
-                            child: Container(
-                              height: 40,
-                              margin: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: _stockMode == 'simple'
-                                    ? Colors.white
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: _stockMode == 'simple'
-                                    ? [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ]
-                                    : null,
-                              ),
-                              child: Center(
-                                child: Text(
-                                  'Simple',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: _stockMode == 'simple'
-                                        ? FontWeight.w600
-                                        : FontWeight.w500,
-                                    color: _stockMode == 'simple'
-                                        ? const Color(0xFF25D366)
-                                        : Colors.grey.shade600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                        // Unlimited - Third
                         Expanded(
                           child: GestureDetector(
                             onTap: () {
@@ -2640,162 +2644,6 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ),
                     ),
                   ),
-                ],
-              ),
-            ),
-            // Separate card for Add New Size
-            _card(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: const Color(0xFF25D366),
-                        width: 1.5,
-                        style: BorderStyle.solid,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      color: Colors.grey.shade50,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        GestureDetector(
-                          onTap: _showSizeSelectionModal,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.add,
-                                color: const Color(0xFF25D366),
-                                size: 16,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Add Size',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: const Color(0xFF25D366),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (_selectedSizes.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Icon(
-                                  Icons.check_circle,
-                                  color: const Color(0xFF25D366),
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '(${_selectedSizes.join(', ')})',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                              ] else ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  '(S, M, L, XL, XXL)',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey.shade500,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (_selectedSizes.isNotEmpty) ...[
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: _showSizeSelectionModal,
-                            child: Icon(
-                              Icons.arrow_forward_ios,
-                              color: Colors.orange,
-                              size: 16,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  // Recently selected sizes
-                  if (_recentSizes.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isDark ? Colors.blue.shade700 : Colors.blue.shade200,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Recently Selected Sizes',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: _recentSizes.take(8).map((size) {
-                              final isSelected = _selectedSizes.contains(size);
-                              return GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    if (!_selectedSizes.contains(size)) {
-                                      _selectedSizes.add(size);
-                                      _saveRecentSize(size);
-                                    }
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isSelected
-                                        ? (isDark ? Colors.blue.shade700 : Colors.blue.shade100)
-                                        : (isDark ? const Color(0xFF2E2E2E) : Colors.white),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isSelected
-                                          ? (isDark ? Colors.blue.shade400 : Colors.blue.shade400)
-                                          : (isDark ? Colors.blue.shade600 : Colors.blue.shade300),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    size,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: isDark
-                                          ? (isSelected ? Colors.white : Colors.blue.shade300)
-                                          : Colors.blue.shade700,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -3358,6 +3206,162 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         }).toList(),
                       ),
                     ],
+                  ],
+                ],
+              ),
+            ),
+            // Separate card for Add New Size - moved below Variation
+            _card(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: const Color(0xFF25D366),
+                        width: 1.5,
+                        style: BorderStyle.solid,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.grey.shade50,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: _showSizeSelectionModal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.add,
+                                color: const Color(0xFF25D366),
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Add Size',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: const Color(0xFF25D366),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (_selectedSizes.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Icon(
+                                  Icons.check_circle,
+                                  color: const Color(0xFF25D366),
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '(${_selectedSizes.join(', ')})',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ] else ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  '(S, M, L, XL, XXL)',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (_selectedSizes.isNotEmpty) ...[
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: _showSizeSelectionModal,
+                            child: Icon(
+                              Icons.arrow_forward_ios,
+                              color: Colors.orange,
+                              size: 16,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  // Recently selected sizes
+                  if (_recentSizes.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark ? Colors.blue.shade700 : Colors.blue.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recently Selected Sizes',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: _recentSizes.take(8).map((size) {
+                              final isSelected = _selectedSizes.contains(size);
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    if (!_selectedSizes.contains(size)) {
+                                      _selectedSizes.add(size);
+                                      _saveRecentSize(size);
+                                    }
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? (isDark ? Colors.blue.shade700 : Colors.blue.shade100)
+                                        : (isDark ? const Color(0xFF2E2E2E) : Colors.white),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? (isDark ? Colors.blue.shade400 : Colors.blue.shade400)
+                                          : (isDark ? Colors.blue.shade600 : Colors.blue.shade300),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    size,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isDark
+                                          ? (isSelected ? Colors.white : Colors.blue.shade300)
+                                          : Colors.blue.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ],
               ),

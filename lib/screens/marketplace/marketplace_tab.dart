@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/product.dart';
 import '../../services/product_database_service.dart';
+import '../../services/product_service.dart';
 import '../product/detail/product_detail_screen.dart';
 import '../product/category_selection_screen.dart';
 
@@ -10,10 +12,10 @@ class MarketplaceTab extends StatefulWidget {
   const MarketplaceTab({super.key});
 
   @override
-  State<MarketplaceTab> createState() => _MarketplaceTabState();
+  State<MarketplaceTab> createState() => MarketplaceTabState();
 }
 
-class _MarketplaceTabState extends State<MarketplaceTab> {
+class MarketplaceTabState extends State<MarketplaceTab> {
   List<dynamic> _marketplaceProducts = [];
   List<dynamic> _filteredProducts = [];
   bool _loadingProducts = false;
@@ -49,7 +51,7 @@ class _MarketplaceTabState extends State<MarketplaceTab> {
   @override
   void initState() {
     super.initState();
-    _loadMarketplaceProducts();
+    _loadMarketplaceProducts(showLocalFirst: true); // Show local products immediately
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -59,24 +61,91 @@ class _MarketplaceTabState extends State<MarketplaceTab> {
     _searchController.dispose();
     super.dispose();
   }
+  
+  // Method to refresh from outside
+  void refresh() {
+    _loadMarketplaceProducts(showLocalFirst: true);
+  }
 
   void _onSearchChanged() {
     _applyFilters();
   }
 
-  Future<void> _loadMarketplaceProducts() async {
+  Future<void> _loadMarketplaceProducts({bool showLocalFirst = false}) async {
     setState(() => _loadingProducts = true);
     try {
-      final products = await ProductDatabaseService().getProducts(
-        status: 'publish',
-      );
-      // Filter products where marketplace is enabled
-      final marketplaceProducts = products.where((product) {
-        if (product is Product) {
-          return product.marketplaceEnabled;
+      // First, get current user's local products if showLocalFirst is true (for immediate display)
+      List<Product> localProducts = [];
+      if (showLocalFirst) {
+        try {
+          final localProductsList = await ProductDatabaseService().getProducts(
+            status: 'publish',
+          );
+          // Filter only marketplace enabled products from local
+          localProducts = localProductsList.where((p) => p.marketplaceEnabled).toList();
+          print('📱 Loaded ${localProducts.length} local marketplace products');
+        } catch (e) {
+          print('⚠️ Error loading local products: $e');
         }
-        return false;
-      }).toList();
+      }
+      
+      // Then get all users' products from server
+      final result = await ProductService.getProducts(
+        status: 'publish',
+        marketplace: true, // Get all users' products
+        limit: 200, // Get more products for marketplace
+      );
+      
+      List<Product> serverProducts = [];
+      if (result['success'] == true && result['data'] != null) {
+        final productsData = result['data'] as List<dynamic>;
+        serverProducts = productsData.map((p) {
+          try {
+            // Convert server data (0/1) to Product model (boolean)
+            final productMap = Map<String, dynamic>.from(p);
+            // Handle marketplace_enabled: server sends 0/1, Product expects boolean
+            if (productMap['marketplace_enabled'] != null) {
+              productMap['marketplace_enabled'] = productMap['marketplace_enabled'] == 1 || 
+                                                  productMap['marketplace_enabled'] == '1' ||
+                                                  productMap['marketplace_enabled'] == true;
+            }
+            return Product.fromMap(productMap);
+          } catch (e) {
+            print('❌ Error parsing product: $e');
+            print('   Product data: $p');
+            return null;
+          }
+        }).whereType<Product>().toList();
+      }
+      
+      // Combine: local products first (for immediate display), then server products
+      // Deduplicate by server_id or name
+      final Map<String, Product> productsMap = {};
+      
+      // Add local products first (they'll be overwritten by server if duplicate)
+      for (var product in localProducts) {
+        final key = product.id?.toString() ?? '${product.userId}_${product.name}';
+        if (!productsMap.containsKey(key)) {
+          productsMap[key] = product;
+        }
+      }
+      
+      // Add server products (will overwrite local duplicates)
+      for (var product in serverProducts) {
+        final key = product.id?.toString() ?? '${product.userId}_${product.name}';
+        productsMap[key] = product; // Server data takes precedence
+      }
+      
+      // Convert to list and sort by updated_at DESC (latest first)
+      final marketplaceProducts = productsMap.values.toList();
+      marketplaceProducts.sort((a, b) {
+        if (a.updatedAt == null && b.updatedAt == null) return 0;
+        if (a.updatedAt == null) return 1;
+        if (b.updatedAt == null) return -1;
+        return b.updatedAt!.compareTo(a.updatedAt!);
+      });
+      
+      print('✅ Loaded ${marketplaceProducts.length} total marketplace products (${localProducts.length} local + ${serverProducts.length} server)');
       
       setState(() {
         _marketplaceProducts = marketplaceProducts;
@@ -976,32 +1045,21 @@ class _MarketplaceTabState extends State<MarketplaceTab> {
 
   Widget _buildImageWidget(String imageUrl) {
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      return Image.network(
-        imageUrl,
+      return CachedNetworkImage(
+        imageUrl: imageUrl,
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
-        alignment: Alignment.center,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Container(
-            color: Colors.grey.shade200,
-            child: Center(
-              child: CircularProgressIndicator(
-                value: loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
-                    : null,
-              ),
-            ),
-          );
-        },
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            color: Colors.grey.shade300,
-            child: const Icon(Icons.broken_image, color: Colors.grey),
-          );
-        },
+        placeholder: (context, url) => Container(
+          color: Colors.grey.shade200,
+          child: const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+        errorWidget: (context, url, error) => Container(
+          color: Colors.grey.shade300,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
       );
     }
     

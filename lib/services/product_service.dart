@@ -292,6 +292,7 @@ class ProductService {
               'images': jsonEncode(updatedProduct.images),
               'stock_mode': stockMode,
               'stock_by_color_size': stockByColorSize != null ? jsonEncode(stockByColorSize) : null,
+              'marketplace_enabled': updatedProduct.marketplaceEnabled ? 1 : 0,
             };
 
             final response = await http.post(
@@ -456,18 +457,20 @@ class ProductService {
     String? status, // 'draft', 'publish', or null for all
     int? limit,
     int? offset,
+    bool marketplace = false, // If true, get all users' products for marketplace
   }) async {
     try {
       final userId = LocalAuthService.getUserId();
-      if (userId == null) {
+      if (!marketplace && userId == null) {
         return {"success": false, "message": "User not logged in"};
       }
 
       final payload = {
-        'user_id': userId,
+        if (!marketplace && userId != null) 'user_id': userId,
         if (status != null) 'status': status,
         if (limit != null) 'limit': limit,
         if (offset != null) 'offset': offset,
+        if (marketplace) 'marketplace': true,
       };
 
       final response = await http.post(

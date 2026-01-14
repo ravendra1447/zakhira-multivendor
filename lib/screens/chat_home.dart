@@ -51,11 +51,20 @@ class _ChatHomePageState extends State<ChatHomePage> {
 
   final GlobalKey<_ProfileTabState> _profileTabKey = GlobalKey<_ProfileTabState>();
 
+  final GlobalKey<MarketplaceTabState> _marketplaceTabKey = GlobalKey<MarketplaceTabState>();
+  
   late final List<Widget> _screens = [
     ChatsTab(userStatus: _userStatus),
-    const MarketplaceTab(),
+    MarketplaceTab(key: _marketplaceTabKey),
     ProfileTab(key: _profileTabKey),
   ];
+  
+  // Method to refresh marketplace
+  void refreshMarketplace() {
+    if (_marketplaceTabKey.currentState != null) {
+      _marketplaceTabKey.currentState!.refresh();
+    }
+  }
 
   @override
   void initState() {
@@ -146,6 +155,11 @@ class _ChatHomePageState extends State<ChatHomePage> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
+      
+      // Refresh marketplace when tab is selected
+      if (index == 1 && _marketplaceTabKey.currentState != null) {
+        _marketplaceTabKey.currentState!.refresh();
+      }
     });
   }
 

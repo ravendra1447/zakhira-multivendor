@@ -38,6 +38,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   final Map<String, Map<String, int>> _variationSizeQuantities = {}; // Track sizes per variation: {variationName: {size: qty}}
   double _subtotal = 0.0;
   bool _isColorList = false;
+  bool _hasOpenedVariationsFromSlide = false;
+  // Track if variations was opened from slide
+  List<int> _viewedImageIndices = [];
+  //Set<int> _viewedImageIndices = {}; // Track which images have been viewed
+  Timer? _swipeTimer;
+  bool _showVariationsHint = false;// Timer to detect swipe beyond last image
 
   @override
   void initState() {
@@ -47,19 +53,22 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final images = _getAllImages();
     _pageController = PageController(initialPage: _currentImageIndex);
     _scrollController.addListener(_onScroll);
+    
+    // Initialize viewed images with the starting image
+    _viewedImageIndices.add(_currentImageIndex);
   }
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    
+
     final scrollOffset = _scrollController.offset;
     final screenHeight = MediaQuery.of(context).size.height;
     final maxImageHeight = screenHeight * 0.4;
-    
+
     // Calculate new image height based on scroll
     // As user scrolls up, image height decreases
     final newHeight = (maxImageHeight - scrollOffset * 0.5).clamp(0.0, maxImageHeight);
-    
+
     if ((_imageHeight - newHeight).abs() > 0.5) {
       setState(() {
         _imageHeight = newHeight;
@@ -71,16 +80,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   void dispose() {
     _pageController.dispose();
     _scrollController.dispose();
+    _swipeTimer?.cancel();
     super.dispose();
   }
 
   List<String> _getAllImages() {
     final List<String> images = [];
-    
+
     // Get all images from the current variation
     if (_currentVariation['allImages'] != null) {
       dynamic allImagesData = _currentVariation['allImages'];
-      
+
       // Handle if allImages is a JSON string
       if (allImagesData is String) {
         try {
@@ -122,7 +132,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
         }
       }
-      
+
       // Process as List
       if (allImagesData is List) {
         for (var img in allImagesData) {
@@ -133,10 +143,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
         }
       }
-      
+
       print('📸 Found ${images.length} images in variation ${_currentVariation['name']}');
     }
-    
+
     // Fallback to single image if allImages not available
     if (images.isEmpty && _currentVariation['image'] != null) {
       final img = _currentVariation['image'];
@@ -145,11 +155,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         print('📸 Using single image fallback');
       }
     }
-    
+
     print('📸 Total images to display: ${images.length}');
     return images;
   }
-  
+
   void _switchVariation(Map<String, dynamic> variation) {
     setState(() {
       _currentVariation = variation;
@@ -208,7 +218,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               child: CircularProgressIndicator(
                 value: loadingProgress.expectedTotalBytes != null
                     ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
+                    loadingProgress.expectedTotalBytes!
                     : null,
               ),
             ),
@@ -247,7 +257,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   Widget _buildImageWidget(String imagePath, {bool isClickable = true}) {
     final bool isNetwork = imagePath.startsWith('http://') || imagePath.startsWith('https://');
-    
+
     Widget buildImage({required BoxFit fit}) {
       if (isNetwork) {
         return Image.network(
@@ -259,7 +269,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               child: CircularProgressIndicator(
                 value: loadingProgress.expectedTotalBytes != null
                     ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
+                    loadingProgress.expectedTotalBytes!
                     : null,
               ),
             );
@@ -271,7 +281,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           },
         );
       }
-      
+
       try {
         final file = File(imagePath);
         if (file.existsSync()) {
@@ -286,7 +296,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           );
         }
       } catch (e) {}
-      
+
       return const Icon(Icons.broken_image, color: Colors.grey);
     }
 
@@ -316,7 +326,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               return Container(color: Colors.white);
             },
           ),
-        
+
         // Blur Effect Overlay
         ClipRect(
           child: BackdropFilter(
@@ -340,7 +350,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         child: imageContent,
       );
     }
-    
+
     return imageContent;
   }
 
@@ -416,7 +426,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final images = _getAllImages();
     final colorName = _currentVariation['name'] as String? ?? 'Unknown';
     final color = _getColorFromName(colorName);
-    
+
     // Initialize image height on first build
     if (_imageHeight == 0.4) {
       final screen = MediaQuery.of(context).size;
@@ -497,7 +507,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ],
             ),
           ),
-          
+
           // Product Details Section
           Expanded(
             child: SingleChildScrollView(
@@ -536,7 +546,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                   ],
-                  
+
                   // Color Swatches
                   if (widget.product.variations.isNotEmpty) ...[
                     Padding(
@@ -561,7 +571,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 final vColorName = variation['name'] as String? ?? '';
                                 final vColor = _getColorFromName(vColorName);
                                 final isSelected = vColorName == colorName;
-                                
+
                                 // Get first image for this variation
                                 String? variationImage;
                                 if (variation['allImages'] != null) {
@@ -573,7 +583,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 if (variationImage == null && variation['image'] != null) {
                                   variationImage = variation['image'].toString();
                                 }
-                                
+
                                 return GestureDetector(
                                   onTap: () {
                                     _switchVariation(variation);
@@ -613,21 +623,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                               child: variationImage != null
                                                   ? _buildColorSwatchImage(variationImage)
                                                   : Container(
-                                                      color: vColor,
-                                                      child: Center(
-                                                        child: Text(
-                                                          vColorName.isNotEmpty
-                                                              ? vColorName.substring(0, 1).toUpperCase()
-                                                              : '?',
-                                                          style: TextStyle(
-                                                            color: vColor.computeLuminance() > 0.5
-                                                                ? Colors.black87
-                                                                : Colors.white,
-                                                            fontWeight: FontWeight.bold,
-                                                          ),
-                                                        ),
-                                                      ),
+                                                color: vColor,
+                                                child: Center(
+                                                  child: Text(
+                                                    vColorName.isNotEmpty
+                                                        ? vColorName.substring(0, 1).toUpperCase()
+                                                        : '?',
+                                                    style: TextStyle(
+                                                      color: vColor.computeLuminance() > 0.5
+                                                          ? Colors.black87
+                                                          : Colors.white,
+                                                      fontWeight: FontWeight.bold,
                                                     ),
+                                                  ),
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -652,7 +662,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const Divider(height: 1),
                   ],
-                  
+
                   // Simple Stock Display (when stockMode is 'simple')
                   if (widget.product.stockMode == 'simple') ...[
                     Padding(
@@ -693,7 +703,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const Divider(height: 1),
                   ],
-                  
+
                   // Pricing Tiers
                   if (widget.product.priceSlabs.isNotEmpty) ...[
                     Padding(
@@ -750,7 +760,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const Divider(height: 1),
                   ],
-                  
+
                   // Size Selection
                   if (widget.product.sizes.isNotEmpty) ...[
                     GestureDetector(
@@ -820,7 +830,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const Divider(height: 1),
                   ],
-                  
+
                   // Product Description
                   if (widget.product.description.isNotEmpty) ...[
                     Padding(
@@ -834,7 +844,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                   ],
-                  
+
                   // Customization
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -852,9 +862,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ],
                     ),
                   ),
-                  
+
                   const Divider(height: 1),
-                  
+
                   // Overview/Details/Recommended Tabs
                   Container(
                     decoration: BoxDecoration(
@@ -879,14 +889,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ],
                     ),
                   ),
-                  
+
                   // Tab Content
                   _buildTabContent(),
                 ],
               ),
             ),
           ),
-          
+
           // Fixed Action Buttons at Bottom
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1231,37 +1241,123 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  // Change this line in your class variables
+  // Changed from Set to List
+
   Widget _buildPageView(List<String> images) {
-    return PageView.builder(
-      controller: _pageController,
-      onPageChanged: (index) {
-        setState(() {
-          _currentImageIndex = index;
-          // If user slides to last image, open variations tab
-          if (index == images.length - 1 && images.length > 1) {
-            // Open variations sheet after a short delay
-            Future.delayed(const Duration(milliseconds: 300), () {
-              if (mounted) {
-                _openVariationsSheet();
-              }
-            });
-          }
-        });
-        if (index < images.length) {
-          _setImageHeightFor(images[index], index);
+    return NotificationListener<ScrollEndNotification>(
+      onNotification: (ScrollEndNotification notification) {
+        final metrics = notification.metrics;
+
+        // Check if we're at the end and user tried to go beyond
+        if (metrics.pixels >= metrics.maxScrollExtent - 10 &&
+            _currentImageIndex == images.length - 1 &&
+            _mediaTab != 'Variations') {
+
+          print('✅ END REACHED: Opening Variations sheet');
+          setState(() {
+            _mediaTab = 'Variations';
+            _showVariationsHint = true;
+          });
+
+          // Open variations sheet after delay
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              _openVariationsSheet();
+              // Reset hint after sheet opens
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) {
+                  setState(() {
+                    _showVariationsHint = false;
+                  });
+                }
+              });
+            }
+          });
         }
+        return false;
       },
-      itemCount: images.length,
-      itemBuilder: (context, index) {
-        return Container(
-          color: Colors.white,
-          width: double.infinity,
-          height: double.infinity,
-          child: Center(
-            child: _buildImageWidget(images[index], isClickable: true),
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            onPageChanged: (index) {
+              setState(() {
+                _currentImageIndex = index;
+
+                // Add to viewed images
+                if (!_viewedImageIndices.contains(index)) {
+                  _viewedImageIndices.add(index);
+                }
+
+                if (index < images.length) {
+                  _setImageHeightFor(images[index], index);
+                }
+              });
+            },
+            itemCount: images.length,
+            itemBuilder: (context, index) {
+              return Container(
+                color: Colors.white,
+                width: double.infinity,
+                height: double.infinity,
+                child: Center(
+                  child: _buildImageWidget(images[index], isClickable: true),
+                ),
+              );
+            },
           ),
-        );
-      },
+
+          // Visual hint when on last image
+          if (_currentImageIndex == images.length - 1 && images.length > 1)
+            Positioned(
+              bottom: 100,
+              right: 20,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _mediaTab = 'Variations';
+                  });
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    _openVariationsSheet();
+                  });
+                },
+                child: AnimatedOpacity(
+                  opacity: _showVariationsHint ? 1.0 : 0.7,
+                  duration: Duration(milliseconds: 500),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.touch_app, color: Colors.white, size: 16),
+                        SizedBox(width: 8),
+                        Text(
+                          'Swipe for Variations →',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1306,6 +1402,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   // Full-screen variations sheet similar to reference
   void _openVariationsSheet() {
+    // LOCAL variable to track current variation inside modal
+    late String currentVarNameInModal = _currentVariation['name']?.toString() ?? '';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1317,19 +1416,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         final priceSlabs = widget.product.priceSlabs;
         final sizes = widget.product.sizes;
         final variations = widget.product.variations;
-        final currentVarName = _currentVariation['name']?.toString() ?? '';
-        
-        // Initialize variation size quantities if empty
-        if (!_variationSizeQuantities.containsKey(currentVarName)) {
-          _variationSizeQuantities[currentVarName] = {};
-          for (final s in sizes) {
-            _variationSizeQuantities[currentVarName]![s] = 0;
+
+        // Initialize variation size quantities if empty for ALL variations
+        for (var variation in variations) {
+          final varName = variation['name']?.toString() ?? '';
+          if (!_variationSizeQuantities.containsKey(varName)) {
+            _variationSizeQuantities[varName] = {};
+            for (final s in sizes) {
+              _variationSizeQuantities[varName]![s] = 0;
+            }
           }
         }
-        
-        // Get current variation's size quantities - use currently selected variation
+
+        // Get current variation's size quantities - use LOCAL modal variable
         Map<String, int> getCurrentSizeQuantities() {
-          final selectedVarName = _currentVariation['name']?.toString() ?? '';
+          final selectedVarName = currentVarNameInModal;
           if (!_variationSizeQuantities.containsKey(selectedVarName)) {
             _variationSizeQuantities[selectedVarName] = {};
             for (final s in sizes) {
@@ -1338,18 +1439,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
           return _variationSizeQuantities[selectedVarName] ?? {};
         }
-        
+
         // Function to get quantity for a variation
         int getVariationQty(String varName) {
           final varSizes = _variationSizeQuantities[varName] ?? {};
           return varSizes.values.fold(0, (a, b) => a + b);
         }
-        
+
         // Get available stock for a color-size combination
         int getAvailableStock(String colorName, String size) {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           if (widget.product.stockMode != 'color_size' || widget.product.stockByColorSize == null) {
             return 0;
@@ -1358,27 +1458,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           if (colorStock == null) return 0;
           return colorStock[size] ?? 0;
         }
-        
+
         // Get remaining available stock after subtracting selected quantities
         int getRemainingStock(String colorName, String size) {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           final available = getAvailableStock(colorName, size);
           final selected = _variationSizeQuantities[colorName]?[size] ?? 0;
           return (available - selected).clamp(0, available);
         }
-        
+
         // Check if a color-size combination is out of stock
         bool isOutOfStock(String colorName, String size) {
-          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
           return getRemainingStock(colorName, size) <= 0;
         }
-        
+
         // Get total selected quantity across all variations and sizes (for simple stock)
         int getTotalSelectedQuantity() {
           int total = 0;
@@ -1388,44 +1486,40 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
           return total;
         }
-        
+
         // Get remaining simple stock
         int getRemainingSimpleStock() {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           if (widget.product.stockMode != 'simple') return 0;
           final totalAvailable = int.tryParse(widget.product.availableQty) ?? 0;
           final selected = getTotalSelectedQuantity();
           return (totalAvailable - selected).clamp(0, totalAvailable);
         }
-        
+
         // Check if simple stock is out
         bool isSimpleStockOut() {
-          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
           if (widget.product.stockMode != 'simple') return false;
           return getRemainingSimpleStock() <= 0;
         }
-        
+
         // Get price based on total quantity
         Map<String, dynamic> getPriceForQuantity(int totalQty) {
           if (priceSlabs.isEmpty) {
             return {'price': 0.0, 'moq': 0};
           }
-          
-          // Sort price slabs by MOQ (ascending)
+
           final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs);
           sortedSlabs.sort((a, b) {
             final moqA = (a['moq'] as num?)?.toInt() ?? 0;
             final moqB = (b['moq'] as num?)?.toInt() ?? 0;
             return moqA.compareTo(moqB);
           });
-          
-          // Find the appropriate price slab based on quantity
+
           Map<String, dynamic>? selectedSlab;
           for (var slab in sortedSlabs.reversed) {
             final moq = (slab['moq'] as num?)?.toInt() ?? 0;
@@ -1434,28 +1528,49 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               break;
             }
           }
-          
-          // If no slab matches, use the first one
+
           selectedSlab ??= sortedSlabs.first;
-          
+
           return {
             'price': (selectedSlab['price'] as num?)?.toDouble() ?? 0.0,
             'moq': (selectedSlab['moq'] as num?)?.toInt() ?? 0,
           };
         }
-        
-        // Calculate subtotal for current variation
-        double calcSubtotal() {
+
+        // Calculate subtotal for current variation IN MODAL
+        double calcSubtotalForModal() {
           final currentSizes = getCurrentSizeQuantities();
           int totalQty = currentSizes.values.fold(0, (a, b) => a + b);
           final priceInfo = getPriceForQuantity(totalQty);
           return priceInfo['price'] * totalQty;
         }
-        _subtotal = calcSubtotal();
+
         return StatefulBuilder(
           builder: (context, setModalState) {
+            // Function to switch variation INSIDE MODAL
+            void switchVariationInModal(Map<String, dynamic> variation) {
+              setModalState(() {
+                // Update both: main screen and modal variable
+                _switchVariation(variation);
+                currentVarNameInModal = variation['name']?.toString() ?? '';
+
+                // Initialize if needed
+                if (!_variationSizeQuantities.containsKey(currentVarNameInModal)) {
+                  _variationSizeQuantities[currentVarNameInModal] = {};
+                  for (final s in sizes) {
+                    _variationSizeQuantities[currentVarNameInModal]![s] = 0;
+                  }
+                }
+
+                // Update subtotal
+                _subtotal = calcSubtotalForModal();
+              });
+            }
+
             final currentSizes = getCurrentSizeQuantities();
             final totalPieces = currentSizes.values.fold(0, (a, b) => a + b);
+            final currentSubtotal = calcSubtotalForModal();
+
             return DraggableScrollableSheet(
               expand: false,
               initialChildSize: 0.92,
@@ -1463,12 +1578,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               builder: (context, scrollController) {
                 // Scroll to selected color when sheet opens
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  final selectedIndex = variations.indexWhere((v) => 
-                    (v['name']?.toString() ?? '') == currentVarName
+                  final selectedIndex = variations.indexWhere((v) =>
+                  (v['name']?.toString() ?? '') == currentVarNameInModal
                   );
                   if (selectedIndex >= 0 && scrollController.hasClients) {
-                    // Calculate approximate scroll position for selected color
-                    // Assuming each color item is about 100px wide with spacing
                     final scrollPosition = (selectedIndex ~/ 3) * 120.0;
                     scrollController.animateTo(
                       scrollPosition.clamp(0.0, scrollController.position.maxScrollExtent),
@@ -1477,106 +1590,105 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     );
                   }
                 });
-                
+
                 return Column(
                   children: [
                     Container(
                       width: 40,
                       height: 4,
                       margin: const EdgeInsets.only(top: 8, bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                // Variations header - at top with X button on right
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.product.stockMode == 'color_size'
-                                  ? 'Variations - Color Size Stock'
-                                  : 'Variations',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    // Variations header
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.product.stockMode == 'color_size'
+                                      ? 'Variations - Color Size Stock'
+                                      : 'Variations',
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                                ),
+                                if (widget.product.stockMode == 'color_size') ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Available stock shown for each size',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            if (widget.product.stockMode == 'color_size') ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                'Available stock shown for each size',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 24),
+                            onPressed: () => Navigator.pop(context),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 24),
-                        onPressed: () => Navigator.pop(context),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // Product image and price section - exactly like second image
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Product thumbnail image (larger, square)
-                      Builder(
-                        builder: (context) {
-                          final currentImages = _getAllImages();
-                          return Stack(
-                            children: [
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.grey.shade300),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: currentImages.isNotEmpty
-                                      ? _buildColorSwatchImage(currentImages[0])
-                                      : Container(color: Colors.grey.shade200),
-                                ),
-                              ),
-                              // Expand icon on top left
-                              Positioned(
-                                top: 4,
-                                left: 4,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.8),
-                                    shape: BoxShape.circle,
+                    ),
+                    const Divider(height: 1),
+                    // Product image and price section
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Product thumbnail image
+                          Builder(
+                            builder: (context) {
+                              final currentImages = _getAllImages();
+                              return Stack(
+                                children: [
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.grey.shade300),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: currentImages.isNotEmpty
+                                          ? _buildColorSwatchImage(currentImages[0])
+                                          : Container(color: Colors.grey.shade200),
+                                    ),
                                   ),
-                                  child: const Icon(
-                                    Icons.open_in_full,
-                                    size: 14,
-                                    color: Colors.black87,
+                                  Positioned(
+                                    top: 4,
+                                    left: 4,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.8),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.open_in_full,
+                                        size: 14,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 12),
-                      // Pricing tiers on right - slidable
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          // Pricing tiers
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
@@ -1628,315 +1740,310 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                             ),
                           ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Color grid - always show 6 colors
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      widget.product.stockMode == 'color_size'
-                                          ? 'Color (${variations.length}) - Color Size Stock'
-                                          : 'Color (${variations.length})',
-                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                                    ),
-                                    if (widget.product.stockMode == 'color_size') ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Stock available for each color-size combination',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey.shade600,
+                              // Color grid
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          widget.product.stockMode == 'color_size'
+                                              ? 'Color (${variations.length}) - Color Size Stock'
+                                              : 'Color (${variations.length})',
+                                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                                         ),
+                                        if (widget.product.stockMode == 'color_size') ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Stock available for each color-size combination',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade600,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      TextButton.icon(
+                                        onPressed: () {
+                                          setModalState(() {
+                                            _isColorList = true;
+                                          });
+                                        },
+                                        icon: const Icon(Icons.view_list, size: 18),
+                                        label: const Text('List'),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: () {
+                                          setModalState(() {
+                                            _isColorList = false;
+                                          });
+                                        },
+                                        icon: const Icon(Icons.photo_library_outlined, size: 18),
+                                        label: const Text('Gallery'),
                                       ),
                                     ],
-                                  ],
-                                ),
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  TextButton.icon(
-                                    onPressed: () {
-                                      setModalState(() {
-                                        _isColorList = true;
-                                      });
-                                    },
-                                    icon: const Icon(Icons.view_list, size: 18),
-                                    label: const Text('List'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () {
-                                      setModalState(() {
-                                        _isColorList = false;
-                                      });
-                                    },
-                                    icon: const Icon(Icons.photo_library_outlined, size: 18),
-                                    label: const Text('Gallery'),
                                   ),
                                 ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Builder(
-                            builder: (context) {
-                              final count = variations.length;
-                              if (_isColorList) {
-                                return SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Row(
-                                    children: variations.map((variation) {
-                                      final vColorName = variation['name']?.toString() ?? '';
-                                      final isSelected = vColorName == _currentVariation['name']?.toString();
-                                      return GestureDetector(
-                                        onTap: () {
-                                          setModalState(() {
-                                            _switchVariation(variation);
-                                            _subtotal = calcSubtotal();
-                                          });
-                                        },
-                                        child: Container(
-                                          margin: const EdgeInsets.only(right: 8),
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300, width: isSelected ? 1.5 : 1),
-                                            color: Colors.white,
-                                          ),
-                                          child: Text(
-                                            vColorName,
-                                            style: const TextStyle(fontSize: 12),
-                                          ),
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
-                                );
-                              }
-                              final gridCount = count > 6 ? 7 : count;
-                              return GridView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 3,
-                                  crossAxisSpacing: 10,
-                                  mainAxisSpacing: 8,
-                                  childAspectRatio: 0.85,
-                                ),
-                                itemCount: gridCount,
-                                itemBuilder: (context, index) {
-                                  final isMoreTile = count > 6 && index == 6;
-                                  if (isMoreTile) {
-                                    return GestureDetector(
-                                      onTap: () {
-                                        setModalState(() {
-                                          _isColorList = true;
-                                        });
-                                      },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: Colors.grey.shade300),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            'More',
-                                            style: TextStyle(color: Colors.orange.shade700, fontWeight: FontWeight.w600),
-                                          ),
-                                        ),
+                              const SizedBox(height: 8),
+                              Builder(
+                                builder: (context) {
+                                  final count = variations.length;
+                                  if (_isColorList) {
+                                    return SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Row(
+                                        children: variations.map((variation) {
+                                          final vColorName = variation['name']?.toString() ?? '';
+                                          final isSelected = vColorName == currentVarNameInModal;
+                                          return GestureDetector(
+                                            onTap: () {
+                                              switchVariationInModal(variation);
+                                            },
+                                            child: Container(
+                                              margin: const EdgeInsets.only(right: 8),
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                              decoration: BoxDecoration(
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: isSelected ? Colors.black : Colors.grey.shade300,
+                                                  width: isSelected ? 1.5 : 1,
+                                                ),
+                                                color: Colors.white,
+                                              ),
+                                              child: Text(
+                                                vColorName,
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
                                       ),
                                     );
                                   }
-                                  final variation = variations[index];
-                                  String? variationImage;
-                                  if (variation['allImages'] != null) {
-                                    final allImages = variation['allImages'] as List;
-                                    if (allImages.isNotEmpty) {
-                                      variationImage = allImages.first.toString();
-                                    }
-                                  }
-                                  if (variationImage == null && variation['image'] != null) {
-                                    variationImage = variation['image'].toString();
-                                  }
-                                  final vColorName = variation['name']?.toString() ?? '';
-                                  final isSelected = vColorName == _currentVariation['name']?.toString();
-                                  final selectedQty = getVariationQty(vColorName);
-                                  return GestureDetector(
-                                    onTap: () {
-                                      setModalState(() {
-                                        _switchVariation(variation);
-                                        final newVarName = variation['name']?.toString() ?? '';
-                                        if (!_variationSizeQuantities.containsKey(newVarName)) {
-                                          _variationSizeQuantities[newVarName] = {};
-                                          for (final s in sizes) {
-                                            _variationSizeQuantities[newVarName]![s] = 0;
-                                          }
-                                        }
-                                        final newImages = _getAllImages();
-                                        _subtotal = calcSubtotal();
-                                      });
-                                    },
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Stack(
-                                          children: [
-                                            Container(
-                                              width: 90,
-                                              height: 90,
-                                              decoration: BoxDecoration(
-                                                borderRadius: BorderRadius.circular(8),
-                                                border: Border.all(
-                                                  color: isSelected ? Colors.orange : Colors.grey.shade300,
-                                                  width: isSelected ? 2 : 1,
+                                  final gridCount = count > 6 ? 7 : count;
+                                  return GridView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 10,
+                                      mainAxisSpacing: 8,
+                                      childAspectRatio: 0.85,
+                                    ),
+                                    itemCount: gridCount,
+                                    itemBuilder: (context, index) {
+                                      final isMoreTile = count > 6 && index == 6;
+                                      if (isMoreTile) {
+                                        return GestureDetector(
+                                          onTap: () {
+                                            setModalState(() {
+                                              _isColorList = true;
+                                            });
+                                          },
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: Colors.grey.shade300),
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                'More',
+                                                style: TextStyle(
+                                                  color: Colors.orange.shade700,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
-                                              ),
-                                              child: ClipRRect(
-                                                borderRadius: BorderRadius.circular(8),
-                                                child: variationImage != null
-                                                    ? Stack(
-                                                        children: [
-                                                          Positioned.fill(
-                                                            child: _buildColorSwatchImage(variationImage),
-                                                          ),
-                                                          Positioned(
-                                                            top: 2,
-                                                            left: 2,
-                                                            child: GestureDetector(
-                                                              onTap: () {
-                                                                _openImageViewer(variationImage!, vColorName, priceSlabs);
-                                                              },
-                                                              child: Container(
-                                                                padding: const EdgeInsets.all(2),
-                                                                decoration: BoxDecoration(
-                                                                  color: Colors.white.withOpacity(0.7),
-                                                                  shape: BoxShape.circle,
-                                                                ),
-                                                                child: const Icon(
-                                                                  Icons.open_in_full,
-                                                                  size: 10,
-                                                                  color: Colors.black87,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          Positioned(
-                                                            bottom: 0,
-                                                            left: 0,
-                                                            right: 0,
-                                                            child: Container(
-                                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                                              color: Colors.white.withOpacity(0.9),
-                                                              child: Text(
-                                                                vColorName,
-                                                                overflow: TextOverflow.ellipsis,
-                                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      )
-                                                    : Container(color: Colors.grey.shade200),
                                               ),
                                             ),
-                                            if (selectedQty > 0)
-                                              Positioned(
-                                                top: 4,
-                                                right: 4,
-                                                child: Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          ),
+                                        );
+                                      }
+                                      final variation = variations[index];
+                                      String? variationImage;
+                                      if (variation['allImages'] != null) {
+                                        final allImages = variation['allImages'] as List;
+                                        if (allImages.isNotEmpty) {
+                                          variationImage = allImages.first.toString();
+                                        }
+                                      }
+                                      if (variationImage == null && variation['image'] != null) {
+                                        variationImage = variation['image'].toString();
+                                      }
+                                      final vColorName = variation['name']?.toString() ?? '';
+                                      final isSelected = vColorName == currentVarNameInModal;
+                                      final selectedQty = getVariationQty(vColorName);
+
+                                      return GestureDetector(
+                                        onTap: () {
+                                          switchVariationInModal(variation);
+                                        },
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Stack(
+                                              children: [
+                                                Container(
+                                                  width: 90,
+                                                  height: 90,
                                                   decoration: BoxDecoration(
-                                                    color: Colors.red,
-                                                    borderRadius: BorderRadius.circular(10),
-                                                  ),
-                                                  child: Text(
-                                                    'x$selectedQty',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10,
-                                                      fontWeight: FontWeight.bold,
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    border: Border.all(
+                                                      color: isSelected ? Colors.orange : Colors.grey.shade300,
+                                                      width: isSelected ? 2 : 1,
                                                     ),
                                                   ),
+                                                  child: ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: variationImage != null
+                                                        ? Stack(
+                                                      children: [
+                                                        Positioned.fill(
+                                                          child: _buildColorSwatchImage(variationImage),
+                                                        ),
+                                                        Positioned(
+                                                          top: 2,
+                                                          left: 2,
+                                                          child: GestureDetector(
+                                                            onTap: () {
+                                                              _openImageViewer(variationImage!, vColorName, priceSlabs);
+                                                            },
+                                                            child: Container(
+                                                              padding: const EdgeInsets.all(2),
+                                                              decoration: BoxDecoration(
+                                                                color: Colors.white.withOpacity(0.7),
+                                                                shape: BoxShape.circle,
+                                                              ),
+                                                              child: const Icon(
+                                                                Icons.open_in_full,
+                                                                size: 10,
+                                                                color: Colors.black87,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        Positioned(
+                                                          bottom: 0,
+                                                          left: 0,
+                                                          right: 0,
+                                                          child: Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                                            color: Colors.white.withOpacity(0.9),
+                                                            child: Text(
+                                                              vColorName,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: const TextStyle(
+                                                                fontSize: 11,
+                                                                fontWeight: FontWeight.w600,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    )
+                                                        : Container(color: Colors.grey.shade200),
+                                                  ),
                                                 ),
-                                              ),
+                                                if (selectedQty > 0)
+                                                  Positioned(
+                                                    top: 4,
+                                                    right: 4,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red,
+                                                        borderRadius: BorderRadius.circular(10),
+                                                      ),
+                                                      child: Text(
+                                                        'x$selectedQty',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 2),
                                           ],
                                         ),
-                                        const SizedBox(height: 2),
-                                      ],
-                                    ),
+                                      );
+                                    },
                                   );
                                 },
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          // Size with steppers
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                widget.product.stockMode == 'color_size' 
-                                    ? 'Size (${sizes.length}) - Color Size Stock'
-                                    : widget.product.stockMode == 'always_available'
+                              ),
+                              const SizedBox(height: 12),
+                              // Size with steppers
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    widget.product.stockMode == 'color_size'
+                                        ? 'Size (${sizes.length}) - Color Size Stock'
+                                        : widget.product.stockMode == 'always_available'
                                         ? 'Size (${sizes.length}) - Always Available'
                                         : 'Size (${sizes.length})',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
+                              const SizedBox(height: 8),
                               Column(
                                 children: sizes.map((s) {
-                                  final currentSizes = getCurrentSizeQuantities();
                                   final qty = currentSizes[s] ?? 0;
                                   final availableStock = widget.product.stockMode == 'color_size'
-                                      ? getAvailableStock(currentVarName, s)
+                                      ? getAvailableStock(currentVarNameInModal, s)
                                       : null;
                                   final remainingStock = widget.product.stockMode == 'color_size'
-                                      ? getRemainingStock(currentVarName, s)
+                                      ? getRemainingStock(currentVarNameInModal, s)
                                       : getRemainingSimpleStock();
                                   final stockOut = widget.product.stockMode == 'always_available'
-                                      ? false // Never out of stock for always_available
+                                      ? false
                                       : widget.product.stockMode == 'color_size'
-                                          ? isOutOfStock(currentVarName, s)
-                                          : isSimpleStockOut();
+                                      ? isOutOfStock(currentVarNameInModal, s)
+                                      : isSimpleStockOut();
                                   final isAlwaysAvailable = widget.product.stockMode == 'always_available';
                                   final effectiveStockOut = isAlwaysAvailable ? false : stockOut;
-                                  
+
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8),
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                     decoration: BoxDecoration(
                                       border: Border.all(
-                                        color: effectiveStockOut 
-                                            ? Colors.red.shade300 
+                                        color: effectiveStockOut
+                                            ? Colors.red.shade300
                                             : isAlwaysAvailable
-                                                ? Colors.green.shade300
-                                                : Colors.grey.shade300,
+                                            ? Colors.green.shade300
+                                            : Colors.grey.shade300,
                                         width: effectiveStockOut ? 2 : 1,
                                       ),
                                       borderRadius: BorderRadius.circular(8),
-                                      color: effectiveStockOut 
-                                          ? Colors.red.shade50 
+                                      color: effectiveStockOut
+                                          ? Colors.red.shade50
                                           : isAlwaysAvailable
-                                              ? Colors.green.shade50
-                                              : Colors.transparent,
+                                          ? Colors.green.shade50
+                                          : Colors.transparent,
                                     ),
                                     child: Row(
                                       children: [
@@ -1949,48 +2056,50 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   fontWeight: FontWeight.w600,
-                                                  color: effectiveStockOut 
-                                                      ? Colors.red.shade700 
+                                                  color: effectiveStockOut
+                                                      ? Colors.red.shade700
                                                       : Colors.black87,
                                                 ),
                                               ),
-                                              if (widget.product.stockMode == 'simple' || availableStock != null || isAlwaysAvailable) ...[
+                                              if (widget.product.stockMode == 'simple' ||
+                                                  availableStock != null ||
+                                                  isAlwaysAvailable) ...[
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   children: [
                                                     Expanded(
                                                       child: isAlwaysAvailable
                                                           ? Row(
-                                                              children: [
-                                                                Icon(
-                                                                  Icons.check_circle,
-                                                                  size: 14,
-                                                                  color: Colors.green.shade700,
-                                                                ),
-                                                                const SizedBox(width: 4),
-                                                                Text(
-                                                                  'Always Available',
-                                                                  style: TextStyle(
-                                                                    fontSize: 12,
-                                                                    color: Colors.green.shade700,
-                                                                    fontWeight: FontWeight.w600,
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            )
-                                                          : Text(
-                                                              widget.product.stockMode == 'simple'
-                                                                  ? 'Available: $remainingStock (Simple Stock)'
-                                                                  : 'Available: $remainingStock',
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                color: stockOut 
-                                                                    ? Colors.red.shade700 
-                                                                    : Colors.green.shade700,
-                                                                fontWeight: FontWeight.w500,
-                                                              ),
-                                                              overflow: TextOverflow.ellipsis,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.check_circle,
+                                                            size: 14,
+                                                            color: Colors.green.shade700,
+                                                          ),
+                                                          const SizedBox(width: 4),
+                                                          Text(
+                                                            'Always Available',
+                                                            style: TextStyle(
+                                                              fontSize: 12,
+                                                              color: Colors.green.shade700,
+                                                              fontWeight: FontWeight.w600,
                                                             ),
+                                                          ),
+                                                        ],
+                                                      )
+                                                          : Text(
+                                                        widget.product.stockMode == 'simple'
+                                                            ? 'Available: $remainingStock (Simple Stock)'
+                                                            : 'Available: $remainingStock',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: stockOut
+                                                              ? Colors.red.shade700
+                                                              : Colors.green.shade700,
+                                                          fontWeight: FontWeight.w500,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
                                                     ),
                                                     if (stockOut && !isAlwaysAvailable) ...[
                                                       const SizedBox(width: 8),
@@ -2023,10 +2132,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           children: [
                                             IconButton(
                                               onPressed: () {
-                                                final cur = (currentSizes[s] ?? 0);
+                                                final cur = qty;
                                                 if (cur > 0) {
-                                                  _variationSizeQuantities[currentVarName]![s] = cur - 1;
-                                                  _subtotal = calcSubtotal();
+                                                  _variationSizeQuantities[currentVarNameInModal]![s] = cur - 1;
+                                                  _subtotal = calcSubtotalForModal();
                                                   setModalState(() {});
                                                 }
                                               },
@@ -2040,28 +2149,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                               onPressed: effectiveStockOut
                                                   ? null
                                                   : () {
-                                                      final cur = (currentSizes[s] ?? 0);
-                                                      // For always_available, allow unlimited quantity
-                                                      if (isAlwaysAvailable) {
-                                                        _variationSizeQuantities[currentVarName]![s] = cur + 1;
-                                                        _subtotal = calcSubtotal();
-                                                        setModalState(() {});
-                                                      } else {
-                                                        final remaining = widget.product.stockMode == 'color_size'
-                                                            ? getRemainingStock(currentVarName, s)
-                                                            : getRemainingSimpleStock();
-                                                        if (remaining > 0) {
-                                                          _variationSizeQuantities[currentVarName]![s] = cur + 1;
-                                                          _subtotal = calcSubtotal();
-                                                          setModalState(() {});
-                                                        }
-                                                      }
-                                                    },
+                                                final cur = qty;
+                                                if (isAlwaysAvailable) {
+                                                  _variationSizeQuantities[currentVarNameInModal]![s] = cur + 1;
+                                                  _subtotal = calcSubtotalForModal();
+                                                  setModalState(() {});
+                                                } else {
+                                                  final remaining = widget.product.stockMode == 'color_size'
+                                                      ? getRemainingStock(currentVarNameInModal, s)
+                                                      : getRemainingSimpleStock();
+                                                  if (remaining > 0) {
+                                                    _variationSizeQuantities[currentVarNameInModal]![s] = cur + 1;
+                                                    _subtotal = calcSubtotalForModal();
+                                                    setModalState(() {});
+                                                  }
+                                                }
+                                              },
                                               icon: Icon(
                                                 Icons.add_circle_outline,
-                                                color: effectiveStockOut 
-                                                    ? Colors.grey.shade400 
-                                                    : null,
+                                                color: effectiveStockOut ? Colors.grey.shade400 : null,
                                               ),
                                             ),
                                           ],
@@ -2072,9 +2178,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 }).toList(),
                               ),
                               const SizedBox(height: 8),
+                              // Selected sizes preview
                               Builder(
                                 builder: (context) {
-                                  final currentSizes = getCurrentSizeQuantities();
                                   return Wrap(
                                     spacing: 8,
                                     runSpacing: 8,
@@ -2093,60 +2199,66 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   );
                                 },
                               ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                // Bottom subtotal and actions
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, -2)),
-                    ],
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text('Subtotal: ₹${_subtotal.toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                        ),
-                        SizedBox(
-                          height: 40,
-                          child: OutlinedButton(
-                            onPressed: () {},
-                            style: OutlinedButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: const Text('Add to cart'),
+                    // Bottom subtotal and actions
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 6,
+                            offset: const Offset(0, -2),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          height: 40,
-                          child: ElevatedButton(
-                            onPressed: () {},
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ],
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Subtotal: ₹${currentSubtotal.toStringAsFixed(2)}',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                              ),
                             ),
-                            child: const Text('Start order'),
-                          ),
+                            SizedBox(
+                              height: 40,
+                              child: OutlinedButton(
+                                onPressed: () {},
+                                style: OutlinedButton.styleFrom(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                child: const Text('Add to cart'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              height: 40,
+                              child: ElevatedButton(
+                                onPressed: () {},
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                child: const Text('Start order'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             );
           },
         );
-        },
-      );
       },
     );
   }
@@ -2272,7 +2384,7 @@ class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
 
   Widget _buildImage(String imagePath) {
     final bool isNetwork = imagePath.startsWith('http://') || imagePath.startsWith('https://');
-    
+
     ImageProvider imageProvider;
     if (isNetwork) {
       imageProvider = CachedNetworkImageProvider(imagePath);

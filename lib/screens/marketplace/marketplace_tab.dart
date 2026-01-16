@@ -51,7 +51,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   @override
   void initState() {
     super.initState();
-    _loadMarketplaceProducts(showLocalFirst: true); // Show local products immediately
+    _loadMarketplaceProducts(); // Load products from server only
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -61,10 +61,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     _searchController.dispose();
     super.dispose();
   }
-  
+
   // Method to refresh from outside
   void refresh() {
-    _loadMarketplaceProducts(showLocalFirst: true);
+    _loadMarketplaceProducts();
   }
 
   void _onSearchChanged() {
@@ -74,28 +74,13 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   Future<void> _loadMarketplaceProducts({bool showLocalFirst = false}) async {
     setState(() => _loadingProducts = true);
     try {
-      // First, get current user's local products if showLocalFirst is true (for immediate display)
-      List<Product> localProducts = [];
-      if (showLocalFirst) {
-        try {
-          final localProductsList = await ProductDatabaseService().getProducts(
-            status: 'publish',
-          );
-          // Filter only marketplace enabled products from local
-          localProducts = localProductsList.where((p) => p.marketplaceEnabled).toList();
-          print('📱 Loaded ${localProducts.length} local marketplace products');
-        } catch (e) {
-          print('⚠️ Error loading local products: $e');
-        }
-      }
-      
-      // Then get all users' products from server
+      // Get all users' products from server ONLY (no local products to avoid duplicates)
       final result = await ProductService.getProducts(
         status: 'publish',
         marketplace: true, // Get all users' products
         limit: 200, // Get more products for marketplace
       );
-      
+
       List<Product> serverProducts = [];
       if (result['success'] == true && result['data'] != null) {
         final productsData = result['data'] as List<dynamic>;
@@ -105,7 +90,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
             final productMap = Map<String, dynamic>.from(p);
             // Handle marketplace_enabled: server sends 0/1, Product expects boolean
             if (productMap['marketplace_enabled'] != null) {
-              productMap['marketplace_enabled'] = productMap['marketplace_enabled'] == 1 || 
+              productMap['marketplace_enabled'] = productMap['marketplace_enabled'] == 1 ||
                                                   productMap['marketplace_enabled'] == '1' ||
                                                   productMap['marketplace_enabled'] == true;
             }
@@ -117,25 +102,16 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           }
         }).whereType<Product>().toList();
       }
-      
-      // Combine: local products first (for immediate display), then server products
-      // Deduplicate by server_id or name
-      final Map<String, Product> productsMap = {};
-      
-      // Add local products first (they'll be overwritten by server if duplicate)
-      for (var product in localProducts) {
-        final key = product.id?.toString() ?? '${product.userId}_${product.name}';
-        if (!productsMap.containsKey(key)) {
-          productsMap[key] = product;
+
+      // Deduplicate by product ID to ensure no duplicates
+      final Map<int, Product> productsMap = {};
+      for (var product in serverProducts) {
+        if (product.id != null) {
+          // Use server ID as key for deduplication
+          productsMap[product.id!] = product;
         }
       }
-      
-      // Add server products (will overwrite local duplicates)
-      for (var product in serverProducts) {
-        final key = product.id?.toString() ?? '${product.userId}_${product.name}';
-        productsMap[key] = product; // Server data takes precedence
-      }
-      
+
       // Convert to list and sort by updated_at DESC (latest first)
       final marketplaceProducts = productsMap.values.toList();
       marketplaceProducts.sort((a, b) {
@@ -144,9 +120,9 @@ class MarketplaceTabState extends State<MarketplaceTab> {
         if (b.updatedAt == null) return -1;
         return b.updatedAt!.compareTo(a.updatedAt!);
       });
-      
-      print('✅ Loaded ${marketplaceProducts.length} total marketplace products (${localProducts.length} local + ${serverProducts.length} server)');
-      
+
+      print('✅ Loaded ${marketplaceProducts.length} marketplace products from server (deduplicated)');
+
       setState(() {
         _marketplaceProducts = marketplaceProducts;
         _filteredProducts = marketplaceProducts;
@@ -192,10 +168,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     if (_sortOption != null) {
       filtered.sort((a, b) {
         if (a is! Product || b is! Product) return 0;
-        
+
         double? priceA;
         double? priceB;
-        
+
         if (a.priceSlabs.isNotEmpty) {
           final priceStr = a.priceSlabs.first['price']?.toString() ?? '';
           priceA = double.tryParse(priceStr);
@@ -236,7 +212,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           children: [
             // Sticky Header Section: Greeting, Search, and Filters
             _buildStickyHeader(),
-            
+
             // Scrollable Content
             Expanded(
               child: SingleChildScrollView(
@@ -244,13 +220,13 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                   children: [
                     // Delivery Location Banner
                     _buildDeliveryBanner(),
-                    
+
                     // Category Icons
                     _buildCategoryIcons(),
-                    
+
                     // Sale Banner
                     _buildSaleBanner(),
-                    
+
                     // Products Grid
                     _buildProductsGrid(),
                   ],
@@ -404,7 +380,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
         itemBuilder: (context, index) {
           final category = _categories[index];
           final isSelected = _selectedCategoryIndex == index;
-          
+
           return GestureDetector(
             onTap: () {
               setState(() {
@@ -545,21 +521,6 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                       style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Wishlist Now',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -752,7 +713,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           for (var variation in product.variations) {
             List<String> allImages = [];
             dynamic allImagesData = variation['allImages'];
-            
+
             if (allImagesData is String) {
               try {
                 final decoded = jsonDecode(allImagesData);
@@ -763,7 +724,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 print('Error decoding allImages JSON: $e');
               }
             }
-            
+
             if (allImagesData is List) {
               for (var img in allImagesData) {
                 if (img is String && img.isNotEmpty) {
@@ -773,7 +734,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 }
               }
             }
-            
+
             if (allImages.isEmpty && variation['image'] != null) {
               final img = variation['image'];
               if (img is String && img.isNotEmpty) {
@@ -782,11 +743,11 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 allImages.add(img.toString());
               }
             }
-            
+
             if (allImages.isNotEmpty) {
               final lastImage = allImages.last;
               final imageIndex = allImages.length - 1;
-              
+
               productItems.add({
                 'product': product,
                 'variation': variation,
@@ -828,7 +789,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           final imageUrl = item['imageUrl'] as String;
           final imageIndex = item['imageIndex'] as int;
           final allImages = item['allImages'] as List<String>;
-          
+
           return _buildProductCard(
             product: product,
             variation: variation,
@@ -852,7 +813,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     double? currentPrice;
     double? originalPrice;
     int discountPercent = 0;
-    
+
     if (product.priceSlabs.isNotEmpty) {
       final firstSlab = product.priceSlabs.first;
       final priceStr = firstSlab['price']?.toString() ?? '';
@@ -907,29 +868,6 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                       child: _buildImageWidget(imageUrl),
                     ),
                   ),
-                  // Heart icon (wishlist)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.favorite_border,
-                        color: Colors.red,
-                        size: 20,
-                      ),
-                    ),
-                  ),
                   // Image count badge
                   if (allImages.length > 1)
                     Positioned(
@@ -965,7 +903,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 ],
               ),
             ),
-            
+
             // Product Details - Only Name and Price
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -985,7 +923,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  
+
                   // Price Row
                   Row(
                     children: [
@@ -1012,22 +950,6 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                                 decoration: TextDecoration.lineThrough,
                               ),
                               overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.green,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              '$discountPercent% off',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
                             ),
                           ),
                         ],
@@ -1062,7 +984,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
         ),
       );
     }
-    
+
     try {
       final file = File(imageUrl);
       if (file.existsSync()) {
@@ -1083,7 +1005,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     } catch (e) {
       print("Error checking file: $imageUrl - $e");
     }
-    
+
     return Container(
       color: Colors.grey.shade300,
       child: const Icon(Icons.broken_image, color: Colors.grey),

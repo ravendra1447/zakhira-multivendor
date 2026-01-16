@@ -8,6 +8,12 @@ import 'category_selection_screen.dart';
 import 'attributes_management_screen.dart';
 import '../../services/product_service.dart';
 import '../chat_home.dart';
+import 'package:whatsappchat/theme/app_colors.dart';
+import 'package:whatsappchat/theme/app_typography.dart';
+import 'package:whatsappchat/theme/app_spacing.dart';
+import 'package:whatsappchat/widgets/auto_focus_text_field.dart';
+import 'package:whatsappchat/widgets/gradient_button.dart';
+import 'package:whatsappchat/widgets/modern_card.dart';
 
 class AddProductBasicInfoScreen extends StatefulWidget {
   final List<File> images;
@@ -228,16 +234,16 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Add Price Slab',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.close, color: Colors.grey),
+                            icon: Icon(Icons.close, color: AppColors.textSecondary(context)),
                             onPressed: () => Navigator.pop(ctx),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
@@ -254,25 +260,25 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         style: const TextStyle(fontSize: 14),
                         decoration: InputDecoration(
                           prefixText: '₹ ',
-                          prefixStyle: const TextStyle(
+                          prefixStyle: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color: Colors.black87,
+                            color: AppColors.textPrimary(context),
                           ),
                           hintText: 'Price (per piece)',
                           hintStyle: TextStyle(
                             fontSize: 13,
-                            color: Colors.grey.shade500,
+                            color: AppColors.textHint(context),
                           ),
                           filled: true,
-                          fillColor: Colors.grey.shade50,
+                          fillColor: AppColors.surface(context),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
+                            borderSide: BorderSide(color: AppColors.border(context)),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
+                            borderSide: BorderSide(color: AppColors.border(context)),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -293,12 +299,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Minimum Order Quantity (MOQ):',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: Colors.black87,
+                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -312,22 +318,22 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   style: const TextStyle(fontSize: 14),
                                   decoration: InputDecoration(
                                     suffixText: 'PCS',
-                                    suffixStyle: const TextStyle(
+                                    suffixStyle: TextStyle(
                                       fontSize: 13,
-                                      color: Colors.black87,
+                                      color: AppColors.textPrimary(context),
                                     ),
                                     filled: true,
-                                    fillColor: Colors.grey.shade50,
+                                    fillColor: AppColors.surface(context),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
                                       borderSide: BorderSide(
-                                        color: Colors.grey.shade300,
+                                        color: AppColors.border(context),
                                       ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
                                       borderSide: BorderSide(
-                                        color: Colors.grey.shade300,
+                                        color: AppColors.border(context),
                                       ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
@@ -434,6 +440,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Dialog(
+              backgroundColor: AppColors.card(context),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -448,12 +455,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Select Sizes',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           GestureDetector(
@@ -486,12 +493,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Text(
+                      Text(
                         'Select Sizes',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
-                          color: Colors.black87,
+                          color: AppColors.textPrimary(context),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -530,13 +537,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   border: Border.all(
                                     color: selected
                                         ? const Color(0xFF25D366).withOpacity(0.6)
-                                        : Colors.grey.shade200,
+                                        : AppColors.border(context),
                                     width: selected ? 1.5 : 1,
                                   ),
                                   borderRadius: BorderRadius.circular(6),
                                   color: selected
                                       ? const Color(0xFF25D366).withOpacity(0.08)
-                                      : Colors.white,
+                                      : AppColors.surface(context),
                                 ),
                                 child: Row(
                                   children: [
@@ -554,7 +561,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                               ? const Color(
                                             0xFF25D366,
                                           ).withOpacity(0.6)
-                                              : Colors.grey.shade300,
+                                              : AppColors.border(context),
                                           width: 1.5,
                                         ),
                                         borderRadius: BorderRadius.circular(4),
@@ -577,7 +584,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                             ? const Color(
                                           0xFF25D366,
                                         ).withOpacity(0.8)
-                                            : Colors.black87,
+                                            : AppColors.textPrimary(context),
                                       ),
                                     ),
                                     const Spacer(),
@@ -603,12 +610,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           );
                         }).toList(),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           'All Sizes',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: Colors.black87,
+                            color: AppColors.textPrimary(context),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -638,13 +645,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 border: Border.all(
                                   color: selected
                                       ? const Color(0xFF25D366).withOpacity(0.6)
-                                      : Colors.grey.shade200,
+                                      : AppColors.border(context),
                                   width: selected ? 1.5 : 1,
                                 ),
                                 borderRadius: BorderRadius.circular(6),
                                 color: selected
                                     ? const Color(0xFF25D366).withOpacity(0.08)
-                                    : Colors.white,
+                                    : AppColors.surface(context),
                               ),
                               child: Row(
                                 children: [
@@ -662,7 +669,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                             ? const Color(
                                           0xFF25D366,
                                         ).withOpacity(0.6)
-                                            : Colors.grey.shade300,
+                                            : AppColors.border(context),
                                         width: 1.5,
                                       ),
                                       borderRadius: BorderRadius.circular(4),
@@ -685,7 +692,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                           ? const Color(
                                         0xFF25D366,
                                       ).withOpacity(0.8)
-                                          : Colors.black87,
+                                          : AppColors.textPrimary(context),
                                     ),
                                   ),
                                 ],
@@ -1546,6 +1553,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Dialog(
+              backgroundColor: AppColors.card(context),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -1560,18 +1568,18 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Add New Size',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(
+                            icon: Icon(
                               Icons.close,
-                              color: Colors.grey,
+                              color: AppColors.textSecondary(context),
                               size: 18,
                             ),
                             onPressed: () => Navigator.pop(ctx),
@@ -1582,12 +1590,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ),
                       const SizedBox(height: 12),
                       // Size Name label
-                      const Text(
+                      Text(
                         'Size Name',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
-                          color: Colors.black87,
+                          color: AppColors.textPrimary(context),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -1598,12 +1606,32 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             child: TextField(
                               controller: sizeNameController,
                               textCapitalization: TextCapitalization.characters,
-                              style: const TextStyle(fontSize: 12),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textPrimary(context),
+                              ),
                               decoration: InputDecoration(
                                 hintText: 'e.g. Free Size, 3XL, 500g',
-                                hintStyle: const TextStyle(fontSize: 12),
+                                hintStyle: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textHint(context),
+                                ),
+                                filled: true,
+                                fillColor: AppColors.surface(context),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: AppColors.border(context)),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: AppColors.border(context)),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF25D366),
+                                    width: 2,
+                                  ),
                                 ),
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -1659,16 +1687,25 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               return Padding(
                                 padding: const EdgeInsets.only(right: 6),
                                 child: Chip(
+                                  backgroundColor: AppColors.surface(context),
                                   label: Text(
                                     size,
-                                    style: const TextStyle(fontSize: 11),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textPrimary(context),
+                                    ),
                                   ),
                                   onDeleted: () {
                                     setModalState(() {
                                       tempSizes.remove(size);
                                     });
                                   },
-                                  deleteIcon: const Icon(Icons.close, size: 14),
+                                  deleteIcon: Icon(
+                                    Icons.close,
+                                    size: 14,
+                                    color: AppColors.textSecondary(context),
+                                  ),
+                                  side: BorderSide(color: AppColors.border(context)),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 4,
                                   ),
@@ -1740,20 +1777,51 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
       builder: (ctx) {
         final ctrl = TextEditingController();
         return AlertDialog(
-          title: const Text('Add Color'),
+          backgroundColor: AppColors.card(context),
+          title: Text(
+            'Add Color',
+            style: TextStyle(color: AppColors.textPrimary(context)),
+          ),
           content: TextField(
             controller: ctrl,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Enter color name'),
+            style: TextStyle(color: AppColors.textPrimary(context)),
+            decoration: InputDecoration(
+              hintText: 'Enter color name',
+              hintStyle: TextStyle(color: AppColors.textHint(context)),
+              filled: true,
+              fillColor: AppColors.surface(context),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.border(context)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.border(context)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(
+                  color: Color(0xFF25D366),
+                  width: 2,
+                ),
+              ),
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.textSecondary(context)),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('Add'),
+              child: const Text(
+                'Add',
+                style: TextStyle(color: Color(0xFF25D366)),
+              ),
             ),
           ],
         );
@@ -1928,17 +1996,18 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   PreferredSizeWidget _header() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AppBar(
-      backgroundColor: const Color(0xFF1F1F1F),
+      backgroundColor: isDark ? const Color(0xFF1A1A1A) : const Color(0xFF1F1F1F),
       elevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        icon: Icon(Icons.arrow_back, color: const Color(0xDEFFFFFF)),
         onPressed: () => Navigator.pop(context),
       ),
-      title: const Text(
+      title: Text(
         'Add Product',
         style: TextStyle(
-          color: Colors.white,
+          color: const Color(0xDEFFFFFF),
           fontSize: 18,
           fontWeight: FontWeight.w700,
         ),
@@ -1948,8 +2017,6 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   }
 
   Widget _sectionTitle(String title) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(
@@ -1957,24 +2024,22 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: textColor,
+          color: AppColors.textPrimary(context),
         ),
       ),
     );
   }
 
   Widget _card(Widget child) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: AppColors.card(context),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.3 : 0.06),
+            color: AppColors.textPrimary(context).withOpacity(0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1986,15 +2051,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final scaffoldBg = isDark ? const Color(0xFF121212) : const Color(0xFFF5F5F5);
-    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final hintColor = isDark ? Colors.grey.shade400 : Colors.grey.shade600;
-    final borderColor = isDark ? Colors.grey.shade700 : Colors.grey.shade300;
-
     return Scaffold(
-      backgroundColor: scaffoldBg,
+      backgroundColor: AppColors.background(context),
       appBar: _header(),
       body: SingleChildScrollView(
         child: Column(
@@ -2007,19 +2065,19 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                   TextField(
                     controller: _nameController,
                     textCapitalization: TextCapitalization.words,
-                    style: TextStyle(fontSize: 14, color: textColor),
+                    style: TextStyle(fontSize: 14, color: AppColors.textPrimary(context)),
                     decoration: InputDecoration(
                       hintText: 'Enter product name',
-                      hintStyle: TextStyle(fontSize: 14, color: hintColor),
+                      hintStyle: TextStyle(fontSize: 14, color: AppColors.textHint(context)),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF2E2E2E) : Colors.grey.shade50,
+                      fillColor: AppColors.surface(context),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: borderColor),
+                        borderSide: BorderSide(color: AppColors.border(context)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: borderColor),
+                        borderSide: BorderSide(color: AppColors.border(context)),
                       ),
                       focusedBorder: const OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(8)),
@@ -2070,9 +2128,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2E2E2E) : Colors.grey.shade50,
+                        color: AppColors.surface(context),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: borderColor),
+                        border: Border.all(color: AppColors.border(context)),
                       ),
                       child: Row(
                         children: [
@@ -2085,12 +2143,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       : _category!,
                               style: TextStyle(
                                 color: (_category == null)
-                                    ? hintColor
-                                    : textColor,
+                                    ? AppColors.textHint(context)
+                                    : AppColors.textPrimary(context),
                               ),
                             ),
                           ),
-                          Icon(Icons.chevron_right, color: hintColor),
+                          Icon(Icons.chevron_right, color: AppColors.textHint(context)),
                         ],
                       ),
                     ),
@@ -2101,10 +2159,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.green.shade900.withOpacity(0.3) : Colors.green.shade50,
+                        color: AppColors.success(context).withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isDark ? Colors.green.shade700 : Colors.green.shade200,
+                          color: AppColors.success(context).withOpacity(0.3),
                         ),
                       ),
                       child: Column(
@@ -2115,7 +2173,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                              color: AppColors.success(context),
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -2139,17 +2197,17 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF2E2E2E) : Colors.white,
+                                    color: AppColors.card(context),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: isDark ? Colors.green.shade600 : Colors.green.shade300,
+                                      color: AppColors.success(context).withOpacity(0.5),
                                     ),
                                   ),
                                   child: Text(
                                     categoryDisplay,
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                                      color: AppColors.success(context),
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -2174,8 +2232,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                   Container(
                     height: 48,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: AppColors.surface(context),
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border(context)),
                     ),
                     child: Row(
                       children: [
@@ -2192,13 +2251,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               margin: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
                                 color: _stockMode == 'simple'
-                                    ? Colors.white
+                                    ? AppColors.card(context)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
                                 boxShadow: _stockMode == 'simple'
                                     ? [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
+                                    color: AppColors.textPrimary(context).withOpacity(0.1),
                                     blurRadius: 4,
                                     offset: const Offset(0, 2),
                                   ),
@@ -2215,7 +2274,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                         : FontWeight.w500,
                                     color: _stockMode == 'simple'
                                         ? const Color(0xFF25D366)
-                                        : Colors.grey.shade600,
+                                        : AppColors.textSecondary(context),
                                   ),
                                 ),
                               ),
@@ -2240,13 +2299,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               margin: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
                                 color: _stockMode == 'color_size'
-                                    ? Colors.white
+                                    ? AppColors.card(context)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
                                 boxShadow: _stockMode == 'color_size'
                                     ? [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
+                                    color: AppColors.textPrimary(context).withOpacity(0.1),
                                     blurRadius: 4,
                                     offset: const Offset(0, 2),
                                   ),
@@ -2263,7 +2322,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                         : FontWeight.w500,
                                     color: _stockMode == 'color_size'
                                         ? const Color(0xFF25D366)
-                                        : Colors.grey.shade600,
+                                        : AppColors.textSecondary(context),
                                   ),
                                 ),
                               ),
@@ -2283,13 +2342,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               margin: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
                                 color: _stockMode == 'always_available'
-                                    ? Colors.white
+                                    ? AppColors.card(context)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
                                 boxShadow: _stockMode == 'always_available'
                                     ? [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
+                                    color: AppColors.textPrimary(context).withOpacity(0.1),
                                     blurRadius: 4,
                                     offset: const Offset(0, 2),
                                   ),
@@ -2306,7 +2365,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                         : FontWeight.w500,
                                     color: _stockMode == 'always_available'
                                         ? const Color(0xFF25D366)
-                                        : Colors.grey.shade600,
+                                        : AppColors.textSecondary(context),
                                   ),
                                 ),
                               ),
@@ -2380,9 +2439,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: AppColors.success(context).withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.green.shade200),
+                        border: Border.all(color: AppColors.success(context).withOpacity(0.3)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2392,12 +2451,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.shade100,
+                                  color: AppColors.success(context).withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
                                   Icons.inventory_2_outlined,
-                                  color: Colors.green.shade700,
+                                  color: AppColors.success(context),
                                   size: 20,
                                 ),
                               ),
@@ -2406,12 +2465,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Unlimited Stock',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.black87,
+                                        color: AppColors.textPrimary(context),
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -2419,7 +2478,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       'Accept orders without tracking inventory',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: Colors.grey.shade600,
+                                        color: AppColors.textSecondary(context),
                                       ),
                                     ),
                                   ],
@@ -2432,9 +2491,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: AppColors.card(context),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade200),
+                              border: Border.all(color: AppColors.border(context)),
                             ),
                             child: Row(
                               children: [
@@ -2447,12 +2506,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   },
                                   activeColor: const Color(0xFF25D366),
                                 ),
-                                const Expanded(
+                                Expanded(
                                   child: Text(
                                     'Show "Made on Order" badge',
                                     style: TextStyle(
                                       fontSize: 13,
-                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.textPrimary(context),
                                     ),
                                   ),
                                 ),
@@ -2461,46 +2520,50 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           ),
                           if (_showMadeOnOrderBadge) ...[
                             const SizedBox(height: 8),
-                            const Text(
+                            Text(
                               'This label will highlight that the product is manufactured after order confirmation.',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey,
+                                color: AppColors.textSecondary(context),
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Text(
+                            Text(
                               'Dispatch Time',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary(context),
                               ),
                             ),
                             const SizedBox(height: 8),
                             TextField(
                               controller: _dispatchTimeController,
                               keyboardType: TextInputType.text,
-                              style: const TextStyle(fontSize: 14),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppColors.textPrimary(context),
+                              ),
                               decoration: InputDecoration(
                                 hintText: 'Enter dispatch time (e.g., 5-7 days)',
-                                hintStyle: const TextStyle(fontSize: 14),
+                                hintStyle: TextStyle(
+                                  fontSize: 14,
+                                  color: AppColors.textHint(context),
+                                ),
                                 filled: true,
-                                fillColor: Colors.white,
+                                fillColor: AppColors.surface(context),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                  BorderSide(color: Colors.grey.shade300),
+                                  borderSide: BorderSide(color: AppColors.border(context)),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                  BorderSide(color: Colors.grey.shade300),
+                                  borderSide: BorderSide(color: AppColors.border(context)),
                                 ),
-                                focusedBorder: const OutlineInputBorder(
-                                  borderRadius:
-                                  BorderRadius.all(Radius.circular(8)),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(Radius.circular(8)),
                                   borderSide: BorderSide(
-                                    color: Color(0xFF25D366),
+                                    color: AppColors.primary(context),
                                     width: 2,
                                   ),
                                 ),
@@ -2656,12 +2719,12 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       // Variation label - left side
-                      const Text(
+                      Text(
                         'Variation',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: Colors.black87,
+                          color: AppColors.textPrimary(context),
                         ),
                       ),
                       // Add New Color button - right side (smaller and thinner)
@@ -2680,7 +2743,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           ),
                         ),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.black87,
+                          foregroundColor: AppColors.textPrimary(context),
                           side: const BorderSide(
                             color: Color(0xFF25D366),
                             width: 1,
@@ -2707,7 +2770,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
+                        color: AppColors.surface(context),
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Row(
@@ -2741,10 +2804,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
+                        color: AppColors.surface(context),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isDark ? Colors.purple.shade700 : Colors.purple.shade200,
+                          color: Colors.purple.shade200,
                         ),
                       ),
                       child: Column(
@@ -2755,7 +2818,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               Icon(
                                 Icons.history,
                                 size: 14,
-                                color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                                color: Colors.purple.shade700,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -2763,7 +2826,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                                  color: Colors.purple.shade700,
                                 ),
                               ),
                             ],
@@ -2790,7 +2853,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       color: _getColorFromName(color),
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(
-                                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade300,
+                                        color: AppColors.border(context),
                                         width: 1,
                                       ),
                                     ),
@@ -2841,11 +2904,11 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               width: 100,
                               margin: const EdgeInsets.only(right: 12),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                color: AppColors.card(context),
                                 border: Border.all(
                                   color: isSelected
-                                      ? Colors.black
-                                      : (isRecentColor ? Colors.purple.shade400 : (isDark ? Colors.grey.shade700 : Colors.grey.shade300)),
+                                      ? const Color(0xFF25D366)
+                                      : (isRecentColor ? Colors.purple.shade400 : AppColors.border(context)),
                                   width: isSelected ? 1.5 : (isRecentColor ? 1.5 : 1),
                                 ),
                                 borderRadius: BorderRadius.circular(12),
@@ -2967,10 +3030,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
+                        color: AppColors.surface(context),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isDark ? Colors.purple.shade700 : Colors.purple.shade200,
+                          color: Colors.purple.shade200,
                         ),
                       ),
                       child: Column(
@@ -2981,7 +3044,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.purple.shade300 : Colors.purple.shade700,
+                              color: Colors.purple.shade700,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -3007,7 +3070,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                       color: _getColorFromName(color),
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(
-                                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade300,
+                                        color: AppColors.border(context),
                                       ),
                                     ),
                                     child: Text(
@@ -3228,7 +3291,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         style: BorderStyle.solid,
                       ),
                       borderRadius: BorderRadius.circular(10),
-                      color: Colors.grey.shade50,
+                      color: AppColors.surface(context),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -3264,7 +3327,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   '(${_selectedSizes.join(', ')})',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.grey.shade600,
+                                    color: AppColors.textSecondary(context),
                                   ),
                                 ),
                               ] else ...[
@@ -3273,7 +3336,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   '(S, M, L, XL, XXL)',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.grey.shade500,
+                                    color: AppColors.textHint(context),
                                   ),
                                 ),
                               ],
@@ -3300,10 +3363,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
+                        color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isDark ? Colors.blue.shade700 : Colors.blue.shade200,
+                          color: Colors.blue.shade200,
                         ),
                       ),
                       child: Column(
@@ -3314,7 +3377,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                              color: Colors.blue.shade700,
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -3336,22 +3399,20 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: isSelected
-                                        ? (isDark ? Colors.blue.shade700 : Colors.blue.shade100)
-                                        : (isDark ? const Color(0xFF2E2E2E) : Colors.white),
+                                        ? Colors.blue.shade100
+                                        : AppColors.card(context),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                       color: isSelected
-                                          ? (isDark ? Colors.blue.shade400 : Colors.blue.shade400)
-                                          : (isDark ? Colors.blue.shade600 : Colors.blue.shade300),
+                                          ? Colors.blue.shade400
+                                          : Colors.blue.shade300,
                                     ),
                                   ),
                                   child: Text(
                                     size,
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: isDark
-                                          ? (isSelected ? Colors.white : Colors.blue.shade300)
-                                          : Colors.blue.shade700,
+                                      color: isSelected ? Colors.blue.shade700 : Colors.blue.shade700,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -3452,16 +3513,16 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
+                          color: AppColors.surface(context),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
+                          border: Border.all(color: AppColors.border(context)),
                         ),
                         child: Row(
                           children: [
                             Expanded(
                               child: Text(
                                 e.key,
-                                style: const TextStyle(fontSize: 13),
+                                style: TextStyle(fontSize: 13, color: AppColors.textPrimary(context)),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -3475,10 +3536,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   vertical: 5,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: AppColors.card(context),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
-                                    color: Colors.grey.shade300,
+                                    color: AppColors.border(context),
                                   ),
                                 ),
                                 child: Row(
@@ -3487,15 +3548,15 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                     Expanded(
                                       child: Text(
                                         selectedValue,
-                                        style: const TextStyle(fontSize: 13),
+                                        style: TextStyle(fontSize: 13, color: AppColors.textPrimary(context)),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     const SizedBox(width: 4),
-                                    const Icon(
+                                    Icon(
                                       Icons.keyboard_arrow_down,
                                       size: 16,
-                                      color: Colors.grey,
+                                      color: AppColors.textSecondary(context),
                                     ),
                                   ],
                                 ),
@@ -3604,7 +3665,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         '${_descController.text.length} / 500 chars',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.grey.shade600,
+                          color: AppColors.textSecondary(context),
                         ),
                       ),
                     ],
@@ -3614,22 +3675,22 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                     controller: _descController,
                     maxLines: 6,
                     maxLength: 500,
-                    style: const TextStyle(fontSize: 14),
+                    style: TextStyle(fontSize: 14, color: AppColors.textPrimary(context)),
                     onChanged: (value) {
                       setState(() {});
                     },
                     decoration: InputDecoration(
                       hintText: 'Enter product description',
-                      hintStyle: const TextStyle(fontSize: 14),
+                      hintStyle: TextStyle(fontSize: 14, color: AppColors.textHint(context)),
                       filled: true,
-                      fillColor: Colors.grey.shade50,
+                      fillColor: AppColors.surface(context),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: AppColors.border(context)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
+                        borderSide: BorderSide(color: AppColors.border(context)),
                       ),
                       focusedBorder: const OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(8)),
@@ -3685,48 +3746,42 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                 ],
               ),
             ),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            Padding(
+              padding: AppSpacing.paddingHorizontalLG.add(AppSpacing.paddingVerticalSM),
               child: Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => _saveProduct('draft'),
                       style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.grey.shade400),
-                        foregroundColor: Colors.black87,
+                        side: BorderSide(color: AppColors.border(context), width: 2),
+                        foregroundColor: AppColors.textPrimary(context),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        padding: AppSpacing.paddingVerticalMD,
+                        minimumSize: const Size(0, 48),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Save as Draft',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                        style: AppTypography.button(context).copyWith(
+                          color: AppColors.textPrimary(context),
                         ),
+                        overflow: TextOverflow.visible,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  AppSpacing.horizontalSpaceMD,
                   Expanded(
-                    child: ElevatedButton(
+                    child: GradientButton(
+                      text: 'Publish',
                       onPressed: () => _saveProduct('publish'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange.shade700,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                      child: const Text(
-                        'Publish',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      height: 48,
+                      icon: Icons.publish,
+                      gradientColors: [
+                        AppColors.orange(context),
+                        AppColors.orange(context).withOpacity(0.8),
+                      ],
                     ),
                   ),
                 ],
@@ -4053,20 +4108,51 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
       builder: (ctx) {
         final ctrl = TextEditingController();
         return AlertDialog(
-          title: const Text('Add Color'),
+          backgroundColor: AppColors.card(context),
+          title: Text(
+            'Add Color',
+            style: TextStyle(color: AppColors.textPrimary(context)),
+          ),
           content: TextField(
             controller: ctrl,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Enter color name'),
+            style: TextStyle(color: AppColors.textPrimary(context)),
+            decoration: InputDecoration(
+              hintText: 'Enter color name',
+              hintStyle: TextStyle(color: AppColors.textHint(context)),
+              filled: true,
+              fillColor: AppColors.surface(context),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.border(context)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.border(context)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(
+                  color: Color(0xFF25D366),
+                  width: 2,
+                ),
+              ),
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.textSecondary(context)),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('Add'),
+              child: const Text(
+                'Add',
+                style: TextStyle(color: Color(0xFF25D366)),
+              ),
             ),
           ],
         );
@@ -4237,7 +4323,7 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                       Expanded(
                         child: Text(
                           'Auto calculate from variations',
-                          style: TextStyle(color: Colors.grey.shade700),
+                          style: TextStyle(color: AppColors.textSecondary(context)),
                         ),
                       ),
                     ],
@@ -4356,9 +4442,13 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Variations',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary(context),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -4369,12 +4459,15 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.orange.shade200,
+                          color: AppColors.orange(context).withOpacity(0.3),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Color',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary(context),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -4384,13 +4477,16 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
+                          color: AppColors.surface(context),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Text('Size'),
+                        child: Text(
+                          'Size',
+                          style: TextStyle(color: AppColors.textPrimary(context)),
+                        ),
                       ),
                       const Spacer(),
-                      const Icon(Icons.keyboard_arrow_up, color: Colors.grey),
+                      Icon(Icons.keyboard_arrow_up, color: AppColors.textSecondary(context)),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -4405,7 +4501,7 @@ class _AddProductPriceMoqScreenState extends State<AddProductPriceMoqScreen> {
                             margin: const EdgeInsets.only(right: 8),
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade300),
+                              border: Border.all(color: AppColors.border(context)),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Column(

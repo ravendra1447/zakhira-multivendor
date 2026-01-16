@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:ui' as ui;
+import 'package:whatsappchat/theme/app_colors.dart';
 
 // Orientation-aware image widget that auto-adjusts based on image dimensions
 class OrientationAwareImage extends StatefulWidget {
@@ -81,9 +82,11 @@ class _OrientationAwareImageState extends State<OrientationAwareImage> {
       return Container(
         width: widget.width,
         height: widget.height,
-        color: Colors.grey.shade300,
-        child: const Center(
-          child: CircularProgressIndicator(),
+        color: AppColors.surface(context),
+        child: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.primary(context),
+          ),
         ),
       );
     }
@@ -165,11 +168,11 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: Colors.grey.shade200,
+                color: AppColors.surface(context),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade400, width: 2),
+                border: Border.all(color: AppColors.border(context), width: 2),
               ),
-              child: const Icon(Icons.add, size: 40, color: Colors.grey),
+              child: Icon(Icons.add, size: 40, color: AppColors.textSecondary(context)),
             ),
           ),
         ),
@@ -202,7 +205,7 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    color: Colors.grey.shade300,
+                    color: AppColors.surface(context),
                     child: OrientationAwareImage(
                       imageFile: _images[0],
                       width: imageWidth,
@@ -221,7 +224,7 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    color: Colors.grey.shade300,
+                    color: AppColors.surface(context),
                     child: OrientationAwareImage(
                       imageFile: _images[1],
                       width: imageWidth,
@@ -242,7 +245,7 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
-                        color: Colors.grey.shade300,
+                        color: AppColors.surface(context),
                         child: ClipRect(
                           child: Align(
                             alignment: Alignment.centerLeft,
@@ -291,14 +294,14 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                   onTap: _addImages,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
+                      color: AppColors.surface(context),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade400, width: 2),
+                      border: Border.all(color: AppColors.border(context), width: 2),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.add,
                       size: 40,
-                      color: Colors.grey,
+                      color: AppColors.textSecondary(context),
                     ),
                   ),
                 ),
@@ -313,14 +316,14 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                   onTap: _addImages,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
+                      color: AppColors.surface(context),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade400, width: 2),
+                      border: Border.all(color: AppColors.border(context), width: 2),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.add,
                       size: 40,
-                      color: Colors.grey,
+                      color: AppColors.textSecondary(context),
                     ),
                   ),
                 ),
@@ -334,11 +337,12 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
   @override
   Widget build(BuildContext context) {
     print('VariantImagesScreen: Received ${_images.length} images');
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.background(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1F1F1F),
+        backgroundColor: isDark ? const Color(0xFF1A1A1A) : const Color(0xFF1F1F1F),
         elevation: 0,
         shadowColor: Colors.black.withOpacity(0.3),
         leading: Container(
@@ -457,8 +461,8 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: _currentIndex == index
-                                  ? Colors.blue
-                                  : Colors.grey.shade300,
+                                  ? AppColors.primary(context)
+                                  : AppColors.border(context),
                               width: _currentIndex == index ? 2 : 1,
                             ),
                           ),
@@ -521,27 +525,27 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                                   width: 120,
                                   height: 120,
                                   decoration: BoxDecoration(
-                                    color: Colors.grey.shade200,
+                                    color: AppColors.surface(context),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: Colors.grey.shade400,
+                                      color: AppColors.border(context),
                                       width: 3,
                                     ),
                                   ),
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.add,
                                     size: 60,
-                                    color: Colors.grey,
+                                    color: AppColors.textSecondary(context),
                                   ),
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              const Text(
+                              Text(
                                 'Add More Images',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w500,
-                                  color: Colors.grey,
+                                  color: AppColors.textSecondary(context),
                                 ),
                               ),
                             ],
@@ -556,12 +560,12 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
       bottomNavigationBar: !_isGridView
           ? Container(
               padding: const EdgeInsets.all(16),
-              color: Colors.white,
+              color: AppColors.card(context),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.grid_view),
+                    icon: Icon(Icons.grid_view, color: AppColors.textPrimary(context)),
                     onPressed: () {
                       setState(() {
                         _isGridView = true;
@@ -572,9 +576,10 @@ class _VariantImagesScreenState extends State<VariantImagesScreen> {
                     _currentIndex < _images.length
                         ? '${_currentIndex + 1} / ${_images.length}'
                         : '${_images.length + 1} / ${_images.length + 1}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary(context),
                     ),
                   ),
                   const SizedBox(width: 48), // Balance the grid icon

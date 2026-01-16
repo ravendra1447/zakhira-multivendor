@@ -7,6 +7,11 @@ import '../../services/product_database_service.dart';
 import '../../services/product_service.dart';
 import '../product/detail/product_detail_screen.dart';
 import '../product/category_selection_screen.dart';
+import 'package:whatsappchat/theme/app_colors.dart';
+import 'package:whatsappchat/theme/app_typography.dart';
+import 'package:whatsappchat/theme/app_spacing.dart';
+import 'package:whatsappchat/widgets/filter_chip_widget.dart';
+import 'package:whatsappchat/widgets/modern_card.dart';
 
 class MarketplaceTab extends StatefulWidget {
   const MarketplaceTab({super.key});
@@ -535,48 +540,39 @@ class MarketplaceTabState extends State<MarketplaceTab> {
 
   Widget _buildFilterOptions() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          _buildFilterButton('↓↑ Sort', Icons.swap_vert, () => _showSortDialog()),
-          const SizedBox(width: 8),
-          _buildFilterButton('Category ⌄', Icons.arrow_drop_down, () => _showCategoryDialog()),
-          const SizedBox(width: 8),
-          _buildFilterButton('Gender ⌄', Icons.arrow_drop_down, () => _showGenderDialog()),
-          const SizedBox(width: 8),
-          _buildFilterButton('≡ Filters', Icons.tune, () => _showFiltersDialog()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterButton(String label, IconData icon, VoidCallback onTap) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade300),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 16, color: Colors.grey.shade700),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade700,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
+      padding: AppSpacing.paddingHorizontalLG.add(AppSpacing.paddingVerticalSM),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            FilterChipWidget(
+              label: 'Sort',
+              isSelected: _sortOption != null,
+              onTap: _showSortDialog,
+              icon: Icons.swap_vert,
+            ),
+            AppSpacing.horizontalSpaceSM,
+            FilterChipWidget(
+              label: 'Category',
+              isSelected: _selectedCategory != null,
+              onTap: _showCategoryDialog,
+              icon: Icons.category,
+            ),
+            AppSpacing.horizontalSpaceSM,
+            FilterChipWidget(
+              label: 'Gender',
+              isSelected: _selectedGender != null,
+              onTap: _showGenderDialog,
+              icon: Icons.person,
+            ),
+            AppSpacing.horizontalSpaceSM,
+            FilterChipWidget(
+              label: 'Filters',
+              isSelected: false,
+              onTap: _showFiltersDialog,
+              icon: Icons.tune,
+            ),
+          ],
         ),
       ),
     );
@@ -586,21 +582,48 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sort By'),
+        backgroundColor: AppColors.card(context),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Sort By',
+          style: AppTypography.heading2(context),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: _sortOptions.map((option) {
-            return RadioListTile<String>(
-              title: Text(option),
-              value: option,
-              groupValue: _sortOption,
-              onChanged: (value) {
-                setState(() {
-                  _sortOption = value;
-                });
-                Navigator.pop(context);
-                _applyFilters();
-              },
+            final isSelected = _sortOption == option;
+            return Container(
+              margin: AppSpacing.marginVerticalXS,
+              decoration: BoxDecoration(
+                color: isSelected 
+                    ? AppColors.primary(context).withOpacity(0.1)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isSelected 
+                      ? AppColors.primary(context)
+                      : AppColors.border(context),
+                  width: isSelected ? 2 : 1,
+                ),
+              ),
+              child: RadioListTile<String>(
+                title: Text(
+                  option,
+                  style: AppTypography.bodyMedium(context).copyWith(
+                    fontWeight: isSelected ? AppTypography.semibold : AppTypography.regular,
+                  ),
+                ),
+                value: option,
+                groupValue: _sortOption,
+                activeColor: AppColors.primary(context),
+                onChanged: (value) {
+                  setState(() {
+                    _sortOption = value;
+                  });
+                  Navigator.pop(context);
+                  _applyFilters();
+                },
+              ),
             );
           }).toList(),
         ),
@@ -613,7 +636,12 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               Navigator.pop(context);
               _applyFilters();
             },
-            child: const Text('Clear'),
+            child: Text(
+              'Clear',
+              style: AppTypography.button(context).copyWith(
+                color: AppColors.error(context),
+              ),
+            ),
           ),
         ],
       ),
@@ -641,21 +669,48 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Gender'),
+        backgroundColor: AppColors.card(context),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Select Gender',
+          style: AppTypography.heading2(context),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: _genderOptions.map((option) {
-            return RadioListTile<String>(
-              title: Text(option),
-              value: option,
-              groupValue: _selectedGender,
-              onChanged: (value) {
-                setState(() {
-                  _selectedGender = value == 'All' ? null : value;
-                });
-                Navigator.pop(context);
-                _applyFilters();
-              },
+            final isSelected = _selectedGender == option || (_selectedGender == null && option == 'All');
+            return Container(
+              margin: AppSpacing.marginVerticalXS,
+              decoration: BoxDecoration(
+                color: isSelected 
+                    ? AppColors.primary(context).withOpacity(0.1)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isSelected 
+                      ? AppColors.primary(context)
+                      : AppColors.border(context),
+                  width: isSelected ? 2 : 1,
+                ),
+              ),
+              child: RadioListTile<String>(
+                title: Text(
+                  option,
+                  style: AppTypography.bodyMedium(context).copyWith(
+                    fontWeight: isSelected ? AppTypography.semibold : AppTypography.regular,
+                  ),
+                ),
+                value: option,
+                groupValue: _selectedGender ?? 'All',
+                activeColor: AppColors.primary(context),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedGender = value == 'All' ? null : value;
+                  });
+                  Navigator.pop(context);
+                  _applyFilters();
+                },
+              ),
             );
           }).toList(),
         ),
@@ -668,7 +723,12 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               Navigator.pop(context);
               _applyFilters();
             },
-            child: const Text('Clear'),
+            child: Text(
+              'Clear',
+              style: AppTypography.button(context).copyWith(
+                color: AppColors.error(context),
+              ),
+            ),
           ),
         ],
       ),
@@ -843,15 +903,11 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           ),
         );
       },
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
+      child: ModernCard(
+        padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min, // Prevent overflow
+          mainAxisSize: MainAxisSize.min,
           children: [
             // Product Image - Bigger size
             Expanded(
@@ -860,11 +916,11 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 fit: StackFit.expand,
                 children: [
                   ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
                     child: Container(
                       width: double.infinity,
                       height: double.infinity,
-                      color: Colors.grey.shade200,
+                      color: AppColors.surface(context),
                       child: _buildImageWidget(imageUrl),
                     ),
                   ),
@@ -874,10 +930,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                       bottom: 8,
                       right: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        padding: AppSpacing.paddingHorizontalSM.add(AppSpacing.paddingVerticalXS),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(4),
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -887,7 +943,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                               color: Colors.white,
                               size: 12,
                             ),
-                            const SizedBox(width: 2),
+                            AppSpacing.horizontalSpaceXS,
                             Text(
                               '${allImages.length}',
                               style: const TextStyle(
@@ -906,7 +962,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
 
             // Product Details - Only Name and Price
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              padding: AppSpacing.paddingSM,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -914,15 +970,13 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                   // Product Name
                   Text(
                     product.name,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                    style: AppTypography.bodyMedium(context).copyWith(
+                      fontWeight: AppTypography.semibold,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
+                  AppSpacing.verticalSpaceXS,
 
                   // Price Row
                   Row(
@@ -931,24 +985,16 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                         Flexible(
                           child: Text(
                             '₹${currentPrice.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
+                            style: AppTypography.price(context).copyWith(fontSize: 16),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (originalPrice != null) ...[
-                          const SizedBox(width: 6),
+                          AppSpacing.horizontalSpaceSM,
                           Flexible(
                             child: Text(
                               '₹${originalPrice.toStringAsFixed(0)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade600,
-                                decoration: TextDecoration.lineThrough,
-                              ),
+                              style: AppTypography.discount(context),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),

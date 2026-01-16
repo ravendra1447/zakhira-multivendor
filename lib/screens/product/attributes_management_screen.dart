@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:whatsappchat/theme/app_colors.dart';
+import 'package:whatsappchat/theme/app_typography.dart';
+import 'package:whatsappchat/theme/app_spacing.dart';
+import 'package:whatsappchat/widgets/gradient_button.dart';
 
 class AttributesManagementScreen extends StatefulWidget {
   final Map<String, List<String>> attributes;
@@ -41,6 +45,7 @@ class _AttributesManagementScreenState
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Dialog(
+              backgroundColor: AppColors.card(context),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -55,12 +60,12 @@ class _AttributesManagementScreenState
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Add Attribute',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           Row(
@@ -101,9 +106,9 @@ class _AttributesManagementScreenState
                               ),
                               const SizedBox(width: 8),
                               IconButton(
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.close,
-                                  color: Colors.grey,
+                                  color: AppColors.textSecondary(context),
                                   size: 18,
                                 ),
                                 onPressed: () => Navigator.pop(ctx),
@@ -122,16 +127,24 @@ class _AttributesManagementScreenState
                           runSpacing: 6,
                           children: tempValues.map((value) {
                             return Chip(
+                              backgroundColor: AppColors.surface(context),
                               label: Text(
                                 value,
-                                style: const TextStyle(fontSize: 11),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.textPrimary(context),
+                                ),
                               ),
                               onDeleted: () {
                                 setModalState(() {
                                   tempValues.remove(value);
                                 });
                               },
-                              deleteIcon: const Icon(Icons.close, size: 14),
+                              deleteIcon: Icon(
+                                Icons.close,
+                                size: 14,
+                                color: AppColors.textSecondary(context),
+                              ),
                             );
                           }).toList(),
                         ),
@@ -144,39 +157,47 @@ class _AttributesManagementScreenState
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Name',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
-                                    color: Colors.black87,
+                                    color: AppColors.textPrimary(context),
                                   ),
                                 ),
                                 const SizedBox(height: 6),
                                 TextField(
                                   controller: nameController,
                                   enabled: !nameFieldLocked,
-                                  style: const TextStyle(fontSize: 12),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary(context),
+                                  ),
                                   decoration: InputDecoration(
                                     hintText: 'Enter attribute name',
                                     hintStyle: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey.shade500,
+                                      color: AppColors.textHint(context),
                                     ),
+                                    filled: true,
+                                    fillColor: AppColors.surface(context),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade300),
+                                      borderSide: BorderSide(
+                                        color: AppColors.border(context),
+                                      ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade300),
+                                      borderSide: BorderSide(
+                                        color: AppColors.border(context),
+                                      ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade400),
+                                      borderSide: BorderSide(
+                                        color: AppColors.primary(context),
+                                      ),
                                     ),
                                     contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 10,
@@ -192,38 +213,46 @@ class _AttributesManagementScreenState
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Value',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
-                                    color: Colors.black87,
+                                    color: AppColors.textPrimary(context),
                                   ),
                                 ),
                                 const SizedBox(height: 6),
                                 TextField(
                                   controller: valueController,
-                                  style: const TextStyle(fontSize: 12),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary(context),
+                                  ),
                                   decoration: InputDecoration(
                                     hintText: 'Enter attribute value',
                                     hintStyle: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey.shade500,
+                                      color: AppColors.textHint(context),
                                     ),
+                                    filled: true,
+                                    fillColor: AppColors.surface(context),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade300),
+                                      borderSide: BorderSide(
+                                        color: AppColors.border(context),
+                                      ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade300),
+                                      borderSide: BorderSide(
+                                        color: AppColors.border(context),
+                                      ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
-                                      borderSide:
-                                          BorderSide(color: Colors.grey.shade400),
+                                      borderSide: BorderSide(
+                                        color: AppColors.primary(context),
+                                      ),
                                     ),
                                     contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 10,
@@ -303,6 +332,7 @@ class _AttributesManagementScreenState
       context: context,
       builder: (ctx) {
         return Dialog(
+          backgroundColor: AppColors.card(context),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -316,13 +346,18 @@ class _AttributesManagementScreenState
                   children: [
                     Text(
                       'Add Value to $attributeName',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary(context),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 18),
+                      icon: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppColors.textSecondary(context),
+                      ),
                       onPressed: () => Navigator.pop(ctx),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -332,11 +367,34 @@ class _AttributesManagementScreenState
                 const SizedBox(height: 12),
                 TextField(
                   controller: valueController,
-                  style: const TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textPrimary(context),
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Enter value',
+                    hintStyle: TextStyle(
+                      color: AppColors.textHint(context),
+                    ),
+                    filled: true,
+                    fillColor: AppColors.surface(context),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.border(context),
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.border(context),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.primary(context),
+                      ),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -382,6 +440,7 @@ class _AttributesManagementScreenState
       context: context,
       builder: (ctx) {
         return Dialog(
+          backgroundColor: AppColors.card(context),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -395,13 +454,18 @@ class _AttributesManagementScreenState
                   children: [
                     Text(
                       'Select $attributeName',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary(context),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 18),
+                      icon: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppColors.textSecondary(context),
+                      ),
                       onPressed: () => Navigator.pop(ctx),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -411,7 +475,13 @@ class _AttributesManagementScreenState
                 const SizedBox(height: 12),
                 ...values.map((value) {
                   return ListTile(
-                    title: Text(value, style: const TextStyle(fontSize: 12)),
+                    title: Text(
+                      value,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textPrimary(context),
+                      ),
+                    ),
                     onTap: () {
                       setState(() {
                         _selectedAttributeValues[attributeName] = value;
@@ -434,6 +504,7 @@ class _AttributesManagementScreenState
       context: context,
       builder: (ctx) {
         return Dialog(
+          backgroundColor: AppColors.card(context),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -447,13 +518,18 @@ class _AttributesManagementScreenState
                   children: [
                     Text(
                       'Edit Value for $attributeName',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary(context),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 18),
+                      icon: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppColors.textSecondary(context),
+                      ),
                       onPressed: () => Navigator.pop(ctx),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -463,11 +539,34 @@ class _AttributesManagementScreenState
                 const SizedBox(height: 12),
                 TextField(
                   controller: valueController,
-                  style: const TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textPrimary(context),
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Enter value',
+                    hintStyle: TextStyle(
+                      color: AppColors.textHint(context),
+                    ),
+                    filled: true,
+                    fillColor: AppColors.surface(context),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.border(context),
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.border(context),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppColors.primary(context),
+                      ),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -519,13 +618,22 @@ class _AttributesManagementScreenState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Delete Value'),
+          backgroundColor: AppColors.card(context),
+          title: Text(
+            'Delete Value',
+            style: TextStyle(color: AppColors.textPrimary(context)),
+          ),
           content: Text(
-              'Are you sure you want to delete "$value" from "$attributeName"?'),
+            'Are you sure you want to delete "$value" from "$attributeName"?',
+            style: TextStyle(color: AppColors.textSecondary(context)),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.textSecondary(context)),
+              ),
             ),
             TextButton(
               onPressed: () {
@@ -542,9 +650,9 @@ class _AttributesManagementScreenState
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text(
+              child: Text(
                 'Delete',
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(color: AppColors.error(context)),
               ),
             ),
           ],
@@ -558,12 +666,22 @@ class _AttributesManagementScreenState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Delete Attribute'),
-          content: Text('Are you sure you want to delete "$attributeName"?'),
+          backgroundColor: AppColors.card(context),
+          title: Text(
+            'Delete Attribute',
+            style: TextStyle(color: AppColors.textPrimary(context)),
+          ),
+          content: Text(
+            'Are you sure you want to delete "$attributeName"?',
+            style: TextStyle(color: AppColors.textSecondary(context)),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.textSecondary(context)),
+              ),
             ),
             TextButton(
               onPressed: () {
@@ -573,9 +691,9 @@ class _AttributesManagementScreenState
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text(
+              child: Text(
                 'Delete',
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(color: AppColors.error(context)),
               ),
             ),
           ],
@@ -586,13 +704,14 @@ class _AttributesManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background(context),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF1A1A1A) : const Color(0xFF1F1F1F),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back, color: const Color(0xDEFFFFFF)),
           onPressed: () {
             Navigator.pop(context, {
               'attributes': _attributes,
@@ -600,10 +719,10 @@ class _AttributesManagementScreenState
             });
           },
         ),
-        title: const Text(
+        title: Text(
           'Attributes',
           style: TextStyle(
-            color: Colors.black,
+            color: const Color(0xDEFFFFFF),
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -614,7 +733,7 @@ class _AttributesManagementScreenState
               width: 28,
               height: 28,
               decoration: BoxDecoration(
-                color: const Color(0xFF25D366),
+                color: AppColors.primary(context),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -633,14 +752,14 @@ class _AttributesManagementScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (_attributes.isEmpty)
-              const Center(
+              Center(
                 child: Padding(
                   padding: EdgeInsets.all(32),
                   child: Text(
                     'No attributes added yet',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.grey,
+                      color: AppColors.textSecondary(context),
                     ),
                   ),
                 ),
@@ -655,9 +774,16 @@ class _AttributesManagementScreenState
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
+                    color: AppColors.card(context),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border(context)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.textPrimary(context).withOpacity(0.05),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
@@ -679,16 +805,16 @@ class _AttributesManagementScreenState
                             }
                           });
                         },
-                        activeColor: const Color(0xFF25D366),
+                        activeColor: AppColors.primary(context),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           e.key,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: Colors.black87,
+                            color: AppColors.textPrimary(context),
                           ),
                         ),
                       ),
@@ -702,10 +828,10 @@ class _AttributesManagementScreenState
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: AppColors.surface(context),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: Colors.grey.shade300,
+                                color: AppColors.border(context),
                               ),
                             ),
                             child: Row(
@@ -713,15 +839,15 @@ class _AttributesManagementScreenState
                                 Expanded(
                                   child: Text(
                                     selectedValue,
-                                    style: const TextStyle(fontSize: 13),
+                                    style: TextStyle(fontSize: 13, color: AppColors.textPrimary(context)),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                                 const SizedBox(width: 4),
-                                const Icon(
+                                Icon(
                                   Icons.keyboard_arrow_down,
                                   size: 16,
-                                  color: Colors.grey,
+                                  color: AppColors.textSecondary(context),
                                 ),
                               ],
                             ),
@@ -740,7 +866,7 @@ class _AttributesManagementScreenState
                           isExpanded
                               ? Icons.keyboard_arrow_up
                               : Icons.chevron_right,
-                          color: Colors.grey,
+                          color: AppColors.textSecondary(context),
                           size: 20,
                         ),
                       ),
@@ -754,7 +880,7 @@ class _AttributesManagementScreenState
                             width: 24,
                             height: 24,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF25D366),
+                              color: AppColors.primary(context),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -773,7 +899,7 @@ class _AttributesManagementScreenState
                             width: 24,
                             height: 24,
                             decoration: BoxDecoration(
-                              color: Colors.blue,
+                              color: AppColors.info(context),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -791,7 +917,7 @@ class _AttributesManagementScreenState
                             width: 24,
                             height: 24,
                             decoration: BoxDecoration(
-                              color: Colors.red,
+                              color: AppColors.error(context),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -808,31 +934,15 @@ class _AttributesManagementScreenState
               }).toList(),
             const SizedBox(height: 24),
             // Save button at bottom
-            SizedBox(
-              width: double.infinity,
-              height: 36,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context, {
-                    'attributes': _attributes,
-                    'selectedValues': _selectedAttributeValues,
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: const Text(
-                  'Save',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
+            GradientButton(
+              text: 'Save',
+              onPressed: () {
+                Navigator.pop(context, {
+                  'attributes': _attributes,
+                  'selectedValues': _selectedAttributeValues,
+                });
+              },
+              height: 48,
             ),
           ],
         ),

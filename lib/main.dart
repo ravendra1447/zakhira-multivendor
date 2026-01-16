@@ -21,6 +21,7 @@ import 'package:whatsappchat/screens/chat_home.dart' hide Contact;
 import 'package:whatsappchat/screens/phone_otp_login.dart';
 import 'package:whatsappchat/screens/verify_mpin_page.dart';
 import 'package:whatsappchat/utils/sound_utils.dart';
+import 'package:whatsappchat/theme/app_theme.dart';
 
 // ----------------- Hive Models -----------------
 @HiveType(typeId: 3)
@@ -291,80 +292,8 @@ class MyApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'Chatting App',
       themeMode: ThemeMode.system,
-      theme: ThemeData(
-        primaryColor: const Color(0xFF075E54),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF075E54),
-          primary: const Color(0xFF075E54),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF075E54),
-          foregroundColor: Colors.white,
-          iconTheme: IconThemeData(color: Colors.white),
-        ),
-        textTheme: const TextTheme(
-          displayLarge: TextStyle(fontSize: 32.0, fontWeight: FontWeight.bold),
-          displayMedium: TextStyle(fontSize: 28.0, fontWeight: FontWeight.bold),
-          displaySmall: TextStyle(fontSize: 24.0, fontWeight: FontWeight.bold),
-          headlineLarge: TextStyle(fontSize: 22.0, fontWeight: FontWeight.w600),
-          headlineMedium: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
-          headlineSmall: TextStyle(fontSize: 18.0, fontWeight: FontWeight.w600),
-          titleLarge: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600),
-          titleMedium: TextStyle(fontSize: 15.0, fontWeight: FontWeight.w500),
-          titleSmall: TextStyle(fontSize: 14.0, fontWeight: FontWeight.w500),
-          bodyLarge: TextStyle(fontSize: 16.0, fontWeight: FontWeight.normal),
-          bodyMedium: TextStyle(fontSize: 14.0, fontWeight: FontWeight.normal),
-          bodySmall: TextStyle(fontSize: 12.0, fontWeight: FontWeight.normal),
-          labelLarge: TextStyle(fontSize: 14.0, fontWeight: FontWeight.w500),
-          labelMedium: TextStyle(fontSize: 12.0, fontWeight: FontWeight.w500),
-          labelSmall: TextStyle(fontSize: 11.0, fontWeight: FontWeight.w500),
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        primaryColor: const Color(0xFF075E54),
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        colorScheme: ColorScheme.dark(
-          primary: const Color(0xFF075E54),
-          secondary: const Color(0xFF128C7E),
-          surface: const Color(0xFF1E1E1E),
-          background: const Color(0xFF121212),
-          error: Colors.red,
-          onPrimary: Colors.white,
-          onSecondary: Colors.white,
-          onSurface: Colors.white,
-          onBackground: Colors.white,
-          onError: Colors.white,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF075E54),
-          foregroundColor: Colors.white,
-          iconTheme: IconThemeData(color: Colors.white),
-          elevation: 0,
-        ),
-        cardColor: const Color(0xFF1E1E1E),
-        dividerColor: Colors.white24,
-        dialogBackgroundColor: const Color(0xFF1E1E1E),
-        textTheme: const TextTheme(
-          displayLarge: TextStyle(fontSize: 32.0, fontWeight: FontWeight.bold),
-          displayMedium: TextStyle(fontSize: 28.0, fontWeight: FontWeight.bold),
-          displaySmall: TextStyle(fontSize: 24.0, fontWeight: FontWeight.bold),
-          headlineLarge: TextStyle(fontSize: 22.0, fontWeight: FontWeight.w600),
-          headlineMedium: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
-          headlineSmall: TextStyle(fontSize: 18.0, fontWeight: FontWeight.w600),
-          titleLarge: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600),
-          titleMedium: TextStyle(fontSize: 15.0, fontWeight: FontWeight.w500),
-          titleSmall: TextStyle(fontSize: 14.0, fontWeight: FontWeight.w500),
-          bodyLarge: TextStyle(fontSize: 16.0, fontWeight: FontWeight.normal),
-          bodyMedium: TextStyle(fontSize: 14.0, fontWeight: FontWeight.normal),
-          bodySmall: TextStyle(fontSize: 12.0, fontWeight: FontWeight.normal),
-          labelLarge: TextStyle(fontSize: 14.0, fontWeight: FontWeight.w500),
-          labelMedium: TextStyle(fontSize: 12.0, fontWeight: FontWeight.w500),
-          labelSmall: TextStyle(fontSize: 11.0, fontWeight: FontWeight.w500),
-        ),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.lightTheme(),
+      darkTheme: AppTheme.darkTheme(),
       home: const SplashGate(),
       //home: const ChatListScreen(),
     );

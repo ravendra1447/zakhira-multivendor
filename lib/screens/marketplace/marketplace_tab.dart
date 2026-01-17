@@ -7,6 +7,7 @@ import '../../services/product_database_service.dart';
 import '../../services/product_service.dart';
 import '../product/detail/product_detail_screen.dart';
 import '../product/category_selection_screen.dart';
+import 'package:whatsappchat/theme/app_theme.dart';
 import 'package:whatsappchat/theme/app_colors.dart';
 import 'package:whatsappchat/theme/app_typography.dart';
 import 'package:whatsappchat/theme/app_spacing.dart';

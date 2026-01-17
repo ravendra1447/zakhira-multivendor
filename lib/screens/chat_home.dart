@@ -24,7 +24,6 @@ import 'new_chat_page.dart';
 import '../config.dart';
 import 'package:whatsappchat/screens/set_mpin_page.dart';
 import 'package:whatsappchat/screens/user_profile_page.dart';
-import 'package:whatsappchat/services/local_auth_service.dart';
 import '../services/api_service.dart';
 import '../models/profile_setting.dart';
 import 'camera_interface_screen.dart';
@@ -32,7 +31,7 @@ import '../services/product_database_service.dart';
 import '../models/product.dart';
 import 'product/detail/product_detail_screen.dart';
 import 'marketplace/marketplace_tab.dart';
-import 'dart:io';
+import 'insta_pages_screen.dart';
 
 class ChatHomePage extends StatefulWidget {
   final int? initialTabIndex;
@@ -50,15 +49,14 @@ class _ChatHomePageState extends State<ChatHomePage> {
   bool _permissionsAsked = false;
 
   final GlobalKey<_ProfileTabState> _profileTabKey = GlobalKey<_ProfileTabState>();
-
   final GlobalKey<MarketplaceTabState> _marketplaceTabKey = GlobalKey<MarketplaceTabState>();
-  
+
   late final List<Widget> _screens = [
     ChatsTab(userStatus: _userStatus),
     MarketplaceTab(key: _marketplaceTabKey),
     ProfileTab(key: _profileTabKey),
   ];
-  
+
   // Method to refresh marketplace
   void refreshMarketplace() {
     if (_marketplaceTabKey.currentState != null) {
@@ -155,7 +153,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
-      
+
       // Refresh marketplace when tab is selected
       if (index == 1 && _marketplaceTabKey.currentState != null) {
         _marketplaceTabKey.currentState!.refresh();
@@ -227,7 +225,9 @@ class _ChatHomePageState extends State<ChatHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       // ✅ Hide AppBar when Profile or Marketplace tab is selected
-      appBar: (_selectedIndex == 2 || _selectedIndex == 1) ? null : AppBar(
+      appBar: (_selectedIndex == 2 || _selectedIndex == 1)
+          ? null
+          : AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: const Color(0xFF075E54),
         title: const Text(
@@ -992,7 +992,6 @@ class Contact {
   });
 }
 
-
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
 
@@ -1221,10 +1220,10 @@ class _ProfileTabState extends State<ProfileTab> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF128C7E), // Dark blue background like image
+      backgroundColor: const Color(0xFF128C7E),
       body: Container(
         decoration: const BoxDecoration(
-          color: Color(0xFF128C7E), // Dark blue background (attractive color)
+          color: Color(0xFF128C7E),
         ),
         child: SafeArea(
           child: Column(
@@ -1339,6 +1338,46 @@ class _ProfileTabState extends State<ProfileTab> {
                     ],
                   ),
                 ),
+              // Create Instagram Page button below location (LEFT ALIGNED)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 64.0, top: 12.0, bottom: 8.0),
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const InstaPagesScreen(),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF128C7E),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 2,
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_circle_outline, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Create Instagram Page',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               // White content area below (marketplace)
               Expanded(
@@ -1421,8 +1460,8 @@ class _ProfileTabState extends State<ProfileTab> {
                         child: _selectedTab == 'Grid'
                             ? _buildProductsGrid()
                             : _selectedTab == 'Reels'
-                                ? const Center(child: Text('Reels coming soon'))
-                                : const Center(child: Text('Profile content')),
+                            ? const Center(child: Text('Reels coming soon'))
+                            : const Center(child: Text('Profile content')),
                       ),
                     ],
                   ),
@@ -1450,7 +1489,7 @@ class _ProfileTabState extends State<ProfileTab> {
     }
 
     // Collect only the last image from each color variation
-    List<Map<String, dynamic>> gridItems = []; // Each item has: product, variation, imageUrl, imageIndex
+    List<Map<String, dynamic>> gridItems = [];
     for (var product in _publishedProducts) {
       if (product is Product) {
         // Get last image from each variation
@@ -1460,7 +1499,7 @@ class _ProfileTabState extends State<ProfileTab> {
             List<String> allImages = [];
             if (variation['allImages'] != null) {
               dynamic allImagesData = variation['allImages'];
-              
+
               // Handle if allImages is a JSON string
               if (allImagesData is String) {
                 try {
@@ -1472,7 +1511,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   print('Error decoding allImages JSON in profile grid: $e');
                 }
               }
-              
+
               // Process as List
               if (allImagesData is List) {
                 for (var img in allImagesData) {
@@ -1484,7 +1523,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 }
               }
             }
-            
+
             // Fallback to single image if allImages not available
             if (allImages.isEmpty && variation['image'] != null) {
               final img = variation['image'];
@@ -1494,13 +1533,13 @@ class _ProfileTabState extends State<ProfileTab> {
                 allImages.add(img.toString());
               }
             }
-            
+
             // Only add if we have images
             if (allImages.isNotEmpty) {
               // Get the last image (most recent)
               final lastImage = allImages.last;
               final imageIndex = allImages.length - 1;
-              
+
               gridItems.add({
                 'product': product,
                 'variation': variation,
@@ -1538,10 +1577,10 @@ class _ProfileTabState extends State<ProfileTab> {
           final variation = item['variation'] as Map<String, dynamic>;
           final imageUrl = item['imageUrl'] as String;
           final imageIndex = item['imageIndex'] as int;
-          
+
           final allImages = item['allImages'] as List<String>;
           final totalImages = allImages.length;
-          
+
           return GestureDetector(
             onTap: () {
               // Debug: Print variation data before navigation
@@ -1557,7 +1596,7 @@ class _ProfileTabState extends State<ProfileTab> {
               }
               print('  Total images in grid: $totalImages');
               print('  Image index: $imageIndex');
-              
+
               // Navigate to product detail page
               Navigator.push(
                 context,
@@ -1580,38 +1619,38 @@ class _ProfileTabState extends State<ProfileTab> {
                       child: _buildImageWidget(imageUrl),
                     ),
                   ),
-                // Image count badge on bottom right
-                if (totalImages > 1)
-                  Positioned(
-                    bottom: 4,
-                    right: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.75),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.photo_library,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '$totalImages',
-                            style: const TextStyle(
+                  // Image count badge on bottom right
+                  if (totalImages > 1)
+                    Positioned(
+                      bottom: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.75),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.photo_library,
                               color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
+                              size: 14,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            Text(
+                              '$totalImages',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1628,31 +1667,31 @@ class _ProfileTabState extends State<ProfileTab> {
         child: Image.network(
           imageUrl,
           fit: BoxFit.cover,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Container(
-            color: Colors.grey.shade200,
-            child: Center(
-              child: CircularProgressIndicator(
-                value: loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
-                    : null,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              color: Colors.grey.shade200,
+              child: Center(
+                child: CircularProgressIndicator(
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                      : null,
+                ),
               ),
-            ),
-          );
-        },
-        errorBuilder: (context, error, stackTrace) {
-          print("Error loading network image: $imageUrl - $error");
-          return Container(
-            color: Colors.grey.shade300,
-            child: const Icon(Icons.broken_image, color: Colors.grey),
-          );
-        },
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            print("Error loading network image: $imageUrl - $error");
+            return Container(
+              color: Colors.grey.shade300,
+              child: const Icon(Icons.broken_image, color: Colors.grey),
+            );
+          },
         ),
       );
     }
-    
+
     // Try as local file path
     try {
       final file = File(imageUrl);
@@ -1661,20 +1700,20 @@ class _ProfileTabState extends State<ProfileTab> {
           child: Image.file(
             file,
             fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            print("Error loading file image: $imageUrl - $error");
-            return Container(
-              color: Colors.grey.shade300,
-              child: const Icon(Icons.broken_image, color: Colors.grey),
-            );
-          },
+            errorBuilder: (context, error, stackTrace) {
+              print("Error loading file image: $imageUrl - $error");
+              return Container(
+                color: Colors.grey.shade300,
+                child: const Icon(Icons.broken_image, color: Colors.grey),
+              );
+            },
           ),
         );
       }
     } catch (e) {
       print("Error checking file: $imageUrl - $e");
     }
-    
+
     // Fallback
     return Container(
       color: Colors.grey.shade300,
@@ -1682,4 +1721,3 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 }
-

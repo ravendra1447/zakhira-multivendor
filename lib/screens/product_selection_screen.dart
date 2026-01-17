@@ -6,11 +6,6 @@ import 'package:path/path.dart' as path;
 import 'package:whatsappchat/screens/product/add_product_basic_info_screen.dart';
 import 'dart:ui' as ui;
 import 'camera_interface_screen.dart';
-import 'package:whatsappchat/theme/app_colors.dart';
-import 'package:whatsappchat/theme/app_typography.dart';
-import 'package:whatsappchat/theme/app_spacing.dart';
-import 'package:whatsappchat/widgets/gradient_button.dart';
-import 'package:whatsappchat/widgets/duplicate_warning.dart';
 
 // Orientation-aware image widget that auto-adjusts based on image dimensions
 class OrientationAwareImage extends StatefulWidget {
@@ -117,8 +112,6 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   String _selectedTab = 'Color'; // Default selected tab
   bool _isAddButtonDisabled = false; // Track if Add button is disabled
   String _selectedVariantType = 'Color'; // Selected variant type: Color or Size
-  bool _showDuplicateWarning = false; // Show duplicate warning
-  String _duplicateColorName = ''; // Store duplicate color name
 
   final List<String> _colors = [
     'Red',
@@ -600,7 +593,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                   if (isAddSlide) {
                     return Center(
                       child: GestureDetector(
-                        onTap: () => _openCameraToAddImages(retainSelection: true),
+                        onTap: _isAddButtonDisabled ? null : () => _openCameraToAddImages(retainSelection: true),
                         child: Container(
                           width: imageWidth,
                           height: imageHeight,
@@ -613,7 +606,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             child: Icon(
                               Icons.add,
                               size: 28,
-                              color: const Color(0xFF25D366),
+                              color: _isAddButtonDisabled 
+                                  ? Colors.grey.shade400 
+                                  : const Color(0xFF25D366),
                             ),
                           ),
                         ),
@@ -872,22 +867,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  AppSpacing.verticalSpaceXS,
-
-                  // Duplicate Warning - Show when duplicate color is detected
-                  if (_showDuplicateWarning)
-                    Padding(
-                      padding: AppSpacing.paddingVerticalSM,
-                      child: DuplicateWarning(
-                        message: '⚠️ "$_duplicateColorName" already exists! Duplicates not accepted.',
-                        isDismissible: true,
-                        onDismiss: () {
-                          setState(() {
-                            _showDuplicateWarning = false;
-                          });
-                        },
-                      ),
-                    ),
+                  const SizedBox(height: 4),
 
                   // Variant Type section - Combined
                   Container(
@@ -1059,25 +1039,28 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                     FocusScope.of(context).unfocus();
                                     final colorName = _colorController.text.trim();
 
-                                    // DUPLICATE CHECK - Show warning widget instead of SnackBar
+                                    // DUPLICATE CHECK - YEH CODE ADD KIYA HAI
                                     final existingColor = _colorImages.keys.firstWhere(
                                           (key) => key.toLowerCase() == colorName.toLowerCase(),
                                       orElse: () => '',
                                     );
 
                                     if (existingColor.isNotEmpty) {
-                                      setState(() {
-                                        _showDuplicateWarning = true;
-                                        _duplicateColorName = colorName;
-                                      });
-                                      // Auto-hide after 3 seconds
-                                      Future.delayed(const Duration(seconds: 3), () {
-                                        if (mounted) {
-                                          setState(() {
-                                            _showDuplicateWarning = false;
-                                          });
-                                        }
-                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '$colorName already exists',
+                                            style: TextStyle(
+                                              color: Theme.of(context).brightness == Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
+                                          backgroundColor: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.grey.shade800
+                                              : Colors.white,
+                                        ),
+                                      );
                                       return;
                                     }
                                     // DUPLICATE CHECK END
@@ -1463,14 +1446,77 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                     ),
                   ),
 
-                  // Next button - centered with modern gradient button
-                  Padding(
-                    padding: AppSpacing.paddingAll(20),
-                    child: GradientButton(
-                      text: 'Save and Continue (${_allVariantImages.length})',
-                      onPressed: _navigateToVariantImages,
-                      icon: Icons.arrow_forward,
-                      height: 56,
+                  // Next button - centered
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    child: Center(
+                      child: Container(
+                        width: double.infinity,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF25D366), Color(0xFF128C7E)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF25D366).withOpacity(0.4),
+                              blurRadius: 15,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _navigateToVariantImages,
+                            borderRadius: BorderRadius.circular(16),
+                            child: Center(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    'Save and Continue',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.3),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      '${_allVariantImages.length}',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Icon(
+                                    Icons.arrow_forward,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],

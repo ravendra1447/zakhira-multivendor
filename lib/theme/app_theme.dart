@@ -10,6 +10,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
+      fontFamily: 'Roboto',
       primaryColor: const Color(0xFF25D366),
       scaffoldBackgroundColor: const Color(0xFFF5F5F5),
       colorScheme: ColorScheme.light(
@@ -36,6 +37,23 @@ class AppTheme {
         backgroundColor: Color(0xFF075E54),
         foregroundColor: Colors.white,
         elevation: 0,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        displayMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        displaySmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        titleLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        titleMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        titleSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        bodyLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        bodyMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        bodySmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        labelLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        labelMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        labelSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -72,6 +90,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
+      fontFamily: 'Roboto',
       primaryColor: const Color(0xFF25D366),
       scaffoldBackgroundColor: const Color(0xFF121212),
       colorScheme: ColorScheme.dark(
@@ -98,6 +117,23 @@ class AppTheme {
         backgroundColor: Color(0xFF075E54),
         foregroundColor: Colors.white,
         elevation: 0,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        displayMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        displaySmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        headlineSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        titleLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        titleMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        titleSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        bodyLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        bodyMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        bodySmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w400),
+        labelLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        labelMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
+        labelSmall: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w500),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,

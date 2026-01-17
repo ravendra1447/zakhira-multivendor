@@ -6,11 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../models/product.dart';
-import 'package:whatsappchat/theme/app_colors.dart';
-import 'package:whatsappchat/theme/app_typography.dart';
-import 'package:whatsappchat/theme/app_spacing.dart';
-import 'package:whatsappchat/widgets/modern_card.dart';
-import 'package:whatsappchat/widgets/gradient_button.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
@@ -36,6 +31,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   String _selectedTab = 'Overview'; // Overview, Details, Recommended
   String _mediaTab = 'Photos'; // Photos, Video, Reviews, Variations
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _colorRowScrollController = ScrollController(); // For color row scrolling
   double _imageHeight = 0.4; // Initial image height as fraction of screen
   final Map<int, double> _imageAspectRatios = {}; // Cache aspect ratios for images
   final Map<String, int> _sizeQuantities = {}; // For variations sheet size quantities
@@ -43,12 +39,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   final Map<String, Map<String, int>> _variationSizeQuantities = {}; // Track sizes per variation: {variationName: {size: qty}}
   double _subtotal = 0.0;
   bool _isColorList = false;
-  bool _hasOpenedVariationsFromSlide = false;
-  // Track if variations was opened from slide
-  List<int> _viewedImageIndices = [];
-  //Set<int> _viewedImageIndices = {}; // Track which images have been viewed
-  Timer? _swipeTimer;
-  bool _showVariationsHint = false;// Timer to detect swipe beyond last image
+  bool _hasOpenedVariationsFromSlide = false; // Track if variations was opened from slide
+  Set<int> _viewedImageIndices = {}; // Track which images have been viewed
+  Timer? _swipeTimer; // Timer to detect swipe beyond last image
 
   @override
   void initState() {
@@ -85,6 +78,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   void dispose() {
     _pageController.dispose();
     _scrollController.dispose();
+    _colorRowScrollController.dispose();
     _swipeTimer?.cancel();
     super.dispose();
   }
@@ -218,7 +212,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
           return Container(
-            color: AppColors.surface(context),
+            color: Colors.grey.shade200,
             child: Center(
               child: CircularProgressIndicator(
                 value: loadingProgress.expectedTotalBytes != null
@@ -231,8 +225,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         },
         errorBuilder: (context, error, stackTrace) {
           return Container(
-            color: AppColors.surface(context),
-            child: Icon(Icons.broken_image, color: AppColors.textSecondary(context), size: 20),
+            color: Colors.grey.shade300,
+            child: const Icon(Icons.broken_image, color: Colors.grey, size: 20),
           );
         },
       );
@@ -245,8 +239,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             return Container(
-              color: AppColors.surface(context),
-              child: Icon(Icons.broken_image, color: AppColors.textSecondary(context), size: 20),
+              color: Colors.grey.shade300,
+              child: const Icon(Icons.broken_image, color: Colors.grey, size: 20),
             );
           },
         );
@@ -255,8 +249,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       print("Error checking file: $imagePath - $e");
     }
     return Container(
-      color: AppColors.surface(context),
-      child: Icon(Icons.broken_image, color: AppColors.textSecondary(context), size: 20),
+      color: Colors.grey.shade300,
+      child: const Icon(Icons.broken_image, color: Colors.grey, size: 20),
     );
   }
 
@@ -281,7 +275,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           },
           errorBuilder: (context, error, stackTrace) {
             return Container(
-              child: Icon(Icons.broken_image, color: AppColors.textSecondary(context), size: 40),
+              child: const Icon(Icons.broken_image, color: Colors.grey, size: 40),
             );
           },
         );
@@ -295,14 +289,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             fit: fit,
             errorBuilder: (context, error, stackTrace) {
               return Container(
-                child: Icon(Icons.broken_image, color: AppColors.textSecondary(context), size: 40),
+                child: const Icon(Icons.broken_image, color: Colors.grey, size: 40),
               );
             },
           );
         }
       } catch (e) {}
 
-      return Icon(Icons.broken_image, color: AppColors.textSecondary(context));
+      return const Icon(Icons.broken_image, color: Colors.grey);
     }
 
     Widget imageContent = Stack(
@@ -313,7 +307,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           Image.network(
             imagePath,
             fit: BoxFit.cover,
-            errorBuilder: (c, e, s) => Container(color: AppColors.surface(context)),
+            errorBuilder: (c, e, s) => Container(color: Colors.white),
           )
         else
           Builder(
@@ -324,11 +318,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   return Image.file(
                     file,
                     fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => Container(color: AppColors.surface(context)),
+                    errorBuilder: (c, e, s) => Container(color: Colors.white),
                   );
                 }
               } catch (e) {}
-              return Container(color: AppColors.surface(context));
+              return Container(color: Colors.white);
             },
           ),
 
@@ -337,7 +331,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
-              color: AppColors.surface(context).withOpacity(0.6),
+              color: Colors.white.withOpacity(0.6),
             ),
           ),
         ),
@@ -443,23 +437,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
 
     return Scaffold(
-      backgroundColor: AppColors.background(context),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: AppColors.surface(context),
+        backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppColors.textPrimary(context)),
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
           children: [
-            Icon(Icons.search, color: AppColors.textPrimary(context)),
+            const Icon(Icons.search, color: Colors.black),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 widget.product.name,
-                style: AppTypography.bodyLarge(context).copyWith(
-                  fontWeight: AppTypography.medium,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -470,7 +466,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           IconButton(
             icon: Icon(
               _isGridView ? Icons.view_carousel : Icons.grid_view,
-              color: AppColors.textPrimary(context),
+              color: Colors.black,
             ),
             onPressed: () {
               setState(() {
@@ -479,11 +475,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             },
           ),
           IconButton(
-            icon: Icon(Icons.shopping_cart_outlined, color: AppColors.textPrimary(context)),
+            icon: const Icon(Icons.shopping_cart_outlined, color: Colors.black),
             onPressed: () {},
           ),
           IconButton(
-            icon: Icon(Icons.more_vert, color: AppColors.textPrimary(context)),
+            icon: const Icon(Icons.more_vert, color: Colors.black),
             onPressed: () {},
           ),
         ],
@@ -532,7 +528,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary(context),
+                                color: Colors.grey.shade800,
                                 height: 1.2,
                               ),
                               maxLines: 2,
@@ -542,7 +538,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           const SizedBox(width: 8),
                           Icon(
                             Icons.keyboard_arrow_right,
-                            color: AppColors.textSecondary(context),
+                            color: Colors.grey.shade400,
                             size: 24,
                           ),
                         ],
@@ -566,6 +562,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           ),
                           const SizedBox(height: 8),
                           SingleChildScrollView(
+                            controller: _colorRowScrollController,
                             scrollDirection: Axis.horizontal,
                             child: Row(
                               children: widget.product.variations.asMap().entries.map((entry) {
@@ -612,10 +609,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                             height: 60,
                                             decoration: BoxDecoration(
                                               borderRadius: BorderRadius.circular(6),
-                                              color: AppColors.card(context),
+                                              color: Colors.white,
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: AppColors.textPrimary(context).withOpacity(0.05),
+                                                  color: Colors.black.withOpacity(0.05),
                                                   blurRadius: 4,
                                                   offset: const Offset(0, 2),
                                                 ),
@@ -634,8 +631,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                         : '?',
                                                     style: TextStyle(
                                                       color: vColor.computeLuminance() > 0.5
-                                                          ? const Color(0xDE000000)
-                                                          : const Color(0xDEFFFFFF),
+                                                          ? Colors.black87
+                                                          : Colors.white,
                                                       fontWeight: FontWeight.bold,
                                                     ),
                                                   ),
@@ -650,7 +647,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                            color: isSelected ? AppColors.textPrimary(context) : AppColors.textSecondary(context),
+                                            color: isSelected ? Colors.black87 : Colors.grey.shade600,
                                           ),
                                         ),
                                       ],
@@ -675,28 +672,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         children: [
                           Row(
                             children: [
-                              Text(
+                              const Text(
                                 'Simple Stock',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary(context),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: AppColors.success(context).withOpacity(0.2),
+                                  color: Colors.green.shade50,
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: AppColors.success(context).withOpacity(0.5)),
+                                  border: Border.all(color: Colors.green.shade200),
                                 ),
                                 child: Text(
                                   'Available: ${widget.product.availableQty}',
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
-                                    color: AppColors.success(context),
+                                    color: Colors.green.shade700,
                                   ),
                                 ),
                               ),
@@ -715,12 +711,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'Pricing',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary(context),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -730,31 +725,36 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             final moqStr = moq != null ? moq.toString() : '';
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
-                              child: Column(
+                              child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    '₹$price',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.textPrimary(context),
-                                    ),
-                                  ),
-                                  if (moqStr.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Min. order: $moqStr pieces',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: AppColors.textSecondary(context),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '₹$price',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                      if (moqStr.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Min. order: $moqStr pieces',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                 ],
                               ),
                             );
-                          }),
+                          }).toList(),
                         ],
                       ),
                     ),
@@ -797,7 +797,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   ),
                                   decoration: BoxDecoration(
                                     border: Border.all(
-                                      color: AppColors.border(context),
+                                      color: Colors.grey.shade300,
                                       width: 1,
                                     ),
                                     borderRadius: BorderRadius.circular(4),
@@ -819,7 +819,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   '+${widget.product.sizes.length - 9}',
                                   style: TextStyle(
                                     fontSize: 14,
-                                    color: AppColors.textSecondary(context),
+                                    color: Colors.grey.shade600,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -834,24 +834,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   // Product Description
                   if (widget.product.description.isNotEmpty) ...[
                     Padding(
-                      padding: AppSpacing.paddingHorizontalLG.add(AppSpacing.paddingVerticalMD),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Text(
                         widget.product.description,
-                        style: AppTypography.bodyMedium(context),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade700,
+                        ),
                       ),
                     ),
                   ],
 
                   // Customization
                   Padding(
-                    padding: AppSpacing.paddingHorizontalLG.add(AppSpacing.paddingVerticalSM),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
+                        const Text(
                           'Customization: Logo/graphic design, Packaging...',
-                          style: AppTypography.bodyMedium(context).copyWith(
-                            color: AppColors.textPrimary(context),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black87,
                           ),
                         ),
                         const Icon(Icons.arrow_forward_ios, size: 16),
@@ -866,7 +870,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: AppColors.divider(context),
+                          color: Colors.grey.shade300,
                           width: 1,
                         ),
                       ),
@@ -897,10 +901,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: AppColors.surface(context),
+              color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.textPrimary(context).withOpacity(0.1),
+                  color: Colors.black.withOpacity(0.1),
                   blurRadius: 4,
                   offset: const Offset(0, -2),
                 ),
@@ -915,15 +919,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       child: OutlinedButton(
                         onPressed: () {},
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: AppColors.textPrimary(context), width: 1),
+                          side: const BorderSide(color: Colors.black, width: 1),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(6),
                           ),
                         ),
-                        child: Text(
+                        child: const Text(
                           'Chat now',
                           style: TextStyle(
-                            color: AppColors.textPrimary(context),
+                            color: Colors.black,
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
                           ),
@@ -976,7 +980,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
-              color: isSelected ? AppColors.textPrimary(context) : Colors.transparent,
+              color: isSelected ? Colors.black : Colors.transparent,
               width: 2,
             ),
           ),
@@ -987,7 +991,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-            color: isSelected ? AppColors.textPrimary(context) : AppColors.textSecondary(context),
+            color: isSelected ? Colors.black : Colors.grey.shade600,
           ),
         ),
       ),
@@ -1038,7 +1042,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 decoration: BoxDecoration(
                   border: Border(
                     bottom: BorderSide(
-                      color: AppColors.textPrimary(context),
+                      color: Colors.black,
                       width: 2,
                     ),
                   ),
@@ -1056,7 +1060,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 'Store reviews (0)',
                 style: TextStyle(
                   fontSize: 14,
-                  color: AppColors.textSecondary(context),
+                  color: Colors.grey.shade600,
                 ),
               ),
             ],
@@ -1084,11 +1088,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ],
           ),
           const SizedBox(height: 24),
-          Text(
+          const Text(
             'No reviews yet',
             style: TextStyle(
               fontSize: 14,
-              color: AppColors.textSecondary(context),
+              color: Colors.grey,
             ),
           ),
         ],
@@ -1115,7 +1119,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               widget.product.description,
               style: TextStyle(
                 fontSize: 14,
-                color: AppColors.textSecondary(context),
+                color: Colors.grey.shade700,
               ),
             ),
             const SizedBox(height: 16),
@@ -1147,7 +1151,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         entry.value.join(', '),
                         style: TextStyle(
                           fontSize: 14,
-                          color: AppColors.textSecondary(context),
+                          color: Colors.grey.shade700,
                         ),
                       ),
                     ),
@@ -1162,14 +1166,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Widget _buildRecommendedTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
+    return const Padding(
+      padding: EdgeInsets.all(16),
       child: Center(
         child: Text(
           'Recommended products coming soon',
           style: TextStyle(
             fontSize: 14,
-            color: AppColors.textSecondary(context),
+            color: Colors.grey,
           ),
         ),
       ),
@@ -1181,7 +1185,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       margin: const EdgeInsets.all(8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.textPrimary(context).withOpacity(0.6),
+        color: Colors.black.withOpacity(0.6),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -1198,13 +1202,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: _mediaTab == 'Photos' ? AppColors.surface(context) : Colors.transparent,
+                color: _mediaTab == 'Photos' ? Colors.white : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
                 'Photos ${_currentImageIndex + 1}/$totalImages',
                 style: TextStyle(
-                  color: _mediaTab == 'Photos' ? AppColors.textPrimary(context) : const Color(0xDEFFFFFF),
+                  color: _mediaTab == 'Photos' ? Colors.black : Colors.white,
                   fontSize: 12,
                   fontWeight: _mediaTab == 'Photos' ? FontWeight.w600 : FontWeight.normal,
                 ),
@@ -1218,14 +1222,29 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               setState(() {
                 _mediaTab = 'Variations';
               });
+              // Scroll color row to show selected color
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final selectedIndex = widget.product.variations.indexWhere((v) =>
+                  (v['name']?.toString() ?? '') == _currentVariation['name']?.toString()
+                );
+                if (selectedIndex >= 0 && _colorRowScrollController.hasClients) {
+                  // Calculate scroll position: each color item is about 84px wide (60 + 12 margin + 12 padding)
+                  final scrollPosition = selectedIndex * 84.0;
+                  _colorRowScrollController.animateTo(
+                    scrollPosition.clamp(0.0, _colorRowScrollController.position.maxScrollExtent),
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
               _openVariationsSheet();
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: Text(
                 'Variations',
-                style: const TextStyle(
-                  color: Color(0xDEFFFFFF),
+                style: TextStyle(
+                  color: Colors.white,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1237,122 +1256,77 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  // Change this line in your class variables
-  // Changed from Set to List
-
   Widget _buildPageView(List<String> images) {
-    return NotificationListener<ScrollEndNotification>(
-      onNotification: (ScrollEndNotification notification) {
-        final metrics = notification.metrics;
-
-        // Check if we're at the end and user tried to go beyond
-        if (metrics.pixels >= metrics.maxScrollExtent - 10 &&
-            _currentImageIndex == images.length - 1 &&
-            _mediaTab != 'Variations') {
-
-          print('✅ END REACHED: Opening Variations sheet');
-          setState(() {
-            _mediaTab = 'Variations';
-            _showVariationsHint = true;
-          });
-
-          // Open variations sheet after delay
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _openVariationsSheet();
-              // Reset hint after sheet opens
-              Future.delayed(const Duration(seconds: 2), () {
+    return GestureDetector(
+      onPanUpdate: (details) {
+        // Detect left swipe (next image direction)
+        if (details.delta.dx < -5) { // Swiping left
+          _swipeTimer?.cancel();
+          _swipeTimer = Timer(const Duration(milliseconds: 100), () {
+            // This timer fires after swipe gesture ends
+            if (_currentImageIndex == images.length - 1 && 
+                _viewedImageIndices.length == images.length && 
+                _mediaTab != 'Variations') {
+              print('DEBUG: All images viewed and user tried to swipe beyond last. Opening Variations.');
+              setState(() {
+                _mediaTab = 'Variations';
+              });
+              Future.delayed(const Duration(milliseconds: 300), () {
                 if (mounted) {
-                  setState(() {
-                    _showVariationsHint = false;
-                  });
+                  _openVariationsSheet();
                 }
               });
             }
           });
         }
-        return false;
       },
-      child: Stack(
-        children: [
-          PageView.builder(
-            controller: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentImageIndex = index;
-
-                // Add to viewed images
-                if (!_viewedImageIndices.contains(index)) {
-                  _viewedImageIndices.add(index);
-                }
-
-                if (index < images.length) {
-                  _setImageHeightFor(images[index], index);
-                }
-              });
-            },
-            itemCount: images.length,
-            itemBuilder: (context, index) {
-              return Container(
-                color: Colors.white,
-                width: double.infinity,
-                height: double.infinity,
-                child: Center(
-                  child: _buildImageWidget(images[index], isClickable: true),
-                ),
-              );
-            },
-          ),
-
-          // Visual hint when on last image
-          if (_currentImageIndex == images.length - 1 && images.length > 1)
-            Positioned(
-              bottom: 100,
-              right: 20,
-              child: GestureDetector(
-                onTap: () {
+      onPanEnd: (details) {
+        _swipeTimer?.cancel();
+      },
+      child: PageView.builder(
+        controller: _pageController,
+        onPageChanged: (index) {
+          setState(() {
+            final wasOnLastImage = _currentImageIndex == images.length - 1;
+            _currentImageIndex = index;
+            // Track this image as viewed
+            _viewedImageIndices.add(index);
+            print('DEBUG: Viewed image index $index. Current viewed images: ${_viewedImageIndices.length}/${images.length}');
+            
+            // If user swiped to a new image beyond the last one (when images.length is 2 and now 3)
+            // or if they're on the last image and images just became 3 or more
+            if (images.length >= 3 && index == images.length - 1 && wasOnLastImage && _mediaTab != 'Variations') {
+              // Auto-slide to Variations tab after a brief delay
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted && _mediaTab != 'Variations') {
                   setState(() {
                     _mediaTab = 'Variations';
                   });
                   Future.delayed(const Duration(milliseconds: 300), () {
-                    _openVariationsSheet();
+                    if (mounted) {
+                      _openVariationsSheet();
+                    }
                   });
-                },
-                child: AnimatedOpacity(
-                  opacity: _showVariationsHint ? 1.0 : 0.7,
-                  duration: Duration(milliseconds: 500),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.textPrimary(context).withOpacity(0.8),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.textPrimary(context).withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.touch_app, color: Color(0xDEFFFFFF), size: 16),
-                        SizedBox(width: 8),
-                        Text(
-                          'Swipe for Variations →',
-                          style: TextStyle(
-                            color: Color(0xDEFFFFFF),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+                }
+              });
+            }
+            
+            if (index < images.length) {
+              _setImageHeightFor(images[index], index);
+            }
+          });
+        },
+        itemCount: images.length,
+        itemBuilder: (context, index) {
+          return Container(
+            color: Colors.white,
+            width: double.infinity,
+            height: double.infinity,
+            child: Center(
+              child: _buildImageWidget(images[index], isClickable: true),
             ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -1381,8 +1355,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: _currentImageIndex == index
-                    ? AppColors.primary(context)
-                    : AppColors.border(context),
+                    ? Colors.blue
+                    : Colors.grey.shade300,
                 width: _currentImageIndex == index ? 2 : 1,
               ),
             ),
@@ -1398,13 +1372,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   // Full-screen variations sheet similar to reference
   void _openVariationsSheet() {
-    // LOCAL variable to track current variation inside modal
-    late String currentVarNameInModal = _currentVariation['name']?.toString() ?? '';
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.card(context),
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -1412,6 +1383,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         final priceSlabs = widget.product.priceSlabs;
         final sizes = widget.product.sizes;
         final variations = widget.product.variations;
+        final currentVarName = _currentVariation['name']?.toString() ?? '';
 
         // Initialize variation size quantities if empty for ALL variations
         for (var variation in variations) {
@@ -1423,10 +1395,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             }
           }
         }
+        print('DEBUG: Opening variations sheet. All quantities: $_variationSizeQuantities');
 
-        // Get current variation's size quantities - use LOCAL modal variable
+        // Get current variation's size quantities - use currently selected variation
         Map<String, int> getCurrentSizeQuantities() {
-          final selectedVarName = currentVarNameInModal;
+          final selectedVarName = _currentVariation['name']?.toString() ?? '';
           if (!_variationSizeQuantities.containsKey(selectedVarName)) {
             _variationSizeQuantities[selectedVarName] = {};
             for (final s in sizes) {
@@ -1444,8 +1417,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get available stock for a color-size combination
         int getAvailableStock(String colorName, String size) {
+          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999;
+            return 999999; // Return a very large number to indicate unlimited
           }
           if (widget.product.stockMode != 'color_size' || widget.product.stockByColorSize == null) {
             return 0;
@@ -1457,8 +1431,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get remaining available stock after subtracting selected quantities
         int getRemainingStock(String colorName, String size) {
+          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999;
+            return 999999; // Return a very large number to indicate unlimited
           }
           final available = getAvailableStock(colorName, size);
           final selected = _variationSizeQuantities[colorName]?[size] ?? 0;
@@ -1467,6 +1442,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Check if a color-size combination is out of stock
         bool isOutOfStock(String colorName, String size) {
+          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
@@ -1485,8 +1461,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get remaining simple stock
         int getRemainingSimpleStock() {
+          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999;
+            return 999999; // Return a very large number to indicate unlimited
           }
           if (widget.product.stockMode != 'simple') return 0;
           final totalAvailable = int.tryParse(widget.product.availableQty) ?? 0;
@@ -1496,6 +1473,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Check if simple stock is out
         bool isSimpleStockOut() {
+          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
@@ -1509,6 +1487,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             return {'price': 0.0, 'moq': 0};
           }
 
+          // Sort price slabs by MOQ (ascending)
           final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs);
           sortedSlabs.sort((a, b) {
             final moqA = (a['moq'] as num?)?.toInt() ?? 0;
@@ -1516,6 +1495,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             return moqA.compareTo(moqB);
           });
 
+          // Find the appropriate price slab based on quantity
           Map<String, dynamic>? selectedSlab;
           for (var slab in sortedSlabs.reversed) {
             final moq = (slab['moq'] as num?)?.toInt() ?? 0;
@@ -1525,6 +1505,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             }
           }
 
+          // If no slab matches, use the first one
           selectedSlab ??= sortedSlabs.first;
 
           return {
@@ -1533,40 +1514,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           };
         }
 
-        // Calculate subtotal for current variation IN MODAL
-        double calcSubtotalForModal() {
-          final currentSizes = getCurrentSizeQuantities();
-          int totalQty = currentSizes.values.fold(0, (a, b) => a + b);
+        // Calculate subtotal for ALL variations (not just current)
+        double calcSubtotal() {
+          int totalQty = getTotalSelectedQuantity();
           final priceInfo = getPriceForQuantity(totalQty);
           return priceInfo['price'] * totalQty;
         }
-
+        _subtotal = calcSubtotal();
         return StatefulBuilder(
           builder: (context, setModalState) {
-            // Function to switch variation INSIDE MODAL
-            void switchVariationInModal(Map<String, dynamic> variation) {
-              setModalState(() {
-                // Update both: main screen and modal variable
-                _switchVariation(variation);
-                currentVarNameInModal = variation['name']?.toString() ?? '';
-
-                // Initialize if needed
-                if (!_variationSizeQuantities.containsKey(currentVarNameInModal)) {
-                  _variationSizeQuantities[currentVarNameInModal] = {};
-                  for (final s in sizes) {
-                    _variationSizeQuantities[currentVarNameInModal]![s] = 0;
-                  }
-                }
-
-                // Update subtotal
-                _subtotal = calcSubtotalForModal();
-              });
-            }
-
             final currentSizes = getCurrentSizeQuantities();
             final totalPieces = currentSizes.values.fold(0, (a, b) => a + b);
-            final currentSubtotal = calcSubtotalForModal();
-
             return DraggableScrollableSheet(
               expand: false,
               initialChildSize: 0.92,
@@ -1575,9 +1533,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 // Scroll to selected color when sheet opens
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   final selectedIndex = variations.indexWhere((v) =>
-                  (v['name']?.toString() ?? '') == currentVarNameInModal
+                  (v['name']?.toString() ?? '') == currentVarName
                   );
                   if (selectedIndex >= 0 && scrollController.hasClients) {
+                    // Calculate approximate scroll position for selected color
+                    // Assuming each color item is about 100px wide with spacing
                     final scrollPosition = (selectedIndex ~/ 3) * 120.0;
                     scrollController.animateTo(
                       scrollPosition.clamp(0.0, scrollController.position.maxScrollExtent),
@@ -1594,11 +1554,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       height: 4,
                       margin: const EdgeInsets.only(top: 8, bottom: 8),
                       decoration: BoxDecoration(
-                        color: AppColors.border(context),
+                        color: Colors.grey.shade300,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    // Variations header
+                    // Variations header - at top with X button on right
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Row(
@@ -1612,11 +1572,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   widget.product.stockMode == 'color_size'
                                       ? 'Variations - Color Size Stock'
                                       : 'Variations',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.textPrimary(context),
-                                  ),
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                                 ),
                                 if (widget.product.stockMode == 'color_size') ...[
                                   const SizedBox(height: 4),
@@ -1624,7 +1580,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                     'Available stock shown for each size',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: AppColors.textSecondary(context),
+                                      color: Colors.grey.shade600,
                                     ),
                                   ),
                                 ],
@@ -1632,7 +1588,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             ),
                           ),
                           IconButton(
-                            icon: Icon(Icons.close, size: 24, color: AppColors.textPrimary(context)),
+                            icon: const Icon(Icons.close, size: 24),
                             onPressed: () => Navigator.pop(context),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
@@ -1641,13 +1597,70 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                     const Divider(height: 1),
-                    // Product image and price section
+                    // Selected quantities summary for all colors
+                    Builder(
+                      builder: (context) {
+                        // Get all variations with quantities
+                        final selectedVariations = <String, int>{};
+                        for (var variation in variations) {
+                          final varName = variation['name']?.toString() ?? '';
+                          final qty = getVariationQty(varName);
+                          if (qty > 0) {
+                            selectedVariations[varName] = qty;
+                          }
+                        }
+                        
+                        if (selectedVariations.isNotEmpty) {
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.shopping_cart_outlined, size: 18, color: Colors.blue.shade700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 4,
+                                    children: selectedVariations.entries.map((entry) {
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: Colors.blue.shade300),
+                                        ),
+                                        child: Text(
+                                          '${entry.key}: ${entry.value}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.blue.shade700,
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                    // Product image and price section - exactly like second image
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Product thumbnail image
+                          // Product thumbnail image (larger, square)
                           Builder(
                             builder: (context) {
                               final currentImages = _getAllImages();
@@ -1658,28 +1671,29 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                     height: 80,
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: AppColors.border(context)),
+                                      border: Border.all(color: Colors.grey.shade300),
                                     ),
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
                                       child: currentImages.isNotEmpty
                                           ? _buildColorSwatchImage(currentImages[0])
-                                          : Container(color: AppColors.surface(context)),
+                                          : Container(color: Colors.grey.shade200),
                                     ),
                                   ),
+                                  // Expand icon on top left
                                   Positioned(
                                     top: 4,
                                     left: 4,
                                     child: Container(
                                       padding: const EdgeInsets.all(4),
                                       decoration: BoxDecoration(
-                                        color: AppColors.card(context).withOpacity(0.8),
+                                        color: Colors.white.withOpacity(0.8),
                                         shape: BoxShape.circle,
                                       ),
-                                      child: Icon(
+                                      child: const Icon(
                                         Icons.open_in_full,
                                         size: 14,
-                                        color: AppColors.textPrimary(context),
+                                        color: Colors.black87,
                                       ),
                                     ),
                                   ),
@@ -1688,7 +1702,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             },
                           ),
                           const SizedBox(width: 12),
-                          // Pricing tiers
+                          // Pricing tiers on right - slidable
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
@@ -1708,7 +1722,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                     decoration: BoxDecoration(
                                       border: Border.all(
-                                        color: isActive ? AppColors.orange(context) : AppColors.border(context),
+                                        color: isActive ? Colors.orange : Colors.grey.shade300,
                                         width: isActive ? 1.5 : 1,
                                       ),
                                       borderRadius: BorderRadius.circular(6),
@@ -1722,7 +1736,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
-                                            color: isActive ? AppColors.orange(context) : AppColors.textPrimary(context),
+                                            color: isActive ? Colors.orange : Colors.black87,
                                           ),
                                         ),
                                         const SizedBox(height: 2),
@@ -1730,7 +1744,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           label,
                                           style: TextStyle(
                                             fontSize: 11,
-                                            color: isActive ? AppColors.orange(context) : AppColors.textSecondary(context),
+                                            color: isActive ? Colors.orange.shade700 : Colors.grey.shade600,
                                           ),
                                         ),
                                       ],
@@ -1752,7 +1766,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Color grid
+                              // Color grid - always show 6 colors
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1765,11 +1779,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           widget.product.stockMode == 'color_size'
                                               ? 'Color (${variations.length}) - Color Size Stock'
                                               : 'Color (${variations.length})',
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary(context),
-                                          ),
+                                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                                         ),
                                         if (widget.product.stockMode == 'color_size') ...[
                                           const SizedBox(height: 4),
@@ -1777,7 +1787,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                             'Stock available for each color-size combination',
                                             style: TextStyle(
                                               fontSize: 11,
-                                              color: AppColors.textSecondary(context),
+                                              color: Colors.grey.shade600,
                                             ),
                                           ),
                                         ],
@@ -1819,28 +1829,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       child: Row(
                                         children: variations.map((variation) {
                                           final vColorName = variation['name']?.toString() ?? '';
-                                          final isSelected = vColorName == currentVarNameInModal;
+                                          final isSelected = vColorName == _currentVariation['name']?.toString();
                                           return GestureDetector(
                                             onTap: () {
-                                              switchVariationInModal(variation);
+                                              setModalState(() {
+                                                _switchVariation(variation);
+                                                _subtotal = calcSubtotal();
+                                              });
                                             },
                                             child: Container(
                                               margin: const EdgeInsets.only(right: 8),
                                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                               decoration: BoxDecoration(
                                                 borderRadius: BorderRadius.circular(6),
-                                                border: Border.all(
-                                                  color: isSelected ? AppColors.primary(context) : AppColors.border(context),
-                                                  width: isSelected ? 1.5 : 1,
-                                                ),
-                                                color: AppColors.card(context),
+                                                border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300, width: isSelected ? 1.5 : 1),
+                                                color: Colors.white,
                                               ),
                                               child: Text(
                                                 vColorName,
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: AppColors.textPrimary(context),
-                                                ),
+                                                style: const TextStyle(fontSize: 12),
                                               ),
                                             ),
                                           );
@@ -1871,15 +1878,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           child: Container(
                                             decoration: BoxDecoration(
                                               borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(color: AppColors.border(context)),
+                                              border: Border.all(color: Colors.grey.shade300),
                                             ),
                                             child: Center(
                                               child: Text(
                                                 'More',
-                                                style: TextStyle(
-                                                  color: AppColors.orange(context),
-                                                  fontWeight: FontWeight.w600,
-                                                ),
+                                                style: TextStyle(color: Colors.orange.shade700, fontWeight: FontWeight.w600),
                                               ),
                                             ),
                                           ),
@@ -1897,13 +1901,31 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                         variationImage = variation['image'].toString();
                                       }
                                       final vColorName = variation['name']?.toString() ?? '';
-                                      final isSelected = vColorName == currentVarNameInModal;
+                                      final isSelected = vColorName == _currentVariation['name']?.toString();
+                                      // Get quantity for this specific color variation
                                       final selectedQty = getVariationQty(vColorName);
-
                                       return GestureDetector(
                                         onTap: () {
-                                          switchVariationInModal(variation);
-                                        },
+                                              setModalState(() {
+                                                final oldVarName = _currentVariation['name']?.toString() ?? '';
+                                                print('DEBUG: Switching from $oldVarName to ${variation['name']}');
+                                                _switchVariation(variation);
+                                                final newVarName = variation['name']?.toString() ?? '';
+                                                if (!_variationSizeQuantities.containsKey(newVarName)) {
+                                                  _variationSizeQuantities[newVarName] = {};
+                                                  for (final s in sizes) {
+                                                    _variationSizeQuantities[newVarName]![s] = 0;
+                                                  }
+                                                  print('DEBUG: Initialized new variation $newVarName with zero quantities');
+                                                } else {
+                                                  print('DEBUG: Existing quantities for $newVarName: ${_variationSizeQuantities[newVarName]}');
+                                                }
+                                                final newImages = _getAllImages();
+                                                _subtotal = calcSubtotal();
+                                              });
+                                              // Update the summary by rebuilding
+                                              setModalState(() {});
+                                            },
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -1915,7 +1937,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                   decoration: BoxDecoration(
                                                     borderRadius: BorderRadius.circular(8),
                                                     border: Border.all(
-                                                      color: isSelected ? AppColors.orange(context) : AppColors.border(context),
+                                                      color: isSelected ? Colors.orange : Colors.grey.shade300,
                                                       width: isSelected ? 2 : 1,
                                                     ),
                                                   ),
@@ -1937,13 +1959,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                             child: Container(
                                                               padding: const EdgeInsets.all(2),
                                                               decoration: BoxDecoration(
-                                                                color: AppColors.card(context).withOpacity(0.7),
+                                                                color: Colors.white.withOpacity(0.7),
                                                                 shape: BoxShape.circle,
                                                               ),
-                                                              child: Icon(
+                                                              child: const Icon(
                                                                 Icons.open_in_full,
                                                                 size: 10,
-                                                                color: AppColors.textPrimary(context),
+                                                                color: Colors.black87,
                                                               ),
                                                             ),
                                                           ),
@@ -1954,15 +1976,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                           right: 0,
                                                           child: Container(
                                                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                                            color: AppColors.card(context).withOpacity(0.9),
+                                                            color: Colors.white.withOpacity(0.9),
                                                             child: Text(
                                                               vColorName,
                                                               overflow: TextOverflow.ellipsis,
-                                                              style: TextStyle(
-                                                                fontSize: 11,
-                                                                fontWeight: FontWeight.w600,
-                                                                color: AppColors.textPrimary(context),
-                                                              ),
+                                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                                                             ),
                                                           ),
                                                         ),
@@ -2019,17 +2037,18 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               const SizedBox(height: 8),
                               Column(
                                 children: sizes.map((s) {
+                                  final currentSizes = getCurrentSizeQuantities();
                                   final qty = currentSizes[s] ?? 0;
                                   final availableStock = widget.product.stockMode == 'color_size'
-                                      ? getAvailableStock(currentVarNameInModal, s)
+                                      ? getAvailableStock(currentVarName, s)
                                       : null;
                                   final remainingStock = widget.product.stockMode == 'color_size'
-                                      ? getRemainingStock(currentVarNameInModal, s)
+                                      ? getRemainingStock(currentVarName, s)
                                       : getRemainingSimpleStock();
                                   final stockOut = widget.product.stockMode == 'always_available'
-                                      ? false
+                                      ? false // Never out of stock for always_available
                                       : widget.product.stockMode == 'color_size'
-                                      ? isOutOfStock(currentVarNameInModal, s)
+                                      ? isOutOfStock(currentVarName, s)
                                       : isSimpleStockOut();
                                   final isAlwaysAvailable = widget.product.stockMode == 'always_available';
                                   final effectiveStockOut = isAlwaysAvailable ? false : stockOut;
@@ -2069,9 +2088,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                       : Colors.black87,
                                                 ),
                                               ),
-                                              if (widget.product.stockMode == 'simple' ||
-                                                  availableStock != null ||
-                                                  isAlwaysAvailable) ...[
+                                              if (widget.product.stockMode == 'simple' || availableStock != null || isAlwaysAvailable) ...[
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   children: [
@@ -2140,11 +2157,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           children: [
                                             IconButton(
                                               onPressed: () {
-                                                final cur = qty;
+                                                final cur = (currentSizes[s] ?? 0);
                                                 if (cur > 0) {
-                                                  _variationSizeQuantities[currentVarNameInModal]![s] = cur - 1;
-                                                  _subtotal = calcSubtotalForModal();
-                                                  setModalState(() {});
+                                                  print('DEBUG: Decreasing quantity for $currentVarName, size $s from $cur to ${cur - 1}');
+                                                  _variationSizeQuantities[currentVarName]![s] = cur - 1;
+                                                  _subtotal = calcSubtotal();
+                                                  setModalState(() {
+                                                    // Rebuild to update summary
+                                                  });
                                                 }
                                               },
                                               icon: const Icon(Icons.remove_circle_outline),
@@ -2157,25 +2177,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                               onPressed: effectiveStockOut
                                                   ? null
                                                   : () {
-                                                final cur = qty;
+                                                final cur = (currentSizes[s] ?? 0);
+                                                // For always_available, allow unlimited quantity
                                                 if (isAlwaysAvailable) {
-                                                  _variationSizeQuantities[currentVarNameInModal]![s] = cur + 1;
-                                                  _subtotal = calcSubtotalForModal();
-                                                  setModalState(() {});
+                                                  print('DEBUG: Increasing quantity for $currentVarName, size $s from $cur to ${cur + 1}');
+                                                  _variationSizeQuantities[currentVarName]![s] = cur + 1;
+                                                  _subtotal = calcSubtotal();
+                                                  setModalState(() {
+                                                    // Rebuild to update summary
+                                                  });
                                                 } else {
                                                   final remaining = widget.product.stockMode == 'color_size'
-                                                      ? getRemainingStock(currentVarNameInModal, s)
+                                                      ? getRemainingStock(currentVarName, s)
                                                       : getRemainingSimpleStock();
                                                   if (remaining > 0) {
-                                                    _variationSizeQuantities[currentVarNameInModal]![s] = cur + 1;
-                                                    _subtotal = calcSubtotalForModal();
-                                                    setModalState(() {});
+                                                    print('DEBUG: Increasing quantity for $currentVarName, size $s from $cur to ${cur + 1}');
+                                                    _variationSizeQuantities[currentVarName]![s] = cur + 1;
+                                                    _subtotal = calcSubtotal();
+                                                    setModalState(() {
+                                                      // Rebuild to update summary
+                                                    });
                                                   }
                                                 }
                                               },
                                               icon: Icon(
                                                 Icons.add_circle_outline,
-                                                color: effectiveStockOut ? Colors.grey.shade400 : null,
+                                                color: effectiveStockOut
+                                                    ? Colors.grey.shade400
+                                                    : null,
                                               ),
                                             ),
                                           ],
@@ -2186,9 +2215,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 }).toList(),
                               ),
                               const SizedBox(height: 8),
-                              // Selected sizes preview
                               Builder(
                                 builder: (context) {
+                                  final currentSizes = getCurrentSizeQuantities();
                                   return Wrap(
                                     spacing: 8,
                                     runSpacing: 8,
@@ -2212,76 +2241,43 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                       ),
                     ),
-                    // Bottom subtotal and actions - Compact single row
+                    // Bottom subtotal and actions
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       decoration: BoxDecoration(
-                        color: AppColors.card(context),
+                        color: Colors.white,
                         boxShadow: [
-                          BoxShadow(
-                            color: AppColors.textPrimary(context).withOpacity(0.08),
-                            blurRadius: 6,
-                            offset: const Offset(0, -2),
-                          ),
+                          BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, -2)),
                         ],
                       ),
                       child: SafeArea(
                         top: false,
                         child: Row(
                           children: [
-                            // Subtotal
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Subtotal',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.textSecondary(context),
-                                  ),
-                                ),
-                                Text(
-                                  '₹${currentSubtotal.toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.textPrimary(context),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(width: 12),
-                            // Add to cart button
                             Expanded(
+                              child: Text('Subtotal: ₹${_subtotal.toStringAsFixed(2)}',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                            ),
+                            SizedBox(
+                              height: 40,
                               child: OutlinedButton(
                                 onPressed: () {},
                                 style: OutlinedButton.styleFrom(
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  side: BorderSide(color: AppColors.primary(context), width: 1.5),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
-                                child: Text(
-                                  'Add to cart',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary(context),
-                                  ),
-                                ),
+                                child: const Text('Add to cart'),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            // Start order button
-                            Expanded(
-                              child: GradientButton(
-                                text: 'Start order',
+                            SizedBox(
+                              height: 40,
+                              child: ElevatedButton(
                                 onPressed: () {},
-                                height: 44,
-                                gradientColors: [
-                                  AppColors.orange(context),
-                                  AppColors.orange(context).withOpacity(0.8),
-                                ],
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                child: const Text('Start order'),
                               ),
                             ),
                           ],

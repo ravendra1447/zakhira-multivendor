@@ -10,3 +10,4 @@ ADD COLUMN subcategory VARCHAR(255) NULL COMMENT 'Product subcategory';
 
 
 
+

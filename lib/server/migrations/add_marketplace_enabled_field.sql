@@ -9,3 +9,4 @@ UPDATE products SET marketplace_enabled = 0 WHERE marketplace_enabled IS NULL;
 
 
 
+

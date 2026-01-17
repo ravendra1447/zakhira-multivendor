@@ -8,6 +8,7 @@ import 'category_selection_screen.dart';
 import 'attributes_management_screen.dart';
 import '../../services/product_service.dart';
 import '../chat_home.dart';
+import 'package:whatsappchat/theme/app_theme.dart';
 import 'package:whatsappchat/theme/app_colors.dart';
 import 'package:whatsappchat/theme/app_typography.dart';
 import 'package:whatsappchat/theme/app_spacing.dart';

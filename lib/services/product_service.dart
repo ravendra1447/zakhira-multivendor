@@ -458,20 +458,28 @@ class ProductService {
     int? limit,
     int? offset,
     bool marketplace = false, // If true, get all users' products for marketplace
+    int? user_id,
   }) async {
     try {
+      final int? finalUserId = user_id ?? LocalAuthService.getUserId();
+
+
       final userId = LocalAuthService.getUserId();
       if (!marketplace && userId == null) {
         return {"success": false, "message": "User not logged in"};
       }
 
       final payload = {
-        if (!marketplace && userId != null) 'user_id': userId,
+        if (!marketplace && finalUserId != null) 'user_id': finalUserId, // ✅ CORRECT
         if (status != null) 'status': status,
         if (limit != null) 'limit': limit,
         if (offset != null) 'offset': offset,
         if (marketplace) 'marketplace': true,
       };
+
+      // ✅ CORRECT PAYLOAD BUILDING
+      print('Payload: $payload');
+
 
       final response = await http.post(
         Uri.parse("$baseUrl/products/list"),
@@ -497,6 +505,69 @@ class ProductService {
         Uri.parse("$baseUrl/products/get"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({'user_id': userId, 'product_id': productId}),
+      );
+
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {"success": false, "message": "Error: ${e.toString()}"};
+    }
+  }
+
+  /// Update products for Instagram
+  /// Sets is_insta_product = 'Y' and product_insta_url for selected products
+  static Future<Map<String, dynamic>> updateProductsForInstagram({
+    required List<int> productIds,
+  }) async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        return {"success": false, "message": "User not logged in"};
+      }
+
+      final response = await http.post(
+        Uri.parse("$baseUrl/products/update-instagram"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          'user_id': userId,
+          'product_ids': productIds,
+        }),
+      );
+
+      final result = jsonDecode(response.body) as Map<String, dynamic>;
+      
+      // Update local database
+      if (result['success'] == true && result['data'] != null) {
+        final updatedProducts = result['data']['products'] as List<dynamic>;
+        for (var productData in updatedProducts) {
+          final productId = productData['product_id'] as int;
+          final instaUrl = productData['insta_url'] as String;
+          
+          // Update local database
+          await ProductDatabaseService().updateProductInstagramStatus(
+            productId: productId,
+            instaUrl: instaUrl,
+            isInstaProduct: true,
+          );
+        }
+      }
+
+      return result;
+    } catch (e) {
+      return {"success": false, "message": "Error: ${e.toString()}"};
+    }
+  }
+
+  /// Get Instagram products (where is_insta_product = 'Y')
+  static Future<Map<String, dynamic>> getInstagramProducts() async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        return {"success": false, "message": "User not logged in"};
+      }
+
+      final response = await http.get(
+        Uri.parse("$baseUrl/products/instagram?user_id=$userId"),
+        headers: {"Content-Type": "application/json"},
       );
 
       return jsonDecode(response.body) as Map<String, dynamic>;

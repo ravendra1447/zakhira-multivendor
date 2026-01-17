@@ -26,7 +26,7 @@ class ProductDatabaseService {
 
     return await openDatabase(
       path,
-      version: 4, // Increment version for migration (added subcategory field)
+      version: 5, // Increment version for migration (added Instagram fields)
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -74,6 +74,22 @@ class ProductDatabaseService {
         print('⚠️ Migration note: $e');
       }
     }
+
+    if (oldVersion < 5) {
+      // Add Instagram fields
+      try {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN product_insta_url TEXT
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN is_insta_product TEXT DEFAULT 'N'
+        ''');
+        print('✅ Database migrated: Added Instagram fields');
+      } catch (e) {
+        // Column might already exist
+        print('⚠️ Migration note: $e');
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -96,6 +112,8 @@ class ProductDatabaseService {
         marketplace_enabled INTEGER DEFAULT 0,
         stock_mode TEXT DEFAULT 'simple',
         stock_by_color_size TEXT,
+        product_insta_url TEXT,
+        is_insta_product TEXT DEFAULT 'N',
         created_at TEXT,
         updated_at TEXT,
         server_id INTEGER,
@@ -251,6 +269,58 @@ class ProductDatabaseService {
     );
 
     return List.generate(maps.length, (i) => Product.fromMap(maps[i]));
+  }
+
+  /// Update product Instagram status
+  /// Updates product_insta_url and is_insta_product fields
+  Future<void> updateProductInstagramStatus({
+    required int productId,
+    required String? instaUrl,
+    required bool isInstaProduct,
+  }) async {
+    final db = await database;
+    
+    try {
+      await db.update(
+        'products',
+        {
+          'product_insta_url': instaUrl,
+          'is_insta_product': isInstaProduct ? 'Y' : 'N',
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [productId],
+      );
+    } catch (e) {
+      // If columns don't exist, try to add them
+      print('⚠️ Instagram fields may not exist in local database. Error: $e');
+      // Continue - server will have the correct data
+    }
+  }
+
+  /// Get Instagram products (where is_insta_product = 'Y')
+  Future<List<Product>> getInstagramProducts() async {
+    final db = await database;
+    final userId = LocalAuthService.getUserId();
+
+    if (userId == null) {
+      return [];
+    }
+
+    try {
+      final maps = await db.query(
+        'products',
+        where: 'user_id = ? AND is_insta_product = ?',
+        whereArgs: [userId, 'Y'],
+        orderBy: 'updated_at DESC',
+      );
+
+      return List.generate(maps.length, (i) => Product.fromMap(maps[i]));
+    } catch (e) {
+      // If columns don't exist, return empty list
+      print('⚠️ Instagram fields may not exist in local database. Error: $e');
+      return [];
+    }
   }
 
   /// Update product from server data

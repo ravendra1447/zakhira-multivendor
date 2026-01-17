@@ -19,6 +19,7 @@ import '../services/crypto_manager.dart';
 import '../models/chat_model.dart';
 import '../services/contact_service.dart';
 import '../services/my_firebase_messaging_service.dart';
+import '../services/product_service.dart';
 import 'chat_screen.dart';
 import 'new_chat_page.dart';
 import '../config.dart';
@@ -157,6 +158,10 @@ class _ChatHomePageState extends State<ChatHomePage> {
       // Refresh marketplace when tab is selected
       if (index == 1 && _marketplaceTabKey.currentState != null) {
         _marketplaceTabKey.currentState!.refresh();
+      }
+      // Refresh profile tab when selected
+      if (index == 2 && _profileTabKey.currentState != null) {
+        _profileTabKey.currentState!.refreshProfile();
       }
     });
   }
@@ -412,9 +417,6 @@ class _ChatsTabState extends State<ChatsTab> {
       final userId = LocalAuthService.getUserId();
       if (userId == null) return;
 
-      // Use ChatService to clear chat (this will notify server and other user)
-      //await ChatService.clearChat(chatId);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Cleared chat with $contactName")),
       );
@@ -473,9 +475,6 @@ class _ChatsTabState extends State<ChatsTab> {
       }
 
       final otherUserId = message.senderId == userId ? message.receiverId : message.senderId;
-
-      // Use ChatService to block user
-      //await ChatService.blockUser(otherUserId);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Blocked $contactName")),
@@ -1004,20 +1003,20 @@ class _ProfileTabState extends State<ProfileTab> {
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
   String _selectedTab = 'Grid'; // Grid, Reels, or Profile
-  List<dynamic> _publishedProducts = [];
+  List<Product> _publishedProducts = []; // ✅ Changed to List<Product>
   bool _loadingProducts = false;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
-    _loadPublishedProducts();
+    _loadPublishedProductsFromServer(); // ✅ SERVER SE LOAD
   }
 
   // Public method to refresh profile
   void refreshProfile() {
     _loadProfile();
-    _loadPublishedProducts();
+    _loadPublishedProductsFromServer(); // ✅ SERVER SE REFRESH
   }
 
   // ✅ Show MPIN menu from hamburger menu
@@ -1106,37 +1105,93 @@ class _ProfileTabState extends State<ProfileTab> {
     }
   }
 
-  Future<void> _loadPublishedProducts() async {
+  // ✅ SIRF SERVER SE LOAD - Local Hive se nahi
+  Future<void> _loadPublishedProductsFromServer() async {
     setState(() => _loadingProducts = true);
+
     try {
-      final products = await ProductDatabaseService().getProducts(
-        status: 'publish',
-      );
-      print("📦 Loaded ${products.length} published products");
-      for (var product in products) {
-        print("  Product: ${product.name}");
-        print("    Main images: ${product.images.length}");
-        print("    Variations: ${product.variations.length}");
-        for (var variation in product.variations) {
-          print("      Variation: ${variation['name']}");
-          print("        Image: ${variation['image']}");
-          print("        allImages type: ${variation['allImages'].runtimeType}");
-          if (variation['allImages'] != null) {
-            if (variation['allImages'] is List) {
-              print("        allImages count: ${(variation['allImages'] as List).length}");
-            } else if (variation['allImages'] is String) {
-              print("        allImages is String, length: ${(variation['allImages'] as String).length}");
-            }
-          }
-        }
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        print("❌ User ID not found");
+        setState(() {
+          _publishedProducts = [];
+          _loadingProducts = false;
+        });
+        return;
       }
+
+      print("🔄 Loading published products from SERVER for user: $userId");
+
+      // ✅ MARKETPLACETAB KI TARAH ProductService use karo
+      final result = await ProductService.getProducts(
+        user_id: userId,      // Current user ke products
+        status: 'publish',    // Sirf published products
+        marketplace: false,   // Sirf user ke apne products
+        limit: 200,           // Max products
+      );
+
+      List<Product> serverProducts = [];
+
+      if (result['success'] == true && result['data'] != null) {
+        final productsData = result['data'] as List<dynamic>;
+        print("✅ Server se aaye published products: ${productsData.length}");
+
+        // ✅ MARKETPLACETAB KI TARAH parse karo
+        serverProducts = productsData.map((p) {
+          try {
+            // Convert server data to Product model
+            final productMap = Map<String, dynamic>.from(p);
+
+            // Debug print
+            print("📦 Server Product:");
+            print("   ID: ${productMap['id']}");
+            print("   Name: ${productMap['name']}");
+            print("   Price: ${productMap['price']}");
+            print("   Stock: ${productMap['stock'] ?? productMap['available_qty']}");
+            print("   Images: ${productMap['images']}");
+            print("   Variations: ${productMap['variations']}");
+
+            // Handle marketplace_enabled (server sends 0/1)
+            if (productMap['marketplace_enabled'] != null) {
+              productMap['marketplace_enabled'] = productMap['marketplace_enabled'] == 1 ||
+                  productMap['marketplace_enabled'] == '1' ||
+                  productMap['marketplace_enabled'] == true;
+            }
+
+            // Create Product object
+            Product product = Product.fromMap(productMap);
+
+            // Additional debug
+            print("   ✅ Parsed - Images: ${product.images.length}, Variations: ${product.variations.length}");
+
+            return product;
+          } catch (e) {
+            print('❌ Error parsing product: $e');
+            print('   Raw data: $p');
+            return null;
+          }
+        }).whereType<Product>().toList();
+      } else {
+        print("❌ Server error: ${result['message']}");
+      }
+
+      // ✅ Sort by updated_at DESC (latest first) - MarketPlaceTab ki tarah
+      serverProducts.sort((a, b) {
+        if (a.updatedAt == null && b.updatedAt == null) return 0;
+        if (a.updatedAt == null) return 1;
+        if (b.updatedAt == null) return -1;
+        return b.updatedAt!.compareTo(a.updatedAt!);
+      });
+
+      print('✅ Loaded ${serverProducts.length} published products from server');
+
       setState(() {
-        _publishedProducts = products;
+        _publishedProducts = serverProducts;
         _loadingProducts = false;
       });
-    } catch (e, stackTrace) {
-      print("❌ Error loading products: $e");
-      print("Stack trace: $stackTrace");
+
+    } catch (e) {
+      print("❌ Error loading products from SERVER: $e");
       setState(() {
         _publishedProducts = [];
         _loadingProducts = false;
@@ -1480,10 +1535,22 @@ class _ProfileTabState extends State<ProfileTab> {
     }
 
     if (_publishedProducts.isEmpty) {
-      return const Center(
-        child: Text(
-          'No published products yet',
-          style: TextStyle(color: Colors.grey),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.shopping_bag_outlined, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'No published products yet',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: refreshProfile,
+              child: const Text('Refresh'),
+            ),
+          ],
         ),
       );
     }
@@ -1492,23 +1559,33 @@ class _ProfileTabState extends State<ProfileTab> {
     List<Map<String, dynamic>> gridItems = [];
     for (var product in _publishedProducts) {
       if (product is Product) {
+        print("📦 Processing product: ${product.name}");
+        print("   Variations count: ${product.variations.length}");
+
         // Get last image from each variation
         if (product.variations.isNotEmpty) {
           for (var variation in product.variations) {
+            print("   Variation: ${variation['name']}");
+            print("   Variation image: ${variation['image']}");
+
             // Get allImages from variation
             List<String> allImages = [];
+
+            // Check if variation has 'allImages' field
             if (variation['allImages'] != null) {
+              print("   allImages exists, type: ${variation['allImages'].runtimeType}");
+
               dynamic allImagesData = variation['allImages'];
 
               // Handle if allImages is a JSON string
-              if (allImagesData is String) {
+              if (allImagesData is String && allImagesData.isNotEmpty) {
                 try {
                   final decoded = jsonDecode(allImagesData);
                   if (decoded is List) {
                     allImagesData = decoded;
                   }
                 } catch (e) {
-                  print('Error decoding allImages JSON in profile grid: $e');
+                  print('   Error decoding allImages JSON: $e');
                 }
               }
 
@@ -1534,6 +1611,11 @@ class _ProfileTabState extends State<ProfileTab> {
               }
             }
 
+            // Also check product's main images
+            if (allImages.isEmpty && product.images.isNotEmpty) {
+              allImages.addAll(product.images);
+            }
+
             // Only add if we have images
             if (allImages.isNotEmpty) {
               // Get the last image (most recent)
@@ -1547,17 +1629,46 @@ class _ProfileTabState extends State<ProfileTab> {
                 'imageIndex': imageIndex,
                 'allImages': allImages,
               });
+
+              print("   ✅ Added to grid: ${variation['name']}, Images: ${allImages.length}");
+            } else {
+              print("   ❌ No images found for variation: ${variation['name']}");
             }
+          }
+        } else {
+          // If no variations, use product's main images
+          if (product.images.isNotEmpty) {
+            final lastImage = product.images.last;
+            gridItems.add({
+              'product': product,
+              'variation': {'name': product.name},
+              'imageUrl': lastImage,
+              'imageIndex': product.images.length - 1,
+              'allImages': product.images,
+            });
+            print("   ✅ Added product image to grid: ${product.name}");
           }
         }
       }
     }
 
     if (gridItems.isEmpty) {
-      return const Center(
-        child: Text(
-          'No images found',
-          style: TextStyle(color: Colors.grey),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.image_not_supported, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'No images found in products',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: refreshProfile,
+              child: const Text('Refresh'),
+            ),
+          ],
         ),
       );
     }
@@ -1585,15 +1696,8 @@ class _ProfileTabState extends State<ProfileTab> {
             onTap: () {
               // Debug: Print variation data before navigation
               print('🔍 Navigating to product detail:');
+              print('  Product: ${product.name}');
               print('  Variation name: ${variation['name']}');
-              print('  allImages type: ${variation['allImages']?.runtimeType}');
-              if (variation['allImages'] != null) {
-                if (variation['allImages'] is List) {
-                  print('  allImages count: ${(variation['allImages'] as List).length}');
-                } else {
-                  print('  allImages: ${variation['allImages']}');
-                }
-              }
               print('  Total images in grid: $totalImages');
               print('  Image index: $imageIndex');
 

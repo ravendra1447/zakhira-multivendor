@@ -1,0 +1,315 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'instagram/instagram_product_selection_screen.dart';
+import 'instagram/instagram_category_selection_screen.dart';
+import '../models/product.dart';
+import '../services/product_service.dart';
+import '../services/product_database_service.dart';
+
+class InstaPagesScreen extends StatefulWidget {
+  const InstaPagesScreen({super.key});
+
+  @override
+  State<InstaPagesScreen> createState() => _InstaPagesScreenState();
+}
+
+class _InstaPagesScreenState extends State<InstaPagesScreen> {
+  List<Product> _instaProducts = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInstagramProducts();
+  }
+
+  Future<void> _loadInstagramProducts() async {
+    setState(() => _loading = true);
+    try {
+      // Try loading from local database first
+      final localProducts = await ProductDatabaseService().getInstagramProducts();
+
+      // Also try to fetch from API
+      final apiResponse = await ProductService.getInstagramProducts();
+
+      if (apiResponse['success'] == true && apiResponse['products'] != null) {
+        final apiProducts = (apiResponse['products'] as List)
+            .map((p) => Product.fromMap(p))
+            .toList();
+
+        // Merge local and API products (avoid duplicates)
+        final allProductsMap = <int, Product>{};
+        for (var p in localProducts) {
+          if (p.id != null) {
+            allProductsMap[p.id!] = p;
+          }
+        }
+        for (var p in apiProducts) {
+          if (p.id != null && !allProductsMap.containsKey(p.id!)) {
+            allProductsMap[p.id!] = p;
+          }
+        }
+
+        setState(() {
+          _instaProducts = allProductsMap.values.toList();
+        });
+      } else {
+        // Use local products if API fails
+        setState(() {
+          _instaProducts = localProducts;
+        });
+      }
+    } catch (e) {
+      print('Error loading Instagram products: $e');
+      // Fallback to local database only
+      final localProducts = await ProductDatabaseService().getInstagramProducts();
+      setState(() {
+        _instaProducts = localProducts;
+      });
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  String? _getProductImage(Product product) {
+    // Get first available image from variations or images
+    if (product.variations.isNotEmpty) {
+      for (var variation in product.variations) {
+        if (variation['allImages'] != null) {
+          dynamic allImagesData = variation['allImages'];
+          if (allImagesData is String) {
+            try {
+              final decoded = jsonDecode(allImagesData);
+              if (decoded is List && decoded.isNotEmpty) {
+                return decoded.first;
+              }
+            } catch (e) {
+              // Ignore
+            }
+          } else if (allImagesData is List && allImagesData.isNotEmpty) {
+            return allImagesData.first;
+          }
+        }
+        if (variation['image'] != null && variation['image'].toString().isNotEmpty) {
+          return variation['image'].toString();
+        }
+      }
+    }
+    if (product.images.isNotEmpty) {
+      return product.images.first;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF128C7E),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () {
+            Navigator.pop(context);
+          },
+        ),
+        title: const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Instagram Pages',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 8.0),
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.add, color: Colors.black, size: 18),
+              onPressed: () {
+                _showSelectionOptions();
+              },
+            ),
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _instaProducts.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey[400]),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No Instagram products yet',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap + to add products',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                      ),
+                    ],
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.all(2),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 2,
+                    mainAxisSpacing: 2,
+                  ),
+                  itemCount: _instaProducts.length,
+                  itemBuilder: (context, index) {
+                    final product = _instaProducts[index];
+                    final imageUrl = _getProductImage(product);
+
+                    return Container(
+                      color: Colors.grey[200],
+                      child: imageUrl != null
+                          ? CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (context, url) => const Center(
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              errorWidget: (context, url, error) => const Icon(Icons.image_not_supported),
+                            )
+                          : const Icon(Icons.image_not_supported, color: Colors.grey),
+                    );
+                  },
+                ),
+    );
+  }
+
+  void _showSelectionOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: Text(
+                'Select Option',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Product Wise Option
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF25D366).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.shopping_bag,
+                  color: Color(0xFF25D366),
+                ),
+              ),
+              title: const Text(
+                'Product Wise',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: const Text(
+                'Create page based on products',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const InstagramProductSelectionScreen(),
+                  ),
+                );
+                if (result != null && mounted) {
+                  // Refresh Instagram products after selection
+                  _loadInstagramProducts();
+                }
+              },
+            ),
+            const Divider(height: 1),
+            // Category Wise Option
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF128C7E).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.category,
+                  color: Color(0xFF128C7E),
+                ),
+              ),
+              title: const Text(
+                'Category Wise',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: const Text(
+                'Create page based on categories',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const InstagramCategorySelectionScreen(),
+                  ),
+                );
+                if (result != null && mounted) {
+                  // Refresh Instagram products after selection
+                  _loadInstagramProducts();
+                }
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

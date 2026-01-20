@@ -1,4 +1,4 @@
-name: Sync raven and main folders to Bitbucket
+name: Sync GitHub branches to Bitbucket
 
 on:
   push:
@@ -28,12 +28,12 @@ jobs:
         env:
           BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}
 
-      - name: Push raven folder
+      - name: Push raven branch (latest code)
         if: github.ref_name == 'raven'
         run: |
-          git subtree push --prefix=raven bitbucket raven
+          git push bitbucket raven --force-with-lease
 
-      - name: Push main folder
+      - name: Push main branch
         if: github.ref_name == 'main'
         run: |
-          git subtree push --prefix=main bitbucket main
+          git push bitbucket main --force-with-lease

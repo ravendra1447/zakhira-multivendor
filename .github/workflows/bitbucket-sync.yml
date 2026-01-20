@@ -1,28 +1,39 @@
-name: Sync GitHub to Bitbucket
+name: Sync raven and main folders to Bitbucket
 
 on:
   push:
     branches:
-      - main
-      - master
       - raven
+      - main
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Push to Bitbucket
+      - name: Git config
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Add Bitbucket remote
         run: |
           git remote remove bitbucket || true
           git remote add bitbucket https://ravendra_dev_admin:${BITBUCKET_TOKEN}@bitbucket.org/ravendra-dev-1447/whatsappchat.git
-          git push bitbucket main --force
-          git push bitbucket raven --force
-          git push bitbucket --tags --force
         env:
           BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}
+
+      - name: Push raven folder
+        if: github.ref_name == 'raven'
+        run: |
+          git subtree push --prefix=raven bitbucket raven
+
+      - name: Push main folder
+        if: github.ref_name == 'main'
+        run: |
+          git subtree push --prefix=main bitbucket main

@@ -1,4 +1,4 @@
-name: Sync GitHub raven to Bitbucket main
+name: Sync raven to Bitbucket main (SSH)
 
 on:
   push:
@@ -10,22 +10,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Git config
+      - name: Setup SSH
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BITBUCKET_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
 
-      - name: Add Bitbucket remote
+      - name: Push raven → bitbucket main
         run: |
           git remote remove bitbucket || true
-          git remote add bitbucket https://ravendra_dev_admin:${BITBUCKET_TOKEN}@bitbucket.org/ravendra-dev-1447/whatsappchat.git
-        env:
-          BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}
-
-      - name: Push raven → Bitbucket main
-        run: |
-          git push bitbucket raven:main --force-with-lease
+          git remote add bitbucket git@bitbucket.org:ravendra-dev-1447/whatsappchat.git
+          git push bitbucket raven:main --force

@@ -19,8 +19,10 @@ jobs:
 
       - name: Push to Bitbucket
         run: |
-          git remote add bitbucket https://x-token-auth:${BITBUCKET_TOKEN}@bitbucket.org/ravendra-dev-1447/whatsappchat.git
-          git push bitbucket --all --force
+          git remote remove bitbucket || true
+          git remote add bitbucket https://ravendra_dev_admin:${BITBUCKET_TOKEN}@bitbucket.org/ravendra-dev-1447/whatsappchat.git
+          git push bitbucket main --force
+          git push bitbucket raven --force
           git push bitbucket --tags --force
         env:
           BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}

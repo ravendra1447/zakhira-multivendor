@@ -1,10 +1,9 @@
-name: Sync GitHub branches to Bitbucket
+name: Sync GitHub raven to Bitbucket main
 
 on:
   push:
     branches:
       - raven
-      - main
 
 jobs:
   sync:
@@ -28,12 +27,6 @@ jobs:
         env:
           BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}
 
-      - name: Push raven branch (latest code)
-        if: github.ref_name == 'raven'
+      - name: Push raven → Bitbucket main
         run: |
-          git push bitbucket raven --force-with-lease
-
-      - name: Push main branch
-        if: github.ref_name == 'main'
-        run: |
-          git push bitbucket main --force-with-lease
+          git push bitbucket raven:main --force-with-lease

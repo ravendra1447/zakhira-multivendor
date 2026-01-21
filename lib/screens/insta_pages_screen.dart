@@ -111,19 +111,8 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
 
   Future<void> _copyProductWithImage(Product product) async {
     try {
-      final imageUrl = _getProductImage(product);
-      final productName = product.name;
       final instagramUrl = product.instagramUrl!;
       
-      // Convert IP address URLs to bangkokmart.in domain
-      String? fixedImageUrl = imageUrl;
-      if (imageUrl != null && imageUrl.isNotEmpty) {
-        fixedImageUrl = imageUrl.replaceAll(
-          RegExp(r'http://184\.168\.126\.71:3000'),
-          'https://bangkokmart.in'
-        );
-      }
-
       // Show loading
       showDialog(
         context: context,
@@ -133,44 +122,7 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
         ),
       );
 
-      String shareContent = '';
-      
-      if (fixedImageUrl != null && fixedImageUrl.isNotEmpty) {
-        try {
-          // Download image
-          final dio = Dio();
-          final response = await dio.get(
-            fixedImageUrl,
-            options: Options(responseType: ResponseType.bytes),
-          );
-          
-          // Get temporary directory
-          final tempDir = await getTemporaryDirectory();
-          final imagePath = '${tempDir.path}/product_${product.id}.jpg';
-          
-          // Save image to temporary file
-          final imageFile = File(imagePath);
-          await imageFile.writeAsBytes(response.data);
-          
-          // Copy image file to clipboard (if supported)
-          // Note: Direct image copying to clipboard is limited on mobile
-          // We'll use the file path approach
-          
-          shareContent = '$productName\n';
-          shareContent += '$instagramUrl\n\n';
-          shareContent += 'Image: $fixedImageUrl';
-          
-        } catch (e) {
-          print('Error downloading image: $e');
-          // Fallback to URL only
-          shareContent = '$fixedImageUrl\n\n';
-          shareContent += '$productName\n';
-          shareContent += '$instagramUrl';
-        }
-      } else {
-        shareContent = '$productName\n';
-        shareContent += '$instagramUrl';
-      }
+      String shareContent = instagramUrl; // Only copy the URL for rich preview
 
       Navigator.pop(context); // Close loading dialog
       
@@ -183,7 +135,7 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
               children: [
                 const Icon(Icons.check_circle, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
-                const Text('Product details copied!'),
+                const Text('Product URL copied!'),
               ],
             ),
             backgroundColor: const Color(0xFF25D366),
@@ -192,7 +144,6 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
         );
       }
     } catch (e) {
-      Navigator.pop(context); // Close loading dialog if open
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

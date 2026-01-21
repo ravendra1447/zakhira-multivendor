@@ -470,9 +470,13 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               final newSizes = await _showAddNewSizeModal(ctx);
                               if (newSizes != null && newSizes.isNotEmpty) {
                                 setState(() {
-                                  // Combine all sizes with comma and add as single item
-                                  final combinedSize = newSizes.join(', ');
-                                  _sizes.add(combinedSize);
+                                  // Add each size individually to avoid comma-separated display
+                                  for (final newSize in newSizes) {
+                                    // Check for duplicates before adding
+                                    if (!_sizes.contains(newSize)) {
+                                      _sizes.add(newSize);
+                                    }
+                                  }
                                 });
                                 setModalState(() {});
                               }
@@ -524,7 +528,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                   if (selected) {
                                     tempSelectedSizes.remove(s);
                                   } else {
-                                    tempSelectedSizes.add(s);
+                                    // Check if size is already selected in main list
+                                    if (!_selectedSizes.contains(s)) {
+                                      tempSelectedSizes.add(s);
+                                    }
                                   }
                                 });
                               },
@@ -632,7 +639,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 if (selected) {
                                   tempSelectedSizes.remove(s);
                                 } else {
-                                  tempSelectedSizes.add(s);
+                                  // Check if size is already selected in main list
+                                  if (!_selectedSizes.contains(s)) {
+                                    tempSelectedSizes.add(s);
+                                  }
                                 }
                               });
                             },
@@ -1641,7 +1651,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               ),
                               onSubmitted: (value) {
                                 final sizeName = value.trim();
-                                if (sizeName.isNotEmpty) {
+                                if (sizeName.isNotEmpty && 
+                                    !tempSizes.contains(sizeName) &&
+                                    !_selectedSizes.contains(sizeName)) {
                                   setModalState(() {
                                     tempSizes.add(sizeName);
                                     sizeNameController.clear();
@@ -1655,7 +1667,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           GestureDetector(
                             onTap: () {
                               final sizeName = sizeNameController.text.trim();
-                              if (sizeName.isNotEmpty) {
+                              if (sizeName.isNotEmpty && 
+                                  !tempSizes.contains(sizeName) &&
+                                  !_selectedSizes.contains(sizeName)) {
                                 setModalState(() {
                                   tempSizes.add(sizeName);
                                   sizeNameController.clear();
@@ -2112,8 +2126,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         // Debug: Print category and subcategory to verify
                         print('✅ Category selected: $_category');
                         print('✅ Subcategory selected: $_subcategory');
-                        final displayName = _subcategory != null 
-                            ? '$_category > $_subcategory' 
+                        final displayName = _subcategory != null
+                            ? '$_category > $_subcategory'
                             : _category;
                         if (displayName != null) {
                           _saveRecentCategory(displayName); // Save to recent categories
@@ -2137,11 +2151,11 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              _category == null 
+                              _category == null
                                   ? 'Select category'
-                                  : _subcategory != null 
-                                      ? '$_category > $_subcategory'
-                                      : _category!,
+                                  : _subcategory != null
+                                  ? '$_category > $_subcategory'
+                                  : _category!,
                               style: TextStyle(
                                 color: (_category == null)
                                     ? AppColors.textHint(context)
@@ -2186,7 +2200,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                               final parts = categoryDisplay.split(' > ');
                               final category = parts[0];
                               final subcategory = parts.length > 1 ? parts[1] : null;
-                              
+
                               return GestureDetector(
                                 onTap: () {
                                   setState(() {
@@ -3325,7 +3339,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '(${_selectedSizes.join(', ')})',
+                                  '(${_selectedSizes.length} sizes)',
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: AppColors.textSecondary(context),
@@ -3358,6 +3372,71 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                       ],
                     ),
                   ),
+                  // Display selected sizes as individual chips
+                  if (_selectedSizes.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF25D366).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFF25D366).withOpacity(0.2),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Selected Sizes',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF25D366),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: _selectedSizes.map((size) {
+                              return Chip(
+                                backgroundColor: const Color(0xFF25D366).withOpacity(0.1),
+                                label: Text(
+                                  size,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: const Color(0xFF25D366),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                deleteIcon: Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: const Color(0xFF25D366),
+                                ),
+                                onDeleted: () {
+                                  setState(() {
+                                    _selectedSizes.remove(size);
+                                  });
+                                },
+                                side: BorderSide(
+                                  color: const Color(0xFF25D366).withOpacity(0.3),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                labelPadding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   // Recently selected sizes
                   if (_recentSizes.isNotEmpty) ...[
                     const SizedBox(height: 8),

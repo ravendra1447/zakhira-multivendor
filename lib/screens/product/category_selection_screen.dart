@@ -3,7 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 class CategorySelectionScreen extends StatefulWidget {
-  const CategorySelectionScreen({super.key});
+  final List<String>? recentCategories;
+  const CategorySelectionScreen({super.key, this.recentCategories});
 
   @override
   State<CategorySelectionScreen> createState() =>
@@ -54,34 +55,42 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
   Future<void> _loadRecentCategories() async {
     final prefs = await SharedPreferences.getInstance();
-    final recentJson = prefs.getString('recent_categories');
-    if (recentJson != null) {
-      final List<dynamic> recentList = json.decode(recentJson);
-      setState(() {
-        _recentItems = recentList.map((item) {
-          final name = item['name'] as String;
-          // Parse category and subcategory from name if not already present
-          String? category = item['category'] as String?;
-          String? subcategory = item['subcategory'] as String?;
-          
-          if (category == null && name.contains(' > ')) {
-            final parts = name.split(' > ');
-            category = parts[0];
-            subcategory = parts.length > 1 ? parts[1] : null;
-          } else if (category == null) {
-            category = name;
-          }
-          
-          return {
-            'name': name,
-            'category': category,
-            'subcategory': subcategory,
-            'image': item['image'] ?? _getIconForCategory(category),
-            'badges': item['badges'] ?? [],
-          };
+    setState(() {
+      // Use recent categories passed from main screen if available
+      if (widget.recentCategories != null && widget.recentCategories!.isNotEmpty) {
+        _recentItems = widget.recentCategories!.map((name) => {
+          'name': name,
+          'isRecent': true,
         }).toList();
-      });
-    }
+      } else {
+        // Load from SharedPreferences
+        final recentJson = prefs.getString('recent_categories');
+        if (recentJson != null) {
+          final List<dynamic> recentList = json.decode(recentJson);
+          _recentItems = recentList.map((item) {
+            final name = item['name'] as String;
+            // Parse category and subcategory from name if not already present
+            String? category = item['category'] as String?;
+            String? subcategory = item['subcategory'] as String?;
+            
+            if (category == null && name.contains(' > ')) {
+              final parts = name.split(' > ');
+              category = parts[0];
+              subcategory = parts.length > 1 ? parts[1] : null;
+            } else if (category == null) {
+              category = name;
+            }
+            
+            return {
+              'name': name,
+              'category': category,
+              'subcategory': subcategory,
+              'isRecent': true,
+            };
+          }).toList();
+        }
+      }
+    });
   }
 
   Future<void> _saveRecentCategory(String categoryName, String? subcategoryName) async {

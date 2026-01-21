@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:whatsappchat/screens/product/detail/product_detail_screen.dart';
 import 'instagram/instagram_product_selection_screen.dart';
 import 'instagram/instagram_category_selection_screen.dart';
@@ -103,6 +107,101 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
       return product.images.first;
     }
     return null;
+  }
+
+  Future<void> _copyProductWithImage(Product product) async {
+    try {
+      final imageUrl = _getProductImage(product);
+      final productName = product.name;
+      final instagramUrl = product.instagramUrl!;
+      
+      // Convert IP address URLs to bangkokmart.in domain
+      String? fixedImageUrl = imageUrl;
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        fixedImageUrl = imageUrl.replaceAll(
+          RegExp(r'http://184\.168\.126\.71:3000'),
+          'https://bangkokmart.in'
+        );
+      }
+
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      String shareContent = '';
+      
+      if (fixedImageUrl != null && fixedImageUrl.isNotEmpty) {
+        try {
+          // Download image
+          final dio = Dio();
+          final response = await dio.get(
+            fixedImageUrl,
+            options: Options(responseType: ResponseType.bytes),
+          );
+          
+          // Get temporary directory
+          final tempDir = await getTemporaryDirectory();
+          final imagePath = '${tempDir.path}/product_${product.id}.jpg';
+          
+          // Save image to temporary file
+          final imageFile = File(imagePath);
+          await imageFile.writeAsBytes(response.data);
+          
+          // Copy image file to clipboard (if supported)
+          // Note: Direct image copying to clipboard is limited on mobile
+          // We'll use the file path approach
+          
+          shareContent = '$productName\n';
+          shareContent += '$instagramUrl\n\n';
+          shareContent += 'Image: $fixedImageUrl';
+          
+        } catch (e) {
+          print('Error downloading image: $e');
+          // Fallback to URL only
+          shareContent = '$fixedImageUrl\n\n';
+          shareContent += '$productName\n';
+          shareContent += '$instagramUrl';
+        }
+      } else {
+        shareContent = '$productName\n';
+        shareContent += '$instagramUrl';
+      }
+
+      Navigator.pop(context); // Close loading dialog
+      
+      await Clipboard.setData(ClipboardData(text: shareContent));
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                const Text('Product details copied!'),
+              ],
+            ),
+            backgroundColor: const Color(0xFF25D366),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -360,22 +459,7 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
                             child: IconButton(
                               onPressed: () async {
                                 if (product.instagramUrl != null && product.instagramUrl!.isNotEmpty) {
-                                  await Clipboard.setData(ClipboardData(text: product.instagramUrl!));
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Row(
-                                          children: [
-                                            const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                                            const SizedBox(width: 8),
-                                            const Text('URL copied to clipboard!'),
-                                          ],
-                                        ),
-                                        backgroundColor: const Color(0xFF25D366),
-                                        duration: const Duration(seconds: 2),
-                                      ),
-                                    );
-                                  }
+                                  await _copyProductWithImage(product);
                                 } else {
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -392,7 +476,7 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
                                 color: Color(0xFF25D366),
                                 size: 20,
                               ),
-                              tooltip: 'Copy URL',
+                              tooltip: 'Copy Product Details',
                             ),
                           ),
                         ),

@@ -1,0 +1,29 @@
+name: Sync raven to Bitbucket main (SSH)
+
+on:
+  push:
+    branches:
+      - raven
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BITBUCKET_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+
+      - name: Push raven → bitbucket main
+        run: |
+          git remote remove bitbucket || true
+          git remote add bitbucket git@bitbucket.org:ravendra-dev-1447/whatsappchat.git
+          git push bitbucket raven:main --force

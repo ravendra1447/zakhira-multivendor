@@ -18,6 +18,7 @@ class Product {
   final bool marketplaceEnabled; // Show in marketplace or not
   final String stockMode; // 'simple', 'color_size', or 'always_available'
   final Map<String, Map<String, int>>? stockByColorSize; // {color: {size: qty}}
+  final String? instagramUrl; // Instagram page URL
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -39,6 +40,7 @@ class Product {
     this.marketplaceEnabled = false,
     this.stockMode = 'simple',
     this.stockByColorSize,
+    this.instagramUrl,
     this.createdAt,
     this.updatedAt,
   });
@@ -63,6 +65,7 @@ class Product {
       'marketplace_enabled': marketplaceEnabled ? 1 : 0,
       'stock_mode': stockMode,
       'stock_by_color_size': stockByColorSize,
+      'product_insta_url': instagramUrl,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
@@ -176,6 +179,7 @@ class Product {
                     ),
                   ))
               : null,
+      instagramUrl: map['product_insta_url'] as String?,
       createdAt: map['created_at'] != null
           ? DateTime.parse(map['created_at'] as String)
           : null,
@@ -205,6 +209,7 @@ class Product {
       'marketplace_enabled': marketplaceEnabled ? 1 : 0,
       'stock_mode': stockMode,
       'stock_by_color_size': stockByColorSize,
+      'product_insta_url': instagramUrl,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
@@ -229,6 +234,7 @@ class Product {
     bool? marketplaceEnabled,
     String? stockMode,
     Map<String, Map<String, int>>? stockByColorSize,
+    String? instagramUrl,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -250,6 +256,7 @@ class Product {
       marketplaceEnabled: marketplaceEnabled ?? this.marketplaceEnabled,
       stockMode: stockMode ?? this.stockMode,
       stockByColorSize: stockByColorSize ?? this.stockByColorSize,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

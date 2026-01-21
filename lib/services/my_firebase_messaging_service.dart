@@ -22,7 +22,7 @@ class MyFirebaseMessagingService {
   static final _messageStreamController = StreamController<Message>.broadcast();
   static Stream<Message> get onNewMessage => _messageStreamController.stream;
 
-  static const String _fcmTokenSaveUrl = "http://184.168.126.71:3000/api/save-fcm-token";
+  static const String _fcmTokenSaveUrl = "https://node-api.bangkokmart.in/api/save-fcm-token";
 
   /// 🛑 Background message handler को PUBLIC बनाएं
   @pragma('vm:entry-point')

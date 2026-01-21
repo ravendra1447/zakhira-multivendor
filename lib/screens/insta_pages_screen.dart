@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:whatsappchat/screens/product/detail/product_detail_screen.dart';
 import 'instagram/instagram_product_selection_screen.dart';
 import 'instagram/instagram_category_selection_screen.dart';
 import '../models/product.dart';
@@ -166,30 +169,234 @@ class _InstaPagesScreenState extends State<InstaPagesScreen> {
                     ],
                   ),
                 )
-              : GridView.builder(
-                  padding: const EdgeInsets.all(2),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 2,
-                    mainAxisSpacing: 2,
-                  ),
+              : ListView.builder(
+                  padding: const EdgeInsets.all(8),
                   itemCount: _instaProducts.length,
                   itemBuilder: (context, index) {
                     final product = _instaProducts[index];
                     final imageUrl = _getProductImage(product);
+                    final instagramUrl = product.instagramUrl ?? 'No URL available';
 
-                    return Container(
-                      color: Colors.grey[200],
-                      child: imageUrl != null
-                          ? CachedNetworkImage(
-                              imageUrl: imageUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (context, url) => const Center(
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: LinearGradient(
+                            colors: [Colors.white, Colors.grey[50]!],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(12),
+                          leading: Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: imageUrl != null
+                                  ? CachedNetworkImage(
+                                imageUrl: imageUrl,
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => Container(
+                                  color: Colors.grey[200],
+                                  child: const Center(
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  color: Colors.grey[200],
+                                  child: const Icon(Icons.image_not_supported, color: Colors.grey),
+                                ),
+                              )
+                                  : Container(
+                                color: Colors.grey[200],
+                                child: const Icon(Icons.image_not_supported, color: Colors.grey),
                               ),
-                              errorWidget: (context, url, error) => const Icon(Icons.image_not_supported),
-                            )
-                          : const Icon(Icons.image_not_supported, color: Colors.grey),
+                            ),
+                          ),
+                          title: Text(
+                            product.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 8),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF128C7E).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: const Color(0xFF128C7E).withOpacity(0.3),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.link,
+                                          size: 16,
+                                          color: Color(0xFF128C7E),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        const Text(
+                                          'Instagram URL:',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                            color: Color(0xFF128C7E),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    GestureDetector(
+                                      onTap: () async {
+                                        if (product.instagramUrl != null && product.instagramUrl!.isNotEmpty) {
+                                          // Get first variation for navigation
+                                          Map<String, dynamic> firstVariation = {};
+                                          if (product.variations.isNotEmpty) {
+                                            firstVariation = product.variations.first;
+                                          } else {
+                                            firstVariation = {
+                                              'name': 'Default',
+                                              'image': product.images.isNotEmpty ? product.images.first : '',
+                                              'allImages': product.images,
+                                            };
+                                          }
+                                          
+                                          // Navigate to product detail page
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => ProductDetailScreen(
+                                                product: product,
+                                                variation: firstVariation,
+                                              ),
+                                            ),
+                                          );
+                                        } else {
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('No URL available for this product'),
+                                                backgroundColor: Colors.orange,
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(6),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.05),
+                                              blurRadius: 2,
+                                              offset: const Offset(0, 1),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                instagramUrl,
+                                                style: const TextStyle(
+                                                  color: Color(0xFF128C7E),
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const Icon(
+                                              Icons.open_in_new,
+                                              size: 14,
+                                              color: Color(0xFF128C7E),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          trailing: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF25D366).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: IconButton(
+                              onPressed: () async {
+                                if (product.instagramUrl != null && product.instagramUrl!.isNotEmpty) {
+                                  await Clipboard.setData(ClipboardData(text: product.instagramUrl!));
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Row(
+                                          children: [
+                                            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                                            const SizedBox(width: 8),
+                                            const Text('URL copied to clipboard!'),
+                                          ],
+                                        ),
+                                        backgroundColor: const Color(0xFF25D366),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('No URL to copy'),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              icon: const Icon(
+                                Icons.copy,
+                                color: Color(0xFF25D366),
+                                size: 20,
+                              ),
+                              tooltip: 'Copy URL',
+                            ),
+                          ),
+                        ),
+                      ),
                     );
                   },
                 ),

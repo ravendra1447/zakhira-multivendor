@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../models/product.dart';
+import '../../checkout/checkout_screen.dart';
+import '../../cart/cart_screen.dart';
+import '../../../services/cart_service.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
@@ -474,9 +477,45 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               });
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.shopping_cart_outlined, color: Colors.black),
-            onPressed: () {},
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.shopping_cart_outlined, color: Colors.black),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CartScreen(),
+                    ),
+                  );
+                },
+              ),
+              if (CartService.totalItems > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '${CartService.totalItems}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.black),
@@ -940,7 +979,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     child: SizedBox(
                       height: 40,
                       child: ElevatedButton(
-                        onPressed: () {},
+                        onPressed: () {
+                          _openVariationsSheet();
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.orange,
                           shape: RoundedRectangleBorder(
@@ -1371,6 +1412,65 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   // Full-screen variations sheet similar to reference
+  void _addToCart() {
+    final currentVarName = _currentVariation['name']?.toString() ?? '';
+    final currentSizes = _variationSizeQuantities[currentVarName] ?? {};
+    
+    // Find the size with quantity > 0
+    String selectedSize = '';
+    int totalQuantity = 0;
+    
+    for (final size in widget.product.sizes) {
+      final qty = currentSizes[size] ?? 0;
+      if (qty > 0) {
+        selectedSize = size;
+        totalQuantity += qty;
+      }
+    }
+    
+    if (selectedSize.isEmpty || totalQuantity == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one size and quantity'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    // Calculate price per item
+    final pricePerItem = _subtotal / totalQuantity;
+    
+    // Add to cart
+    CartService.addToCart(
+      product: widget.product,
+      variation: _currentVariation,
+      size: selectedSize,
+      quantity: totalQuantity,
+      price: pricePerItem,
+    );
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Added $totalQuantity ${widget.product.name} to cart'),
+        backgroundColor: Colors.green,
+        action: SnackBarAction(
+          label: 'View Cart',
+          textColor: Colors.white,
+          onPressed: () {
+            Navigator.pop(context);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const CartScreen(),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   void _openVariationsSheet() {
     showModalBottomSheet(
       context: context,
@@ -2261,18 +2361,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             SizedBox(
                               height: 40,
                               child: OutlinedButton(
-                                onPressed: () {},
+                                onPressed: () {
+                                  _addToCart();
+                                },
                                 style: OutlinedButton.styleFrom(
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  side: const BorderSide(color: Colors.blue),
                                 ),
-                                child: const Text('Add to cart'),
+                                child: const Text('Add to cart', style: TextStyle(color: Colors.blue)),
                               ),
                             ),
                             const SizedBox(width: 8),
                             SizedBox(
                               height: 40,
                               child: ElevatedButton(
-                                onPressed: () {},
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => CheckoutScreen(
+                                        product: widget.product,
+                                        selectedVariation: _currentVariation,
+                                        quantity: _variationQuantities[_currentVariation['name']] ?? 1,
+                                        totalPrice: _subtotal,
+                                      ),
+                                    ),
+                                  );
+                                },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.orange,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

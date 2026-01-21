@@ -6,7 +6,8 @@ import 'local_auth_service.dart';
 /// Specialized service for Instagram-specific server product operations
 /// Implements server-first approach to eliminate local/server ID mismatches
 class ServerProductService {
-  static const String baseUrl = "http://184.168.126.71:3000/api";
+  //https://node-api.bangkokmart.in/api
+  static const String baseUrl = "https://node-api.bangkokmart.in/api";
 
   /// Fetch products for Instagram creation using server-only approach
   /// This mirrors the marketplace pattern to ensure consistency

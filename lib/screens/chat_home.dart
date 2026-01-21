@@ -20,6 +20,7 @@ import '../models/chat_model.dart';
 import '../services/contact_service.dart';
 import '../services/my_firebase_messaging_service.dart';
 import '../services/product_service.dart';
+import '../services/cart_service.dart';
 import 'chat_screen.dart';
 import 'new_chat_page.dart';
 import '../config.dart';
@@ -28,8 +29,10 @@ import 'package:whatsappchat/screens/user_profile_page.dart';
 import '../services/api_service.dart';
 import '../models/profile_setting.dart';
 import 'camera_interface_screen.dart';
+import 'cart/cart_screen.dart';
 import '../services/product_database_service.dart';
 import '../models/product.dart';
+import 'order/my_orders_screen.dart';
 import 'product/detail/product_detail_screen.dart';
 import 'marketplace/marketplace_tab.dart';
 import 'insta_pages_screen.dart';
@@ -200,6 +203,19 @@ class _ChatHomePageState extends State<ChatHomePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(Icons.receipt_long, color: Colors.blue),
+              title: const Text("My Orders"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const MyOrdersScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.settings, color: Colors.grey),
               title: const Text("Settings"),
               onTap: () {
@@ -247,6 +263,47 @@ class _ChatHomePageState extends State<ChatHomePage> {
         actions: [
           const Icon(Icons.search, color: Colors.white),
           const SizedBox(width: 16),
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CartScreen(),
+                ),
+              );
+            },
+            child: Stack(
+              children: [
+                const Icon(Icons.shopping_cart_outlined, color: Colors.white),
+                if (CartService.totalItems > 0)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        '${CartService.totalItems}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onPressed: _showMenu,

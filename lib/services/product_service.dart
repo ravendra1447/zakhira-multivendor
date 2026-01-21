@@ -8,7 +8,7 @@ import '../models/product.dart';
 
 class ProductService {
   // Base URL - Node.js Express API
-  static const String baseUrl = "http://184.168.126.71:3000/api";
+  static const String baseUrl = "https://node-api.bangkokmart.in/api";
 
   /// Save Product (Draft or Publish) - FAST VERSION
   /// Saves locally first, then uploads images in background

@@ -45,18 +45,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   bool _hasOpenedVariationsFromSlide = false; // Track if variations was opened from slide
   Set<int> _viewedImageIndices = {}; // Track which images have been viewed
   Timer? _swipeTimer; // Timer to detect swipe beyond last image
+  String? _activeVariationForSheet; // Track which variation is active in the sheet
+  Map<String, bool> _colorSelectionMode = {}; // Track which colors are being edited
 
   @override
   void initState() {
     super.initState();
     _currentVariation = widget.variation;
+    _activeVariationForSheet = widget.variation['name']?.toString() ?? '';
     _currentImageIndex = widget.initialImageIndex;
     final images = _getAllImages();
     _pageController = PageController(initialPage: _currentImageIndex);
     _scrollController.addListener(_onScroll);
-    
+
     // Initialize viewed images with the starting image
     _viewedImageIndices.add(_currentImageIndex);
+
+    // Initialize color selection mode
+    for (var variation in widget.product.variations) {
+      final varName = variation['name']?.toString() ?? '';
+      _colorSelectionMode[varName] = false;
+    }
   }
 
   void _onScroll() {
@@ -173,6 +182,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       if (images.isNotEmpty) {
         _setImageHeightFor(images[0], 0);
       }
+      // IMPORTANT: Don't reset quantities when switching variations
+      // This preserves selections across different colors
     });
   }
 
@@ -1266,7 +1277,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               // Scroll color row to show selected color
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 final selectedIndex = widget.product.variations.indexWhere((v) =>
-                  (v['name']?.toString() ?? '') == _currentVariation['name']?.toString()
+                (v['name']?.toString() ?? '') == _currentVariation['name']?.toString()
                 );
                 if (selectedIndex >= 0 && _colorRowScrollController.hasClients) {
                   // Calculate scroll position: each color item is about 84px wide (60 + 12 margin + 12 padding)
@@ -1305,8 +1316,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           _swipeTimer?.cancel();
           _swipeTimer = Timer(const Duration(milliseconds: 100), () {
             // This timer fires after swipe gesture ends
-            if (_currentImageIndex == images.length - 1 && 
-                _viewedImageIndices.length == images.length && 
+            if (_currentImageIndex == images.length - 1 &&
+                _viewedImageIndices.length == images.length &&
                 _mediaTab != 'Variations') {
               print('DEBUG: All images viewed and user tried to swipe beyond last. Opening Variations.');
               setState(() {
@@ -1333,7 +1344,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             // Track this image as viewed
             _viewedImageIndices.add(index);
             print('DEBUG: Viewed image index $index. Current viewed images: ${_viewedImageIndices.length}/${images.length}');
-            
+
             // If user swiped to a new image beyond the last one (when images.length is 2 and now 3)
             // or if they're on the last image and images just became 3 or more
             if (images.length >= 3 && index == images.length - 1 && wasOnLastImage && _mediaTab != 'Variations') {
@@ -1351,7 +1362,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 }
               });
             }
-            
+
             if (index < images.length) {
               _setImageHeightFor(images[index], index);
             }
@@ -1411,48 +1422,65 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  // Full-screen variations sheet similar to reference
   void _addToCart() {
-    final currentVarName = _currentVariation['name']?.toString() ?? '';
-    final currentSizes = _variationSizeQuantities[currentVarName] ?? {};
-    
-    // Find the size with quantity > 0
-    String selectedSize = '';
-    int totalQuantity = 0;
-    
-    for (final size in widget.product.sizes) {
-      final qty = currentSizes[size] ?? 0;
-      if (qty > 0) {
-        selectedSize = size;
-        totalQuantity += qty;
+    // Get all variations with quantities
+    final selectedItems = <Map<String, dynamic>>[];
+
+    for (var entry in _variationSizeQuantities.entries) {
+      final colorName = entry.key;
+      final sizeQuantities = entry.value;
+
+      for (var sizeEntry in sizeQuantities.entries) {
+        final size = sizeEntry.key;
+        final quantity = sizeEntry.value;
+
+        if (quantity > 0) {
+          // Find the variation object
+          final variation = widget.product.variations.firstWhere(
+                (v) => (v['name']?.toString() ?? '') == colorName,
+            orElse: () => {},
+          );
+
+          // Calculate price for this item
+          final priceInfo = _getPriceForQuantity(quantity);
+          final pricePerItem = priceInfo['price']?.toDouble() ?? 0.0;
+
+          selectedItems.add({
+            'variation': variation,
+            'size': size,
+            'quantity': quantity,
+            'price': pricePerItem,
+          });
+        }
       }
     }
-    
-    if (selectedSize.isEmpty || totalQuantity == 0) {
+
+    if (selectedItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select at least one size and quantity'),
+          content: Text('Please select at least one item'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
-    
-    // Calculate price per item
-    final pricePerItem = _subtotal / totalQuantity;
-    
-    // Add to cart
-    CartService.addToCart(
-      product: widget.product,
-      variation: _currentVariation,
-      size: selectedSize,
-      quantity: totalQuantity,
-      price: pricePerItem,
-    );
-    
+
+    // Add all items to cart
+    for (var item in selectedItems) {
+      CartService.addToCart(
+        product: widget.product,
+        variation: item['variation'] as Map<String, dynamic>,
+        size: item['size'] as String,
+        quantity: item['quantity'] as int,
+        price: item['price'] as double,
+      );
+    }
+
+    final totalItems = selectedItems.fold(0, (sum, item) => sum + (item['quantity'] as int));
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Added $totalQuantity ${widget.product.name} to cart'),
+        content: Text('Added $totalItems items to cart'),
         backgroundColor: Colors.green,
         action: SnackBarAction(
           label: 'View Cart',
@@ -1471,6 +1499,40 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  Map<String, dynamic> _getPriceForQuantity(int totalQty) {
+    final priceSlabs = widget.product.priceSlabs;
+
+    if (priceSlabs.isEmpty) {
+      return {'price': 0.0, 'moq': 0};
+    }
+
+    // Sort price slabs by MOQ (ascending)
+    final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs);
+    sortedSlabs.sort((a, b) {
+      final moqA = (a['moq'] as num?)?.toInt() ?? 0;
+      final moqB = (b['moq'] as num?)?.toInt() ?? 0;
+      return moqA.compareTo(moqB);
+    });
+
+    // Find the appropriate price slab based on quantity
+    Map<String, dynamic>? selectedSlab;
+    for (var slab in sortedSlabs.reversed) {
+      final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+      if (totalQty >= moq) {
+        selectedSlab = slab;
+        break;
+      }
+    }
+
+    // If no slab matches, use the first one
+    selectedSlab ??= sortedSlabs.first;
+
+    return {
+      'price': (selectedSlab['price'] as num?)?.toDouble() ?? 0.0,
+      'moq': (selectedSlab['moq'] as num?)?.toInt() ?? 0,
+    };
+  }
+
   void _openVariationsSheet() {
     showModalBottomSheet(
       context: context,
@@ -1483,7 +1545,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         final priceSlabs = widget.product.priceSlabs;
         final sizes = widget.product.sizes;
         final variations = widget.product.variations;
-        final currentVarName = _currentVariation['name']?.toString() ?? '';
+
+        // Set initial active variation if not set
+        if (_activeVariationForSheet == null) {
+          _activeVariationForSheet = _currentVariation['name']?.toString() ?? '';
+        }
 
         // Initialize variation size quantities if empty for ALL variations
         for (var variation in variations) {
@@ -1495,11 +1561,76 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             }
           }
         }
-        print('DEBUG: Opening variations sheet. All quantities: $_variationSizeQuantities');
 
-        // Get current variation's size quantities - use currently selected variation
-        Map<String, int> getCurrentSizeQuantities() {
-          final selectedVarName = _currentVariation['name']?.toString() ?? '';
+        print('DEBUG: Opening variations sheet. All quantities: $_variationSizeQuantities');
+        print('DEBUG: Active variation in sheet: $_activeVariationForSheet');
+
+        // Helper function to get images for a variation
+        List<String> getImagesForVariation(Map<String, dynamic> variation) {
+          final List<String> images = [];
+
+          if (variation['allImages'] != null) {
+            dynamic allImagesData = variation['allImages'];
+
+            if (allImagesData is String) {
+              try {
+                final decoded = jsonDecode(allImagesData);
+                if (decoded is List) {
+                  allImagesData = decoded;
+                }
+              } catch (e) {
+                final s = allImagesData.trim();
+                dynamic fallbackList;
+                try {
+                  final fixed = (s.startsWith('[') && !s.endsWith(']')) ? '$s]' : s;
+                  final decodedFixed = jsonDecode(fixed);
+                  if (decodedFixed is List) {
+                    fallbackList = decodedFixed;
+                  }
+                } catch (_) {
+                  final cleaned = s
+                      .replaceAll('[', '')
+                      .replaceAll(']', '')
+                      .replaceAll('"', '')
+                      .replaceAll("'", '');
+                  final parts = cleaned
+                      .split(RegExp(r'[,\s]+'))
+                      .where((p) => p.isNotEmpty)
+                      .toList();
+                  if (parts.isNotEmpty) {
+                    fallbackList = parts;
+                  }
+                }
+                if (fallbackList is List) {
+                  allImagesData = fallbackList;
+                }
+              }
+            }
+
+            if (allImagesData is List) {
+              for (var img in allImagesData) {
+                if (img is String && img.isNotEmpty) {
+                  images.add(img);
+                } else if (img != null) {
+                  images.add(img.toString());
+                }
+              }
+            }
+          }
+
+          if (images.isEmpty && variation['image'] != null) {
+            final img = variation['image'];
+            if (img is String && img.isNotEmpty) {
+              images.add(img);
+            }
+          }
+
+          return images;
+        }
+
+        // Get active variation's size quantities
+        Map<String, int> getActiveSizeQuantities() {
+          final selectedVarName = _activeVariationForSheet ?? '';
           if (!_variationSizeQuantities.containsKey(selectedVarName)) {
             _variationSizeQuantities[selectedVarName] = {};
             for (final s in sizes) {
@@ -1517,9 +1648,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get available stock for a color-size combination
         int getAvailableStock(String colorName, String size) {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           if (widget.product.stockMode != 'color_size' || widget.product.stockByColorSize == null) {
             return 0;
@@ -1531,9 +1661,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get remaining available stock after subtracting selected quantities
         int getRemainingStock(String colorName, String size) {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           final available = getAvailableStock(colorName, size);
           final selected = _variationSizeQuantities[colorName]?[size] ?? 0;
@@ -1542,14 +1671,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Check if a color-size combination is out of stock
         bool isOutOfStock(String colorName, String size) {
-          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
           return getRemainingStock(colorName, size) <= 0;
         }
 
-        // Get total selected quantity across all variations and sizes (for simple stock)
+        // Get total selected quantity across all variations and sizes
         int getTotalSelectedQuantity() {
           int total = 0;
           for (var varName in _variationSizeQuantities.keys) {
@@ -1561,9 +1689,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get remaining simple stock
         int getRemainingSimpleStock() {
-          // Always available mode - stock never runs out
           if (widget.product.stockMode == 'always_available') {
-            return 999999; // Return a very large number to indicate unlimited
+            return 999999;
           }
           if (widget.product.stockMode != 'simple') return 0;
           final totalAvailable = int.tryParse(widget.product.availableQty) ?? 0;
@@ -1573,7 +1700,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Check if simple stock is out
         bool isSimpleStockOut() {
-          // Always available mode - never out of stock
           if (widget.product.stockMode == 'always_available') {
             return false;
           }
@@ -1583,61 +1709,54 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         // Get price based on total quantity
         Map<String, dynamic> getPriceForQuantity(int totalQty) {
-          if (priceSlabs.isEmpty) {
-            return {'price': 0.0, 'moq': 0};
-          }
-
-          // Sort price slabs by MOQ (ascending)
-          final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs);
-          sortedSlabs.sort((a, b) {
-            final moqA = (a['moq'] as num?)?.toInt() ?? 0;
-            final moqB = (b['moq'] as num?)?.toInt() ?? 0;
-            return moqA.compareTo(moqB);
-          });
-
-          // Find the appropriate price slab based on quantity
-          Map<String, dynamic>? selectedSlab;
-          for (var slab in sortedSlabs.reversed) {
-            final moq = (slab['moq'] as num?)?.toInt() ?? 0;
-            if (totalQty >= moq) {
-              selectedSlab = slab;
-              break;
-            }
-          }
-
-          // If no slab matches, use the first one
-          selectedSlab ??= sortedSlabs.first;
-
-          return {
-            'price': (selectedSlab['price'] as num?)?.toDouble() ?? 0.0,
-            'moq': (selectedSlab['moq'] as num?)?.toInt() ?? 0,
-          };
+          return _getPriceForQuantity(totalQty);
         }
 
-        // Calculate subtotal for ALL variations (not just current)
+        // Calculate subtotal for ALL variations
         double calcSubtotal() {
           int totalQty = getTotalSelectedQuantity();
           final priceInfo = getPriceForQuantity(totalQty);
           return priceInfo['price'] * totalQty;
         }
+
         _subtotal = calcSubtotal();
+
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final currentSizes = getCurrentSizeQuantities();
-            final totalPieces = currentSizes.values.fold(0, (a, b) => a + b);
+            // Get active variation size quantities
+            Map<String, int> getActiveSizeQuantitiesLocal() {
+              final selectedVarName = _activeVariationForSheet ?? '';
+              if (!_variationSizeQuantities.containsKey(selectedVarName)) {
+                _variationSizeQuantities[selectedVarName] = {};
+                for (final s in sizes) {
+                  _variationSizeQuantities[selectedVarName]![s] = 0;
+                }
+              }
+              return _variationSizeQuantities[selectedVarName] ?? {};
+            }
+
+            final activeSizes = getActiveSizeQuantitiesLocal();
+            final totalPieces = activeSizes.values.fold(0, (a, b) => a + b);
+
+            // Get active variation object
+            final activeVariationObj = variations.firstWhere(
+                  (v) => (v['name']?.toString() ?? '') == _activeVariationForSheet,
+              orElse: () => _currentVariation,
+            );
+
+            // Get images for active variation
+            final activeVariationImages = getImagesForVariation(activeVariationObj);
+
             return DraggableScrollableSheet(
               expand: false,
               initialChildSize: 0.92,
               maxChildSize: 0.95,
               builder: (context, scrollController) {
-                // Scroll to selected color when sheet opens
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   final selectedIndex = variations.indexWhere((v) =>
-                  (v['name']?.toString() ?? '') == currentVarName
+                  (v['name']?.toString() ?? '') == _activeVariationForSheet
                   );
                   if (selectedIndex >= 0 && scrollController.hasClients) {
-                    // Calculate approximate scroll position for selected color
-                    // Assuming each color item is about 100px wide with spacing
                     final scrollPosition = (selectedIndex ~/ 3) * 120.0;
                     scrollController.animateTo(
                       scrollPosition.clamp(0.0, scrollController.position.maxScrollExtent),
@@ -1658,7 +1777,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    // Variations header - at top with X button on right
+
+                    // Header with X button
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Row(
@@ -1697,10 +1817,46 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                     const Divider(height: 1),
-                    // Selected quantities summary for all colors
+
+                    // Active color indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, size: 16, color: Colors.blue.shade700),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Editing: ',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.blue.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Text(
+                              _activeVariationForSheet ?? 'Select a color',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Selected quantities summary
                     Builder(
                       builder: (context) {
-                        // Get all variations with quantities
                         final selectedVariations = <String, int>{};
                         for (var variation in variations) {
                           final varName = variation['name']?.toString() ?? '';
@@ -1709,7 +1865,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             selectedVariations[varName] = qty;
                           }
                         }
-                        
+
                         if (selectedVariations.isNotEmpty) {
                           return Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1719,87 +1875,173 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: Colors.blue.shade200),
                             ),
-                            child: Row(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(Icons.shopping_cart_outlined, size: 18, color: Colors.blue.shade700),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Wrap(
-                                    spacing: 8,
-                                    runSpacing: 4,
-                                    children: selectedVariations.entries.map((entry) {
-                                      return Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: Colors.blue.shade300),
-                                        ),
-                                        child: Text(
-                                          '${entry.key}: ${entry.value}',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.blue.shade700,
+                                Row(
+                                  children: [
+                                    Icon(Icons.shopping_cart_outlined, size: 18, color: Colors.blue.shade700),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Selected Items:',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.blue.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 4,
+                                  children: selectedVariations.entries.map((entry) {
+                                    return Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: Colors.blue.shade300),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${entry.key}: ${entry.value}',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.blue.shade700,
+                                            ),
                                           ),
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
+                                          const SizedBox(width: 4),
+                                          GestureDetector(
+                                            onTap: () {
+                                              // Switch to this color
+                                              final variation = variations.firstWhere(
+                                                    (v) => (v['name']?.toString() ?? '') == entry.key,
+                                                orElse: () => {},
+                                              );
+                                              setModalState(() {
+                                                _activeVariationForSheet = entry.key;
+                                              });
+                                            },
+                                            child: Icon(
+                                              Icons.edit,
+                                              size: 14,
+                                              color: Colors.blue.shade700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
                                 ),
                               ],
                             ),
                           );
                         }
-                        return const SizedBox.shrink();
+                        return Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, size: 18, color: Colors.grey.shade600),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Tap any color to start adding items',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
                       },
                     ),
-                    // Product image and price section - exactly like second image
+
+                    // Product image and price section - WITH ACTIVE VARIATION IMAGE
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Product thumbnail image (larger, square)
-                          Builder(
-                            builder: (context) {
-                              final currentImages = _getAllImages();
-                              return Stack(
-                                children: [
-                                  Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.grey.shade300),
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: currentImages.isNotEmpty
-                                          ? _buildColorSwatchImage(currentImages[0])
-                                          : Container(color: Colors.grey.shade200),
-                                    ),
-                                  ),
-                                  // Expand icon on top left
-                                  Positioned(
-                                    top: 4,
-                                    left: 4,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.8),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.open_in_full,
-                                        size: 14,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
+                          // Product thumbnail image (based on active variation)
+                          GestureDetector(
+                            onTap: () {
+                              if (activeVariationImages.isNotEmpty) {
+                                _openImageViewer(activeVariationImages[0], _activeVariationForSheet ?? '', priceSlabs);
+                              }
                             },
+                            child: Stack(
+                              children: [
+                                Container(
+                                  width: 80,
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: activeVariationImages.isNotEmpty
+                                        ? _buildColorSwatchImage(activeVariationImages[0])
+                                        : Container(color: Colors.grey.shade200),
+                                  ),
+                                ),
+                                // Expand icon on top left
+                                Positioned(
+                                  top: 4,
+                                  left: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.8),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.open_in_full,
+                                      size: 14,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                // Variation name at bottom
+                                if (_activeVariationForSheet != null && _activeVariationForSheet!.isNotEmpty)
+                                  Positioned(
+                                    bottom: 0,
+                                    left: 0,
+                                    right: 0,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.6),
+                                        borderRadius: const BorderRadius.only(
+                                          bottomLeft: Radius.circular(8),
+                                          bottomRight: Radius.circular(8),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        _activeVariationForSheet!,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                           const SizedBox(width: 12),
                           // Pricing tiers on right - slidable
@@ -1858,6 +2100,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                     const Divider(height: 1),
+
                     Expanded(
                       child: SingleChildScrollView(
                         controller: scrollController,
@@ -1866,7 +2109,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Color grid - always show 6 colors
+                              // Color grid header
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1920,6 +2163,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 ],
                               ),
                               const SizedBox(height: 8),
+
+                              // Color selection grid
                               Builder(
                                 builder: (context) {
                                   final count = variations.length;
@@ -1929,11 +2174,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       child: Row(
                                         children: variations.map((variation) {
                                           final vColorName = variation['name']?.toString() ?? '';
-                                          final isSelected = vColorName == _currentVariation['name']?.toString();
+                                          final isSelected = vColorName == _activeVariationForSheet;
+                                          final selectedQty = getVariationQty(vColorName);
+
                                           return GestureDetector(
                                             onTap: () {
                                               setModalState(() {
-                                                _switchVariation(variation);
+                                                _activeVariationForSheet = vColorName;
                                                 _subtotal = calcSubtotal();
                                               });
                                             },
@@ -1942,12 +2189,38 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                               decoration: BoxDecoration(
                                                 borderRadius: BorderRadius.circular(6),
-                                                border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300, width: isSelected ? 1.5 : 1),
+                                                border: Border.all(
+                                                  color: isSelected ? Colors.orange : Colors.grey.shade300,
+                                                  width: isSelected ? 2 : 1,
+                                                ),
                                                 color: Colors.white,
                                               ),
-                                              child: Text(
-                                                vColorName,
-                                                style: const TextStyle(fontSize: 12),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    vColorName,
+                                                    style: const TextStyle(fontSize: 12),
+                                                  ),
+                                                  if (selectedQty > 0) ...[
+                                                    const SizedBox(width: 4),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red,
+                                                        borderRadius: BorderRadius.circular(10),
+                                                      ),
+                                                      child: Text(
+                                                        '$selectedQty',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
                                               ),
                                             ),
                                           );
@@ -1955,6 +2228,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       ),
                                     );
                                   }
+
                                   final gridCount = count > 6 ? 7 : count;
                                   return GridView.builder(
                                     shrinkWrap: true,
@@ -1989,43 +2263,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           ),
                                         );
                                       }
+
                                       final variation = variations[index];
+                                      final vColorName = variation['name']?.toString() ?? '';
+                                      final isSelected = vColorName == _activeVariationForSheet;
+                                      final selectedQty = getVariationQty(vColorName);
+
+                                      // Get image for this variation
+                                      final variationImages = getImagesForVariation(variation);
                                       String? variationImage;
-                                      if (variation['allImages'] != null) {
-                                        final allImages = variation['allImages'] as List;
-                                        if (allImages.isNotEmpty) {
-                                          variationImage = allImages.first.toString();
-                                        }
-                                      }
-                                      if (variationImage == null && variation['image'] != null) {
+                                      if (variationImages.isNotEmpty) {
+                                        variationImage = variationImages[0];
+                                      } else if (variation['image'] != null) {
                                         variationImage = variation['image'].toString();
                                       }
-                                      final vColorName = variation['name']?.toString() ?? '';
-                                      final isSelected = vColorName == _currentVariation['name']?.toString();
-                                      // Get quantity for this specific color variation
-                                      final selectedQty = getVariationQty(vColorName);
+
                                       return GestureDetector(
                                         onTap: () {
-                                              setModalState(() {
-                                                final oldVarName = _currentVariation['name']?.toString() ?? '';
-                                                print('DEBUG: Switching from $oldVarName to ${variation['name']}');
-                                                _switchVariation(variation);
-                                                final newVarName = variation['name']?.toString() ?? '';
-                                                if (!_variationSizeQuantities.containsKey(newVarName)) {
-                                                  _variationSizeQuantities[newVarName] = {};
-                                                  for (final s in sizes) {
-                                                    _variationSizeQuantities[newVarName]![s] = 0;
-                                                  }
-                                                  print('DEBUG: Initialized new variation $newVarName with zero quantities');
-                                                } else {
-                                                  print('DEBUG: Existing quantities for $newVarName: ${_variationSizeQuantities[newVarName]}');
-                                                }
-                                                final newImages = _getAllImages();
-                                                _subtotal = calcSubtotal();
-                                              });
-                                              // Update the summary by rebuilding
-                                              setModalState(() {});
-                                            },
+                                          setModalState(() {
+                                            _activeVariationForSheet = vColorName;
+                                            _subtotal = calcSubtotal();
+                                          });
+                                        },
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -2047,14 +2306,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                         ? Stack(
                                                       children: [
                                                         Positioned.fill(
-                                                          child: _buildColorSwatchImage(variationImage),
+                                                          child: _buildColorSwatchImage(variationImage!),
                                                         ),
                                                         Positioned(
                                                           top: 2,
                                                           left: 2,
                                                           child: GestureDetector(
                                                             onTap: () {
-                                                              _openImageViewer(variationImage!, vColorName, priceSlabs);
+                                                              if (variationImage != null) {
+                                                                _openImageViewer(variationImage!, vColorName, priceSlabs);
+                                                              }
                                                             },
                                                             child: Container(
                                                               padding: const EdgeInsets.all(2),
@@ -2080,7 +2341,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                             child: Text(
                                                               vColorName,
                                                               overflow: TextOverflow.ellipsis,
-                                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                                              style: const TextStyle(
+                                                                fontSize: 11,
+                                                                fontWeight: FontWeight.w600,
+                                                              ),
                                                             ),
                                                           ),
                                                         ),
@@ -2100,7 +2364,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                         borderRadius: BorderRadius.circular(10),
                                                       ),
                                                       child: Text(
-                                                        'x$selectedQty',
+                                                        '$selectedQty',
                                                         style: const TextStyle(
                                                           color: Colors.white,
                                                           fontSize: 10,
@@ -2119,8 +2383,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   );
                                 },
                               ),
-                              const SizedBox(height: 12),
-                              // Size with steppers
+
+                              const SizedBox(height: 16),
+
+                              // Size selection header
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -2135,20 +2401,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 ],
                               ),
                               const SizedBox(height: 8),
+
+                              // Size selection with steppers
                               Column(
                                 children: sizes.map((s) {
-                                  final currentSizes = getCurrentSizeQuantities();
-                                  final qty = currentSizes[s] ?? 0;
+                                  final qty = activeSizes[s] ?? 0;
                                   final availableStock = widget.product.stockMode == 'color_size'
-                                      ? getAvailableStock(currentVarName, s)
+                                      ? getAvailableStock(_activeVariationForSheet!, s)
                                       : null;
                                   final remainingStock = widget.product.stockMode == 'color_size'
-                                      ? getRemainingStock(currentVarName, s)
+                                      ? getRemainingStock(_activeVariationForSheet!, s)
                                       : getRemainingSimpleStock();
                                   final stockOut = widget.product.stockMode == 'always_available'
-                                      ? false // Never out of stock for always_available
+                                      ? false
                                       : widget.product.stockMode == 'color_size'
-                                      ? isOutOfStock(currentVarName, s)
+                                      ? isOutOfStock(_activeVariationForSheet!, s)
                                       : isSimpleStockOut();
                                   final isAlwaysAvailable = widget.product.stockMode == 'always_available';
                                   final effectiveStockOut = isAlwaysAvailable ? false : stockOut;
@@ -2257,13 +2524,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           children: [
                                             IconButton(
                                               onPressed: () {
-                                                final cur = (currentSizes[s] ?? 0);
-                                                if (cur > 0) {
-                                                  print('DEBUG: Decreasing quantity for $currentVarName, size $s from $cur to ${cur - 1}');
-                                                  _variationSizeQuantities[currentVarName]![s] = cur - 1;
-                                                  _subtotal = calcSubtotal();
+                                                if (qty > 0) {
                                                   setModalState(() {
-                                                    // Rebuild to update summary
+                                                    _variationSizeQuantities[_activeVariationForSheet!]![s] = qty - 1;
+                                                    _subtotal = calcSubtotal();
                                                   });
                                                 }
                                               },
@@ -2277,25 +2541,19 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                               onPressed: effectiveStockOut
                                                   ? null
                                                   : () {
-                                                final cur = (currentSizes[s] ?? 0);
-                                                // For always_available, allow unlimited quantity
                                                 if (isAlwaysAvailable) {
-                                                  print('DEBUG: Increasing quantity for $currentVarName, size $s from $cur to ${cur + 1}');
-                                                  _variationSizeQuantities[currentVarName]![s] = cur + 1;
-                                                  _subtotal = calcSubtotal();
                                                   setModalState(() {
-                                                    // Rebuild to update summary
+                                                    _variationSizeQuantities[_activeVariationForSheet!]![s] = qty + 1;
+                                                    _subtotal = calcSubtotal();
                                                   });
                                                 } else {
                                                   final remaining = widget.product.stockMode == 'color_size'
-                                                      ? getRemainingStock(currentVarName, s)
+                                                      ? getRemainingStock(_activeVariationForSheet!, s)
                                                       : getRemainingSimpleStock();
                                                   if (remaining > 0) {
-                                                    print('DEBUG: Increasing quantity for $currentVarName, size $s from $cur to ${cur + 1}');
-                                                    _variationSizeQuantities[currentVarName]![s] = cur + 1;
-                                                    _subtotal = calcSubtotal();
                                                     setModalState(() {
-                                                      // Rebuild to update summary
+                                                      _variationSizeQuantities[_activeVariationForSheet!]![s] = qty + 1;
+                                                      _subtotal = calcSubtotal();
                                                     });
                                                   }
                                                 }
@@ -2314,26 +2572,65 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   );
                                 }).toList(),
                               ),
+
                               const SizedBox(height: 8),
+
+                              // Selected sizes summary for active variation
                               Builder(
                                 builder: (context) {
-                                  final currentSizes = getCurrentSizeQuantities();
-                                  return Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: sizes.where((s) => (currentSizes[s] ?? 0) > 0).map((s) {
-                                      final q = currentSizes[s]!;
-                                      return Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey.shade100,
-                                          borderRadius: BorderRadius.circular(20),
-                                          border: Border.all(color: Colors.grey.shade300),
+                                  final selectedSizes = sizes.where((s) => (activeSizes[s] ?? 0) > 0).toList();
+                                  if (selectedSizes.isNotEmpty) {
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Selected for $_activeVariationForSheet:',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade700,
+                                          ),
                                         ),
-                                        child: Text('$s × $q'),
-                                      );
-                                    }).toList(),
-                                  );
+                                        const SizedBox(height: 8),
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: selectedSizes.map((s) {
+                                            final q = activeSizes[s]!;
+                                            return Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.shade50,
+                                                borderRadius: BorderRadius.circular(20),
+                                                border: Border.all(color: Colors.blue.shade300),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text('$s × $q'),
+                                                  const SizedBox(width: 4),
+                                                  GestureDetector(
+                                                    onTap: () {
+                                                      setModalState(() {
+                                                        _variationSizeQuantities[_activeVariationForSheet!]![s] = 0;
+                                                        _subtotal = calcSubtotal();
+                                                      });
+                                                    },
+                                                    child: Icon(
+                                                      Icons.clear,
+                                                      size: 16,
+                                                      color: Colors.red.shade600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ],
+                                    );
+                                  }
+                                  return const SizedBox.shrink();
                                 },
                               ),
                             ],
@@ -2341,6 +2638,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                       ),
                     ),
+
                     // Bottom subtotal and actions
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -2355,9 +2653,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         child: Row(
                           children: [
                             Expanded(
-                              child: Text('Subtotal: ₹${_subtotal.toStringAsFixed(2)}',
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Subtotal: ₹${_subtotal.toStringAsFixed(2)}',
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Total items: ${getTotalSelectedQuantity()}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
+                            const SizedBox(width: 8),
                             SizedBox(
                               height: 40,
                               child: OutlinedButton(
@@ -2383,7 +2697,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       builder: (context) => CheckoutScreen(
                                         product: widget.product,
                                         selectedVariation: _currentVariation,
-                                        quantity: _variationQuantities[_currentVariation['name']] ?? 1,
+                                        quantity: getTotalSelectedQuantity(),
                                         totalPrice: _subtotal,
                                       ),
                                     ),

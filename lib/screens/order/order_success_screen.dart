@@ -117,11 +117,13 @@ class OrderSuccessScreen extends StatelessWidget {
                       children: [
                         Icon(Icons.phone, color: Colors.orange[600], size: 20),
                         const SizedBox(width: 12),
-                        const Text(
-                          'You will receive updates on your phone',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
+                        Expanded(
+                          child: const Text(
+                            'You will receive updates on your phone',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],

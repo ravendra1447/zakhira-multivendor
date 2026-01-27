@@ -12,6 +12,8 @@ import 'package:http/http.dart' as http;
 import '../main.dart';
 import '../models/chat_model.dart' hide MessageAdapter;
 import '../screens/chat_screen.dart';
+import '../screens/order/admin_all_orders_screen.dart';
+import '../screens/order/order_detail_screen.dart';
 import '../services/local_auth_service.dart';
 import '../utils/sound_utils.dart';
 
@@ -32,6 +34,15 @@ class MyFirebaseMessagingService {
     // Ensure Hive is properly initialized in background
     await Hive.initFlutter();
     Hive.registerAdapter(MessageAdapter());
+
+    // Check if it's an order notification
+    if (message.data['type'] == 'order_confirmation' || 
+        message.data['type'] == 'new_order_admin' ||
+        message.data['type'] == 'order_status_update') {
+      // Handle order notifications in background
+      await _showOrderLocalNotification(message);
+      return;
+    }
 
     if (message.data.isNotEmpty) {
       final msg = Message.fromMap(message.data);
@@ -70,13 +81,18 @@ class MyFirebaseMessagingService {
       onDidReceiveNotificationResponse: (response) {
         // when user taps notification
         final payload = response.payload;
+        print("🔔 Notification tapped with payload: $payload"); // Debug log
+        
         if (payload != null) {
           try {
             final data = jsonDecode(payload);
+            print("🔔 Parsed notification data: $data"); // Debug log
             _navigateToChat(data);
           } catch (e) {
             print("❌ Notification tap payload parse error: $e");
           }
+        } else {
+          print("❌ Notification payload is null");
         }
       },
     );
@@ -84,6 +100,16 @@ class MyFirebaseMessagingService {
     // ✅ Foreground Message Listener
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       print('📩 Foreground message received: ${message.notification?.title}');
+      
+      // Check if it's an order notification
+      if (message.data['type'] == 'order_confirmation' || 
+          message.data['type'] == 'new_order_admin' ||
+          message.data['type'] == 'order_status_update') {
+        // Handle order notifications
+        await _handleOrderNotification(message);
+        return;
+      }
+      
       if (message.data.isNotEmpty) {
         // ✅ DEBUG: Log Firebase data to check for group_id
         print('🔍 [FIREBASE DATA] All keys: ${message.data.keys.toList()}');
@@ -124,12 +150,70 @@ class MyFirebaseMessagingService {
     await saveFcmTokenToServer();
   }
 
+  /// Handle Order Notifications
+  static Future<void> _handleOrderNotification(RemoteMessage message) async {
+    print('🛒 Order notification received: ${message.notification?.title}');
+    
+    // Show local notification for orders (even in foreground)
+    await _showOrderLocalNotification(message);
+    
+    // Play notification sound
+    SoundUtils.playReceiveSound();
+  }
+
+  /// Show Order Local Notification
+  static Future<void> _showOrderLocalNotification(RemoteMessage message) async {
+    RemoteNotification? notification = message.notification;
+    
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'order_channel',
+      'Order Notifications',
+      channelDescription: 'Order updates and confirmations',
+      importance: Importance.max,
+      priority: Priority.high,
+      showWhen: true,
+      icon: '@mipmap/ic_launcher',
+      largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+      styleInformation: BigTextStyleInformation(
+        notification?.body ?? 'You have a new order update',
+        htmlFormatBigText: true,
+        contentTitle: notification?.title ?? 'Order Update',
+        htmlFormatContentTitle: true,
+      ),
+    );
+
+    final NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    await _flutterLocalNotificationsPlugin.show(
+      notification?.hashCode ?? DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      notification?.title ?? 'Order Update',
+      notification?.body ?? 'You have a new order update',
+      platformDetails,
+      payload: jsonEncode(message.data),
+    );
+  }
+
   /// Handle Navigation on notification tap
   static void _navigateToChat(Map<String, dynamic> data) {
     try {
+      print("🔍 Navigation data received: $data"); // Debug log
+      
+      // Check if it's an order notification
+      final type = data['type'];
+      print("🔍 Notification type: $type"); // Debug log
+      
+      if (type == 'order_confirmation' || type == 'new_order_admin' || type == 'order_status_update') {
+        _navigateToOrder(data);
+        return;
+      }
+
       final chatId = int.tryParse(data['chatId'] ?? '');
       final otherUserId = int.tryParse(data['otherUserId'] ?? '');
       final otherUserName = data['otherUserName'];
+
+      print("🔍 Chat data - chatId: $chatId, otherUserId: $otherUserId, otherUserName: $otherUserName"); // Debug log
 
       if (chatId != null && otherUserId != null && otherUserName != null) {
         navigatorKey.currentState?.push(
@@ -143,9 +227,67 @@ class MyFirebaseMessagingService {
         );
       } else {
         print("❌ Missing data for navigation");
+        print("❌ Available keys in data: ${data.keys.toList()}"); // Debug log
       }
     } catch (e) {
       print("❌ Error navigating to chat: $e");
+    }
+  }
+
+  /// Navigate to Order Details/Admin Dashboard
+  static void _navigateToOrder(Map<String, dynamic> data) {
+    try {
+      final type = data['type'];
+      final orderId = data['orderId'];
+
+      if (type == 'new_order_admin') {
+        // Navigate to order details for admin
+        try {
+          final orderIdInt = int.parse(orderId);
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: orderIdInt),
+            ),
+          );
+          print("🛒 Admin navigated to order details for new order - Order ID: $orderId");
+        } catch (e) {
+          print("❌ Error parsing orderId or navigating for admin: $e");
+          // Fallback to dashboard if order details fail
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => AdminAllOrdersScreen(orders: []),
+            ),
+          );
+        }
+      } else if (type == 'order_confirmation') {
+        // Navigate to user order details
+        try {
+          final orderIdInt = int.parse(orderId);
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: orderIdInt),
+            ),
+          );
+          print("🛒 Navigated to order details for Order ID: $orderId");
+        } catch (e) {
+          print("❌ Error parsing orderId or navigating: $e");
+        }
+      } else if (type == 'order_status_update') {
+        // Navigate to order details
+        try {
+          final orderIdInt = int.parse(orderId);
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: orderIdInt),
+            ),
+          );
+          print("🛒 Navigated to order details for status update - Order ID: $orderId");
+        } catch (e) {
+          print("❌ Error parsing orderId or navigating: $e");
+        }
+      }
+    } catch (e) {
+      print("❌ Error navigating to order: $e");
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'local_auth_service.dart';
 import 'product_database_service.dart';
+import 'product_website_service.dart';
 import '../models/product.dart';
 
 class ProductService {
@@ -139,14 +140,19 @@ class ProductService {
         images: images,
         variations: processedVariations,
         dbService: dbService,
+        productData: productData, // Pass productData for website associations
+        status: status, // Pass status parameter
       );
 
       // Return success immediately
-      return {
+      final result = {
         "success": true,
         "message": "Product saved successfully. Images uploading in background...",
         "data": {"local_id": localId},
+        "product_id": localId, // Add product_id for website associations
       };
+
+      return result;
     } catch (e) {
       return {"success": false, "message": "Error: ${e.toString()}"};
     }
@@ -159,11 +165,19 @@ class ProductService {
     required List<File> images,
     required List<Map<String, dynamic>> variations,
     required ProductDatabaseService dbService,
+    Map<String, dynamic>? productData, // Add productData for website associations
+    required String status, // Add status parameter
   }) async {
     // Run in background (don't await)
     Future(() async {
       try {
         print('🔄 Background upload started for product $localId...');
+        print('🔄 ProductData received: ${productData != null ? "YES" : "NO"}');
+        if (productData != null) {
+          print('🔄 Product status: ${productData['status']}');
+          print('🔄 publishWebsiteEnabled: ${productData['publishWebsiteEnabled']}');
+          print('🔄 selectedWebsiteIds: ${productData['selectedWebsiteIds']}');
+        }
         
         // Upload main images in parallel
         final List<String> imageUrls = [];
@@ -307,6 +321,44 @@ class ProductService {
               if (serverId != null) {
                 await dbService.markAsSynced(localId, serverId);
                 print('✅ Product $localId synced with server (ID: $serverId)');
+                
+                // Debug: Check website association conditions
+                print('🔍 Checking website associations...');
+                print('🔍 status parameter: $status');
+                print('🔍 productData exists: ${productData != null}');
+                if (productData != null) {
+                  print('🔍 productData status: ${productData['status']}');
+                  print('🔍 publishWebsiteEnabled: ${productData['publishWebsiteEnabled']}');
+                  print('🔍 selectedWebsiteIds: ${productData['selectedWebsiteIds']}');
+                }
+                
+                // Handle website associations after getting actual server product_id
+                if (productData != null && 
+                    status == 'publish' && 
+                    productData['publishWebsiteEnabled'] == true && 
+                    productData['selectedWebsiteIds'] != null) {
+                  
+                  print('✅ All conditions passed - proceeding with website associations');
+                  
+                  final List<int> websiteIds = (productData['selectedWebsiteIds'] as List<dynamic>)
+                      .map((id) => int.parse(id.toString()))
+                      .toList();
+                  
+                  if (websiteIds.isNotEmpty) {
+                    print('🌐 Saving website associations with actual server product_id: $serverId...');
+                    await ProductWebsiteService.saveProductWebsites(
+                      productId: serverId, // Use actual server product_id
+                      websiteIds: websiteIds,
+                    );
+                  } else {
+                    print('❌ websiteIds is empty');
+                  }
+                } else {
+                  print('❌ Website associations conditions not met');
+                  print('❌ Status check: ${status == 'publish' ? 'PASS' : 'FAIL'}');
+                  print('❌ publishWebsiteEnabled check: ${productData?['publishWebsiteEnabled'] == true ? 'PASS' : 'FAIL'}');
+                  print('❌ selectedWebsiteIds check: ${productData?['selectedWebsiteIds'] != null ? 'PASS' : 'FAIL'}');
+                }
               }
             }
           } catch (e) {

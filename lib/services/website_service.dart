@@ -122,4 +122,52 @@ class WebsiteService {
       throw Exception('Error fetching website products: $e');
     }
   }
+
+  // Fetch products published to a specific website (for Website Products List)
+  static Future<Map<String, dynamic>> getPublishedWebsiteProducts(int websiteId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/product-domain-visibility/products/website/$websiteId'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'products': data['products'] ?? []
+        };
+      } else {
+        throw Exception('Failed to fetch published website products');
+      }
+    } catch (e) {
+      throw Exception('Error fetching published website products: $e');
+    }
+  }
+
+  // Fetch websites with published products for a user
+  static Future<Map<String, dynamic>> getWebsitesWithProducts(int userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/product-domain-visibility/websites/with-products/$userId'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'websites': data['websites'] ?? []
+        };
+      } else {
+        throw Exception('Failed to fetch websites with products');
+      }
+    } catch (e) {
+      throw Exception('Error fetching websites with products: $e');
+    }
+  }
 }

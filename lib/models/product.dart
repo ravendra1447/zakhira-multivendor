@@ -261,5 +261,23 @@ class Product {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+
+  // Get the lowest price from price slabs
+  double? get price {
+    if (priceSlabs.isEmpty) return null;
+    
+    double? lowestPrice;
+    for (final slab in priceSlabs) {
+      if (slab['price'] != null) {
+        final price = double.tryParse(slab['price'].toString());
+        if (price != null) {
+          if (lowestPrice == null || price < lowestPrice) {
+            lowestPrice = price;
+          }
+        }
+      }
+    }
+    return lowestPrice;
+  }
 }
 

@@ -1,13 +1,16 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../camera_interface_screen.dart';
 import 'category_selection_screen.dart';
 import 'attributes_management_screen.dart';
 import '../../services/product_service.dart';
+import '../../services/local_auth_service.dart';
 import '../chat_home.dart';
+import '../../config.dart';
 import 'package:whatsappchat/theme/app_theme.dart';
 import 'package:whatsappchat/theme/app_colors.dart';
 import 'package:whatsappchat/theme/app_typography.dart';
@@ -53,6 +56,9 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   final TextEditingController _tempValueController = TextEditingController();
   bool _showAddAttributeFields = false;
   bool _marketplaceEnabled = true; // Marketplace toggle
+  bool _publishWebsiteEnabled = false; // Publish Website toggle
+  List<Map<String, dynamic>> _websites = []; // List of available websites
+  List<int> _selectedWebsiteIds = []; // Selected website IDs
   // Stock management
   String _stockMode = 'simple'; // 'simple', 'color_size', or 'always_available'
   String? _selectedColorForStock;
@@ -72,6 +78,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   void initState() {
     super.initState();
     _loadRecentlySelectedItems();
+    _fetchWebsites(); // Fetch websites on initialization
     // Initialize color items from colorImagesMap if available
     if (widget.colorImagesMap != null && widget.colorImagesMap!.isNotEmpty) {
       // Use color names from map - store all images for each color
@@ -157,6 +164,357 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
 
     // Optionally, save this new color to recent colors again
     _saveRecentColor(colorName);
+  }
+
+  // Fetch websites from API
+  Future<void> _fetchWebsites() async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      
+      if (userId != null) {
+        print('🔍 Found userId: $userId');
+        // Use Config.baseNodeApiUrl instead of direct IP
+        final String baseUrl = Config.baseNodeApiUrl;
+        
+        // First test all websites endpoint
+        print('🔍 Testing ALL websites endpoint on Node API...');
+        try {
+          final testResponse = await http.get(
+            Uri.parse('$baseUrl/product-domain-visibility/test/websites'),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          );
+          
+          print('📊 Test response status: ${testResponse.statusCode}');
+          if (testResponse.statusCode == 200) {
+            final testData = json.decode(testResponse.body);
+            print('📊 Total websites in DB: ${testData['count']}');
+            print('📊 Sample data: ${testData['websites'].take(2)}');
+          }
+        } catch (e) {
+          print('❌ Test endpoint failed: $e');
+        }
+        
+        // Now try debug endpoint to see if websites exist
+        print('🔍 Trying debug endpoint on Node API...');
+        final debugResponse = await http.get(
+          Uri.parse('$baseUrl/product-domain-visibility/websites/all'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        );
+        
+        print('📊 Debug response status: ${debugResponse.statusCode}');
+        if (debugResponse.statusCode == 200) {
+          final debugData = json.decode(debugResponse.body);
+          print('📊 Debug websites found: ${debugData['websites']?.length ?? 0}');
+        }
+        
+        // Now try the actual endpoint - temporarily use debug endpoint to show all websites
+        print('🔍 Using debug endpoint to show all websites (temporary fix)...');
+        final response = await http.get(
+          Uri.parse('$baseUrl/product-domain-visibility/websites/all'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        );
+        
+        print('📊 User response status: ${response.statusCode}');
+        print('📊 User response body: ${response.body}');
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['success'] == true && data['websites'] != null) {
+            setState(() {
+              _websites = List<Map<String, dynamic>>.from(data['websites']);
+            });
+            print('✅ Successfully loaded ${_websites.length} websites');
+          }
+        } else {
+          print('HTTP Error: ${response.statusCode}');
+          print('Response body: ${response.body}');
+        }
+      } else {
+        print('❌ User ID is null - user not logged in');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Please login to access websites'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error fetching websites: $e');
+    }
+  }
+
+  // Save product-website associations
+  Future<void> _saveProductWebsiteAssociations(int productId) async {
+    try {
+      if (_publishWebsiteEnabled && _selectedWebsiteIds.isNotEmpty) {
+        print('🌐 Saving product-website associations...');
+        print('🌐 Product ID: $productId');
+        print('🌐 Selected Website IDs: $_selectedWebsiteIds');
+        
+        final String baseUrl = Config.baseNodeApiUrl;
+        final response = await http.post(
+          Uri.parse('$baseUrl/product-domain-visibility/save'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({
+            'productId': productId,
+            'selectedWebsiteIds': _selectedWebsiteIds,
+          }),
+        );
+        
+        print('🌐 Save response status: ${response.statusCode}');
+        print('🌐 Save response body: ${response.body}');
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['success'] == true) {
+            print('✅ Product-website associations saved successfully');
+          } else {
+            print('❌ Failed to save associations: ${data['message']}');
+          }
+        } else {
+          print('❌ HTTP Error: ${response.statusCode}');
+        }
+      } else {
+        print('🌐 No websites selected or publish website disabled');
+      }
+    } catch (e) {
+      print('❌ Error saving product-website associations: $e');
+    }
+  }
+
+  // Show website selection modal
+  Future<void> _showWebsiteSelectionModal() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              backgroundColor: AppColors.card(context),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Title
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Select Websites',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary(context),
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close, color: AppColors.textSecondary(context)),
+                            onPressed: () => Navigator.pop(ctx),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (_websites.isEmpty) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.language, size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No websites found',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Add websites to publish products',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  print('🔄 Refreshing websites...');
+                                  await _fetchWebsites();
+                                  setModalState(() {});
+                                  print('🔄 Refresh completed. Websites count: ${_websites.length}');
+                                },
+                                icon: Icon(Icons.refresh, size: 16),
+                                label: Text('Refresh'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        Text(
+                          'Choose websites where this product will be visible:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary(context),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ..._websites.map((website) {
+                          final websiteId = website['website_id'] as int;
+                          final isSelected = _selectedWebsiteIds.contains(websiteId);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: GestureDetector(
+                              onTap: () {
+                                setModalState(() {
+                                  if (isSelected) {
+                                    _selectedWebsiteIds.remove(websiteId);
+                                  } else {
+                                    _selectedWebsiteIds.add(websiteId);
+                                  }
+                                });
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? const Color(0xFF25D366).withOpacity(0.6)
+                                        : AppColors.border(context),
+                                    width: isSelected ? 2 : 1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: isSelected
+                                      ? const Color(0xFF25D366).withOpacity(0.08)
+                                      : AppColors.surface(context),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 20,
+                                      height: 20,
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? const Color(0xFF25D366)
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? const Color(0xFF25D366)
+                                              : AppColors.border(context),
+                                          width: 2,
+                                        ),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: isSelected
+                                          ? const Icon(
+                                              Icons.check,
+                                              size: 14,
+                                              color: Colors.white,
+                                            )
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            website['website_name'] ?? 'Unknown Website',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: isSelected
+                                                  ? const Color(0xFF25D366)
+                                                  : AppColors.textPrimary(context),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            website['domain'] ?? 'No domain',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: AppColors.textSecondary(context),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.language,
+                                      size: 16,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                      const SizedBox(height: 16),
+                      // Done button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 40,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() {}); // Update main UI with selected websites
+                            Navigator.pop(ctx);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25D366),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            'Done',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // Helper function to get color from color name
@@ -1939,6 +2297,8 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         'description': _descController.text.trim(),
         'sizes': _selectedSizes, // Keep as Set<String> - ProductService expects Set<String>?
         'marketplaceEnabled': _marketplaceEnabled,
+        'publishWebsiteEnabled': _publishWebsiteEnabled,
+        'selectedWebsiteIds': _selectedWebsiteIds,
         // Include full stock data for color_size mode
         'stockByColorSize': _stockMode == 'color_size'
             ? _stockByColorSize.map((color, sizeMap) =>
@@ -1949,12 +2309,20 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
         'showMadeOnOrderBadge': _stockMode == 'always_available' ? _showMadeOnOrderBadge : false,
       };
 
+      // Debug: Print save details
+      print('🎯 About to save product with status: $type');
+      print('🎯 _publishWebsiteEnabled: $_publishWebsiteEnabled');
+      print('🎯 _selectedWebsiteIds: $_selectedWebsiteIds');
+
       // Save to database using ProductService
       final result = await ProductService.saveProduct(
         productData: productData,
         images: widget.images,
         status: type, // 'draft' or 'publish'
       );
+
+      // Debug: Print save result
+      print('🎯 ProductService.saveProduct result: $result');
 
       // Close loading dialog
       if (mounted) {
@@ -3820,6 +4188,99 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                           },
                           activeColor: const Color(0xFF25D366),
                         ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Publish Website Toggle
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.language,
+                                    color: Color(0xFF25D366), size: 20),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Publish Website',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Switch(
+                              value: _publishWebsiteEnabled,
+                              onChanged: (value) {
+                                setState(() {
+                                  _publishWebsiteEnabled = value;
+                                });
+                                if (value) {
+                                  print('🌐 Website toggle enabled - fetching websites...');
+                                  _fetchWebsites();
+                                }
+                              },
+                              activeColor: const Color(0xFF25D366),
+                            ),
+                          ],
+                        ),
+                        if (_publishWebsiteEnabled) ...[
+                          const SizedBox(height: 12),
+                          GestureDetector(
+                            onTap: () {
+                              print('🌐 Website selection button tapped. Websites available: ${_websites.length}');
+                              _showWebsiteSelectionModal();
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.list_alt, 
+                                       size: 16, 
+                                       color: Colors.grey.shade600),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _selectedWebsiteIds.isEmpty
+                                          ? 'Select websites...'
+                                          : '${_selectedWebsiteIds.length} website(s) selected',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: _selectedWebsiteIds.isEmpty
+                                            ? Colors.grey.shade500
+                                            : const Color(0xFF25D366),
+                                        fontWeight: _selectedWebsiteIds.isEmpty
+                                            ? FontWeight.normal
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(Icons.arrow_forward_ios, 
+                                       size: 12, 
+                                       color: Colors.grey.shade400),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

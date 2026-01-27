@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/product.dart';
 import '../../services/product_service.dart';
 import '../../services/local_auth_service.dart';
+import '../../services/catalog_service.dart';
 
 class InstagramCategoryProductDetailScreen extends StatefulWidget {
   final String categoryName;
@@ -216,9 +217,28 @@ class _InstagramCategoryProductDetailScreenState extends State<InstagramCategory
     return null;
   }
 
-  // ✅ Updated: API call for Instagram update
+  // Updated: Catalog-based Instagram update
   Future<void> _updateProductsForInstagram() async {
     if (_selectedProducts.isEmpty) return;
+
+    // Show catalog options
+    _showCatalogOptions();
+  }
+
+  // Show catalog creation/addition options
+  Future<void> _showCatalogOptions() async {
+    final userId = LocalAuthService.getUserId();
+    if (userId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('User not logged in'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
 
     // Show loading
     showDialog(
@@ -230,34 +250,308 @@ class _InstagramCategoryProductDetailScreenState extends State<InstagramCategory
     );
 
     try {
-      // ✅ Updated API call
-      final result = await ProductService.updateProductsForInstagram(
+      // Get existing catalogs
+      final catalogsResult = await CatalogService.getCatalogs(userId);
+      Navigator.pop(context); // Close loading dialog
+
+      if (!mounted) return;
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          builder: (context, scrollController) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SingleChildScrollView(
+              controller: scrollController,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'Catalog Options',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF128C7E),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  
+                  // Create New Catalog section
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF25D366).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.add_circle,
+                        color: Color(0xFF25D366),
+                      ),
+                    ),
+                    title: const Text(
+                      'Create New Catalog',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Create a catalog with ${_selectedProducts.length} selected products',
+                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showCreateCatalogDialog();
+                    },
+                  ),
+                  
+                  const Divider(height: 32),
+                  
+                  // Add to Existing Catalog section
+                  if (catalogsResult['success'] == true && 
+                      catalogsResult['catalogs'] != null && 
+                      catalogsResult['catalogs'].isNotEmpty) ...[
+                    Text(
+                      'Add to Existing Catalog',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...catalogsResult['catalogs'].map((catalog) => ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF128C7E).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.folder,
+                          color: Color(0xFF128C7E),
+                        ),
+                      ),
+                      title: Text(
+                        catalog['catalog_name'] ?? 'Unnamed Catalog',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${catalog['product_count'] ?? 0} products • ${catalog['catalog_code'] ?? ''}',
+                        style: const TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _addToExistingCatalog(catalog['id']);
+                      },
+                    )).toList(),
+                  ] else ...[
+                    const SizedBox(height: 20),
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.folder_open, size: 48, color: Colors.grey[400]),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No existing catalogs',
+                            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Create a new catalog to get started',
+                            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading catalogs: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showCreateCatalogDialog() async {
+    final TextEditingController catalogNameController = TextEditingController();
+    
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create New Catalog'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Create a catalog with ${_selectedProducts.length} selected products'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: catalogNameController,
+              decoration: const InputDecoration(
+                labelText: 'Catalog Name',
+                hintText: 'Enter catalog name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (catalogNameController.text.trim().isNotEmpty) {
+                Navigator.pop(context);
+                _createNewCatalog(catalogNameController.text.trim());
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF128C7E),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createNewCatalog(String catalogName) async {
+    final userId = LocalAuthService.getUserId();
+    if (userId == null) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final result = await CatalogService.createCatalog(
+        userId: userId,
         productIds: _selectedProducts.toList(),
+        catalogName: catalogName,
       );
 
       Navigator.pop(context); // Close loading dialog
 
-      if (result['success'] == true) {
-        // ✅ Success: Return to previous screen with selected IDs
-        Navigator.pop(context, _selectedProducts.toList());
+      if (!mounted) return;
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${_selectedProducts.length} products added to Instagram'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+      if (result['success'] == true) {
+        // Success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Catalog "${result['catalog']['catalog_name']}" created with ${_selectedProducts.length} products'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Go back to previous screen
+        Navigator.pop(context, _selectedProducts.toList());
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message'] ?? 'Failed to update products'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to create catalog'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _addToExistingCatalog(int catalogId) async {
+    final userId = LocalAuthService.getUserId();
+    if (userId == null) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final result = await CatalogService.addToCatalog(
+        userId: userId,
+        productIds: _selectedProducts.toList(),
+        catalogId: catalogId,
+      );
+
+      Navigator.pop(context); // Close loading dialog
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${_selectedProducts.length} products added to catalog'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Go back to previous screen
+        Navigator.pop(context, _selectedProducts.toList());
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to add products to catalog'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       Navigator.pop(context); // Close loading dialog

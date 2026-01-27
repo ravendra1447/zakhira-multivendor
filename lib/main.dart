@@ -211,9 +211,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   //ImpellerInitializer.disable();
 
-
-
-
   // Firebase Init
   await Firebase.initializeApp();
 
@@ -231,7 +228,6 @@ Future<void> main() async {
   await Hive.openBox('chatScroll');
   await Hive.openBox('meta');
   await Hive.openBox('authBox');
-
 
   // FCM Background Handler Registration
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -275,8 +271,8 @@ Future<void> main() async {
   await SoundUtils.init();
   ChatService.ensureConnected();
 
-  // FCM Service Init
-  //await MyFirebaseMessagingService.initialize();
+  // FCM Service Init (for chat and order notifications)
+  await MyFirebaseMessagingService.initialize();
 
   runApp(const MyApp());
 }
@@ -350,7 +346,7 @@ class _SplashGateState extends State<SplashGate> {
       // ✅ Check if MPIN is set AND enabled
       final hasMpin = LocalAuthService.hasMpin();
       final isMpinEnabled = LocalAuthService.isMpinEnabled();
-      
+
       if (hasMpin && isMpinEnabled) {
         // Go to MPIN verification page
         Navigator.pushReplacement(
@@ -370,36 +366,165 @@ class _SplashGateState extends State<SplashGate> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF075E54),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.chat,
-              size: 80,
-              color: Colors.white,
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Chatting App',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
+      backgroundColor: const Color(0xFF075E54), // WhatsApp green color
+      body: Stack(
+        children: [
+          // Background pattern (optional)
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.05,
+              child: Image.asset(
+                'assets/icon/zakhira_logo.jpeg',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(),
               ),
             ),
-            const SizedBox(height: 20),
-            Container(
-              width: 20,
-              height: 20,
-              child: const CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 2,
-              ),
+          ),
+
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // LOGO Container with shadow
+                Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 15,
+                        spreadRadius: 3,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: Colors.white,
+                      width: 3,
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(27),
+                    child: Image.asset(
+                      'assets/icon/zakhira_logo.jpeg',
+                      width: 134,
+                      height: 134,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        // If image fails to load, show a placeholder
+                        return Container(
+                          color: const Color(0xFF075E54),
+                          child: const Center(
+                            child: Icon(
+                              Icons.chat,
+                              size: 70,
+                              color: Colors.white,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 35),
+
+                // App Name
+                const Text(
+                  'Zakhira Chat',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 34,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                    shadows: [
+                      Shadow(
+                        blurRadius: 5,
+                        color: Colors.black26,
+                        offset: Offset(1, 1),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                // Tagline
+                const Text(
+                  'End-to-End Encrypted',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+
+                const SizedBox(height: 50),
+
+                // Loading indicator
+                Column(
+                  children: [
+                    SizedBox(
+                      width: 25,
+                      height: 25,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2.5,
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    const Text(
+                      'Initializing...',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+
+          // Bottom copyright/version
+          Positioned(
+            bottom: 30,
+            left: 0,
+            right: 0,
+            child: Column(
+              children: [
+                const Text(
+                  'from',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Meta Technologies',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Version 1.0.0',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

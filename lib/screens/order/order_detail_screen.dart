@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../config.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
@@ -85,6 +87,108 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  void _copyOrderDetails() {
+    if (order == null) return;
+    
+    String orderDetails = '''
+🛒 *Order Details* 🛒
+
+📋 *Order ID:* #${widget.orderId}
+📅 *Order Date:* ${_formatDate(order!['order_date'])}
+💳 *Payment Method:* ${order!['payment_method'] ?? 'COD'}
+🚚 *Order Status:* ${order!['order_status'] ?? 'Pending'}
+
+📦 *Order Items:*
+''';
+
+    // Add order items
+    for (var item in orderItems) {
+      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) * 
+                       (double.tryParse(item['price'].toString()) ?? 0.0);
+      orderDetails += '''
+• ${item['product_name'] ?? 'Product'}
+  Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
+''';
+    }
+
+    orderDetails += '''
+🏠 *Shipping Address:*
+${order!['shipping_street'] ?? 'N/A'}
+${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${order!['shipping_pincode'] ?? 'N/A'}
+📞 ${order!['shipping_phone'] ?? 'N/A'}
+
+💰 *Order Summary:*
+Subtotal: ₹${order!['total_amount'] ?? '0'}
+Delivery Fee: FREE
+*Total Amount: ₹${order!['total_amount'] ?? '0'}*
+
+Thank you for your order! 🙏
+''';
+
+    Clipboard.setData(ClipboardData(text: orderDetails));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Order details copied to clipboard!'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _shareOnWhatsApp() async {
+    if (order == null) return;
+    
+    String orderDetails = '''
+🛒 *Order Details* 🛒
+
+📋 *Order ID:* #${widget.orderId}
+📅 *Order Date:* ${_formatDate(order!['order_date'])}
+💳 *Payment Method:* ${order!['payment_method'] ?? 'COD'}
+🚚 *Order Status:* ${order!['order_status'] ?? 'Pending'}
+
+📦 *Order Items:*
+''';
+
+    // Add order items
+    for (var item in orderItems) {
+      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) * 
+                       (double.tryParse(item['price'].toString()) ?? 0.0);
+      orderDetails += '''
+• ${item['product_name'] ?? 'Product'}
+  Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
+''';
+    }
+
+    orderDetails += '''
+🏠 *Shipping Address:*
+${order!['shipping_street'] ?? 'N/A'}
+${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${order!['shipping_pincode'] ?? 'N/A'}
+📞 ${order!['shipping_phone'] ?? 'N/A'}
+
+💰 *Order Summary:*
+Subtotal: ₹${order!['total_amount'] ?? '0'}
+Delivery Fee: FREE
+*Total Amount: ₹${order!['total_amount'] ?? '0'}*
+
+Thank you for your order! 🙏
+''';
+
+    // Encode for URL
+    String encodedText = Uri.encodeComponent(orderDetails);
+    String whatsappUrl = "https://wa.me/?text=$encodedText";
+
+    try {
+      await launchUrl(Uri.parse(whatsappUrl));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open WhatsApp'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   String _formatDate(String dateString) {
     try {
       final date = DateTime.parse(dateString);
@@ -130,6 +234,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         iconTheme: const IconThemeData(
           color: Colors.black,
         ),
+        actions: [
+          // Copy Button
+          IconButton(
+            onPressed: _copyOrderDetails,
+            icon: const Icon(
+              Icons.copy,
+              color: Colors.green,
+            ),
+            tooltip: 'Copy Order Details',
+          ),
+          // WhatsApp Share Button
+          IconButton(
+            onPressed: _shareOnWhatsApp,
+            icon: const Icon(
+              Icons.share,
+              color: Colors.green,
+            ),
+            tooltip: 'Share on WhatsApp',
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -185,30 +310,49 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Widget _buildOrderDetails() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Order Status Card
-          _buildStatusCard(),
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Order Status Card
+                _buildStatusCard(),
 
-          const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-          // Order Items
-          _buildOrderItems(),
+                // Order Items
+                _buildOrderItems(),
 
-          const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-          // Shipping Address
-          _buildShippingAddress(),
+                // Shipping Address
+                _buildShippingAddress(),
 
-          const SizedBox(height: 16),
-
-          // Order Summary
-          _buildOrderSummary(),
-        ],
-      ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+        // Order Summary - Fixed at the bottom
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.2),
+                spreadRadius: 2,
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: _buildOrderSummary(),
+        ),
+      ],
     );
   }
 
@@ -283,6 +427,50 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildOrderItems() {
     return Container(
       decoration: BoxDecoration(
@@ -310,21 +498,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ),
             ),
           ),
-          ...orderItems.map((item) => _buildOrderItem(item)).toList(),
+          ...orderItems.asMap().entries.map((entry) {
+            final index = entry.key;
+            final item = entry.value;
+            return _buildOrderItem(item, index == orderItems.length - 1);
+          }).toList(),
         ],
       ),
     );
   }
 
-  Widget _buildOrderItem(dynamic item) {
+  Widget _buildOrderItem(dynamic item, bool isLast) {
     return Container(
       decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: Colors.grey[200]!),
+          top: BorderSide(color: Colors.grey.shade200),
+          bottom: isLast ? BorderSide.none : BorderSide(color: Colors.grey.shade200),
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.all(16),
         child: Row(
           children: [
             // Product Image
@@ -338,35 +531,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(6),
-                child: item['image_url'] != null && item['image_url'].toString().isNotEmpty
-                    ? Image.network(
-                  'http://184.168.126.71/api/uploads/${item['image_url']}',
-                  width: 60,
-                  height: 60,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      width: 60,
-                      height: 60,
-                      color: Colors.grey[200],
-                      child: Icon(
-                        Icons.image_not_supported,
-                        size: 24,
-                        color: Colors.grey[400],
-                      ),
-                    );
-                  },
-                )
-                    : Container(
-                  width: 60,
-                  height: 60,
-                  color: Colors.grey[200],
-                  child: Icon(
-                    Icons.image_not_supported,
-                    size: 24,
-                    color: Colors.grey[400],
-                  ),
-                ),
+                child: _buildProductImage(item),
               ),
             ),
 
@@ -442,8 +607,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           color: Colors.grey[600],
                         ),
                       ),
-                      const Text('×'),
-                      const SizedBox(width: 8),
+                      const Text(' × '),
                       Text(
                         '₹${item['price'].toString()}',
                         style: const TextStyle(
@@ -452,31 +616,107 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           color: Colors.black87,
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Item Total
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '₹${((double.tryParse(item['quantity'].toString()) ?? 0.0) * (double.tryParse(item['price'].toString()) ?? 0.0)).toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
+                      const Spacer(),
+                      // Item Total
+                      Text(
+                        '₹${((double.tryParse(item['quantity'].toString()) ?? 0.0) * (double.tryParse(item['price'].toString()) ?? 0.0)).toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Helper method to build product image
+  Widget _buildProductImage(dynamic item) {
+    // Try multiple image sources in order of preference
+    
+    // 1. Check if order has image_url (from order details)
+    if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
+      return Image.network(
+        order!['image_url'],
+        width: 80,
+        height: 80,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+      );
+    }
+    
+    // 2. Check if item has image_url
+    if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+      String imageUrl = item['image_url'].toString();
+      
+      // If it's a full URL, use it directly
+      if (imageUrl.startsWith('http')) {
+        return Image.network(
+          imageUrl,
+          width: 80,
+          height: 80,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+        );
+      }
+      
+      // If it's a relative path, construct full URL
+      return Image.network(
+        'http://184.168.126.71/api/uploads/$imageUrl',
+        width: 80,
+        height: 80,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+      );
+    }
+    
+    // 3. Use placeholder image with product name
+    return _buildPlaceholderImage(productName: item['product_name'] ?? 'Product');
+  }
+
+  Widget _buildPlaceholderImage({String? productName}) {
+    return Container(
+      width: 80,
+      height: 80,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.grey[300]!, Colors.grey[400]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.image,
+            size: 24,
+            color: Colors.grey[600],
+          ),
+          const SizedBox(height: 4),
+          if (productName != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                productName.length > 10 ? '${productName.substring(0, 10)}...' : productName,
+                style: TextStyle(
+                  fontSize: 8,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -564,7 +804,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
@@ -623,6 +862,53 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value, {bool isFree = false, bool isTotal = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: isTotal ? 16 : 14,
+            fontWeight: isTotal ? FontWeight.w700 : FontWeight.w500,
+            color: isTotal ? Colors.black87 : Colors.grey.shade700,
+          ),
+        ),
+        Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isTotal ? 12 : 8,
+            vertical: isTotal ? 8 : 4,
+          ),
+          decoration: BoxDecoration(
+            color: isTotal 
+                ? Colors.purple.shade50 
+                : isFree 
+                    ? Colors.green.shade50 
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: isTotal 
+                ? Border.all(color: Colors.purple.shade200)
+                : isFree 
+                    ? Border.all(color: Colors.green.shade200)
+                    : null,
+          ),
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: isTotal ? 16 : 14,
+              fontWeight: FontWeight.w700,
+              color: isTotal 
+                  ? Colors.purple.shade700 
+                  : isFree 
+                      ? Colors.green.shade700 
+                      : Colors.black87,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -5,6 +5,7 @@ import '../../models/product.dart';
 import '../../services/product_database_service.dart';
 import '../../services/product_service.dart';
 import '../../services/local_auth_service.dart';
+import '../../services/catalog_service.dart';
 import 'instagram_category_product_detail_screen.dart';
 
 class InstagramCategorySelectionScreen extends StatefulWidget {

@@ -21,6 +21,7 @@ import '../services/contact_service.dart';
 import '../services/my_firebase_messaging_service.dart';
 import '../services/product_service.dart';
 import '../services/cart_service.dart';
+import '../widgets/profile_image_manager/image_options_modal.dart';
 import 'chat_screen.dart';
 import 'new_chat_page.dart';
 import '../config.dart';
@@ -33,10 +34,12 @@ import 'cart/cart_screen.dart';
 import '../services/product_database_service.dart';
 import '../models/product.dart';
 import 'order/my_orders_screen.dart';
+import 'order/dashboard_screen.dart';
 import 'product/detail/product_detail_screen.dart';
 import 'marketplace/marketplace_tab.dart';
 import 'insta_pages_screen.dart';
 import 'website_selection_screen.dart';
+import 'website/website_tab.dart';
 
 class ChatHomePage extends StatefulWidget {
   final int? initialTabIndex;
@@ -55,10 +58,12 @@ class _ChatHomePageState extends State<ChatHomePage> {
 
   final GlobalKey<_ProfileTabState> _profileTabKey = GlobalKey<_ProfileTabState>();
   final GlobalKey<MarketplaceTabState> _marketplaceTabKey = GlobalKey<MarketplaceTabState>();
+  final GlobalKey<WebsiteTabState> _websiteTabKey = GlobalKey<WebsiteTabState>();
 
   late final List<Widget> _screens = [
     ChatsTab(userStatus: _userStatus),
     MarketplaceTab(key: _marketplaceTabKey),
+    WebsiteTab(key: _websiteTabKey),
     ProfileTab(key: _profileTabKey),
   ];
 
@@ -204,6 +209,19 @@ class _ChatHomePageState extends State<ChatHomePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(Icons.dashboard, color: Colors.green),
+              title: const Text("Dashboard"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DashboardScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.receipt_long, color: Colors.blue),
               title: const Text("My Orders"),
               onTap: () {
@@ -246,8 +264,8 @@ class _ChatHomePageState extends State<ChatHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ✅ Hide AppBar when Profile or Marketplace tab is selected
-      appBar: (_selectedIndex == 2 || _selectedIndex == 1)
+      // ✅ Hide AppBar when Profile, Marketplace or Website tab is selected
+      appBar: (_selectedIndex == 2 || _selectedIndex == 1 || _selectedIndex == 3)
           ? null
           : AppBar(
         automaticallyImplyLeading: false,
@@ -325,6 +343,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.chat), label: "Chats"),
           BottomNavigationBarItem(icon: Icon(Icons.store), label: "Marketplace"),
+          BottomNavigationBarItem(icon: Icon(Icons.language), label: "Websites"),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
         ],
       ),
@@ -1148,6 +1167,22 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
+  // Show profile image options modal
+  void _showProfileImageOptions(BuildContext context, String imageUrl) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ImageOptionsModal(
+        imageUrl: imageUrl,
+        imageId: 'profile',
+        onRefresh: () {
+          Navigator.pop(context);
+          _loadProfile(); // Refresh profile data
+        },
+      ),
+    );
+  }
+
   Future<void> _loadProfile() async {
     setState(() => _loading = true);
     final profile = await ApiService.getProfile();
@@ -1354,25 +1389,34 @@ class _ProfileTabState extends State<ProfileTab> {
                       },
                     ),
                     const SizedBox(width: 8),
-                    // Profile photo (circular, small)
+                    // Profile photo (circular, small) with long press
                     if (_profile!.profileImage != null && _profile!.profileImage!.isNotEmpty)
-                      ClipOval(
-                        child: Image.network(
-                          _profile!.profileImage!,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white24,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.person, color: Colors.white, size: 24),
-                            );
-                          },
+                      GestureDetector(
+                        onTap: () {
+                          // Handle tap if needed
+                        },
+                        onLongPress: () {
+                          // Show edit/delete modal for profile image
+                          _showProfileImageOptions(context, _profile!.profileImage!);
+                        },
+                        child: ClipOval(
+                          child: Image.network(
+                            _profile!.profileImage!,
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: Colors.white24,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.person, color: Colors.white, size: 24),
+                              );
+                            },
+                          ),
                         ),
                       )
                     else

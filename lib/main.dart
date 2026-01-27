@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart' as fln;
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'services/cart_service.dart';
 
 import 'package:whatsappchat/models/chat_model.dart';
 import 'package:whatsappchat/models/contact.dart';
@@ -332,6 +333,11 @@ class _SplashGateState extends State<SplashGate> {
       // Heavy contact sync को main thread को block किए बिना Isolate में शुरू करें
       if (userId != null && userId > 0) {
         log('Starting background contact sync for User ID: $userId');
+        
+        // Set user ID for cart service
+        CartService.setUserId(userId);
+        await CartService.loadCartFromServer();
+        log('Cart service initialized for User ID: $userId');
         try {
           await Isolate.spawn(fetchPhoneContactsInIsolate, {
             'ownerUserId': userId,

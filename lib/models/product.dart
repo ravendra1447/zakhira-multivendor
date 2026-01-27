@@ -19,6 +19,7 @@ class Product {
   final String stockMode; // 'simple', 'color_size', or 'always_available'
   final Map<String, Map<String, int>>? stockByColorSize; // {color: {size: qty}}
   final String? instagramUrl; // Instagram page URL
+  final String? sellerName; // Seller name for cart grouping
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -41,6 +42,7 @@ class Product {
     this.stockMode = 'simple',
     this.stockByColorSize,
     this.instagramUrl,
+    this.sellerName,
     this.createdAt,
     this.updatedAt,
   });
@@ -180,6 +182,7 @@ class Product {
                   ))
               : null,
       instagramUrl: map['product_insta_url'] as String?,
+      sellerName: map['seller_name'] as String? ?? 'Default Seller',
       createdAt: map['created_at'] != null
           ? DateTime.parse(map['created_at'] as String)
           : null,

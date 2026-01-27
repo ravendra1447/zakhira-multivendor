@@ -14,6 +14,7 @@ import '../models/chat_model.dart' hide MessageAdapter;
 import '../screens/chat_screen.dart';
 import '../screens/order/admin_all_orders_screen.dart';
 import '../screens/order/order_detail_screen.dart';
+import '../screens/order/dashboard_screen.dart';
 import '../services/local_auth_service.dart';
 import '../utils/sound_utils.dart';
 
@@ -241,22 +242,24 @@ class MyFirebaseMessagingService {
       final orderId = data['orderId'];
 
       if (type == 'new_order_admin') {
-        // Navigate to order details for admin
+        // Navigate directly to order details for admin
         try {
           final orderIdInt = int.parse(orderId);
-          navigatorKey.currentState?.push(
+          navigatorKey.currentState?.pushAndRemoveUntil(
             MaterialPageRoute(
               builder: (_) => OrderDetailScreen(orderId: orderIdInt),
             ),
+            (route) => false,
           );
           print("🛒 Admin navigated to order details for new order - Order ID: $orderId");
         } catch (e) {
           print("❌ Error parsing orderId or navigating for admin: $e");
           // Fallback to dashboard if order details fail
-          navigatorKey.currentState?.push(
+          navigatorKey.currentState?.pushAndRemoveUntil(
             MaterialPageRoute(
-              builder: (_) => AdminAllOrdersScreen(orders: []),
+              builder: (_) => DashboardScreen(),
             ),
+            (route) => false,
           );
         }
       } else if (type == 'order_confirmation') {

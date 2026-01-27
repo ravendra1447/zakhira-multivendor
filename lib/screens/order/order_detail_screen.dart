@@ -89,7 +89,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   void _copyOrderDetails() {
     if (order == null) return;
-    
+
     String orderDetails = '''
 🛒 *Order Details* 🛒
 
@@ -103,8 +103,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
     // Add order items
     for (var item in orderItems) {
-      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) * 
-                       (double.tryParse(item['price'].toString()) ?? 0.0);
+      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) *
+          (double.tryParse(item['price'].toString()) ?? 0.0);
       orderDetails += '''
 • ${item['product_name'] ?? 'Product'}
   Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
@@ -137,7 +137,7 @@ Thank you for your order! 🙏
 
   void _shareOnWhatsApp() async {
     if (order == null) return;
-    
+
     String orderDetails = '''
 🛒 *Order Details* 🛒
 
@@ -151,8 +151,8 @@ Thank you for your order! 🙏
 
     // Add order items
     for (var item in orderItems) {
-      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) * 
-                       (double.tryParse(item['price'].toString()) ?? 0.0);
+      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) *
+          (double.tryParse(item['price'].toString()) ?? 0.0);
       orderDetails += '''
 • ${item['product_name'] ?? 'Product'}
   Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
@@ -195,6 +195,176 @@ Thank you for your order! 🙏
       return '${date.day}/${date.month}/${date.year} at ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
     } catch (e) {
       return dateString;
+    }
+  }
+
+  void _showFullScreenImage(BuildContext context, dynamic item) {
+    String? imageUrl;
+    
+    // Try to get the image URL from the same sources as _buildProductImage
+    if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
+      imageUrl = order!['image_url'];
+    } else if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+      String tempImageUrl = item['image_url'].toString();
+      if (tempImageUrl.startsWith('http')) {
+        imageUrl = tempImageUrl;
+      } else {
+        imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+      }
+    }
+
+    if (imageUrl != null) {
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (BuildContext context) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.zero,
+            child: Stack(
+              children: [
+                // Full screen image
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    width: MediaQuery.of(context).size.width,
+                    height: MediaQuery.of(context).size.height,
+                    child: InteractiveViewer(
+                      panEnabled: true,
+                      boundaryMargin: const EdgeInsets.all(20),
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: Image.network(
+                        imageUrl!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            width: MediaQuery.of(context).size.width,
+                            height: MediaQuery.of(context).size.height,
+                            color: Colors.black,
+                            child: const Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline,
+                                    size: 64,
+                                    color: Colors.white,
+                                  ),
+                                  SizedBox(height: 16),
+                                  Text(
+                                    'Image not available',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                // Close button
+                Positioned(
+                  top: 40,
+                  right: 20,
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } else {
+      // Show placeholder if no image available
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (BuildContext context) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.zero,
+            child: Stack(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    width: MediaQuery.of(context).size.width,
+                    height: MediaQuery.of(context).size.height,
+                    color: Colors.black,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.image,
+                            size: 100,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            item['product_name'] ?? 'Product',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'No image available',
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 40,
+                  right: 20,
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
     }
   }
 
@@ -521,17 +691,20 @@ Thank you for your order! 🙏
         child: Row(
           children: [
             // Product Image
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: _buildProductImage(item),
+            GestureDetector(
+              onTap: () => _showFullScreenImage(context, item),
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: _buildProductImage(item),
+                ),
               ),
             ),
 
@@ -640,7 +813,7 @@ Thank you for your order! 🙏
   // Helper method to build product image
   Widget _buildProductImage(dynamic item) {
     // Try multiple image sources in order of preference
-    
+
     // 1. Check if order has image_url (from order details)
     if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
       return Image.network(
@@ -651,11 +824,11 @@ Thank you for your order! 🙏
         errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
       );
     }
-    
+
     // 2. Check if item has image_url
     if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
       String imageUrl = item['image_url'].toString();
-      
+
       // If it's a full URL, use it directly
       if (imageUrl.startsWith('http')) {
         return Image.network(
@@ -666,7 +839,7 @@ Thank you for your order! 🙏
           errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
         );
       }
-      
+
       // If it's a relative path, construct full URL
       return Image.network(
         'http://184.168.126.71/api/uploads/$imageUrl',
@@ -676,7 +849,7 @@ Thank you for your order! 🙏
         errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
       );
     }
-    
+
     // 3. Use placeholder image with product name
     return _buildPlaceholderImage(productName: item['product_name'] ?? 'Product');
   }
@@ -883,28 +1056,28 @@ Thank you for your order! 🙏
             vertical: isTotal ? 8 : 4,
           ),
           decoration: BoxDecoration(
-            color: isTotal 
-                ? Colors.purple.shade50 
-                : isFree 
-                    ? Colors.green.shade50 
-                    : Colors.transparent,
+            color: isTotal
+                ? Colors.purple.shade50
+                : isFree
+                ? Colors.green.shade50
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: isTotal 
+            border: isTotal
                 ? Border.all(color: Colors.purple.shade200)
-                : isFree 
-                    ? Border.all(color: Colors.green.shade200)
-                    : null,
+                : isFree
+                ? Border.all(color: Colors.green.shade200)
+                : null,
           ),
           child: Text(
             value,
             style: TextStyle(
               fontSize: isTotal ? 16 : 14,
               fontWeight: FontWeight.w700,
-              color: isTotal 
-                  ? Colors.purple.shade700 
-                  : isFree 
-                      ? Colors.green.shade700 
-                      : Colors.black87,
+              color: isTotal
+                  ? Colors.purple.shade700
+                  : isFree
+                  ? Colors.green.shade700
+                  : Colors.black87,
             ),
           ),
         ),

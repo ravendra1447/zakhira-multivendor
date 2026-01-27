@@ -6,8 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../models/product.dart';
-import '../../checkout/checkout_screen.dart';
 import '../../cart/cart_screen.dart';
+import '../../checkout/checkout_screen.dart';
+
 import '../../../services/cart_service.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -1422,7 +1423,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  void _addToCart() {
+  Future<void> _addToCart() async {
     // Get all variations with quantities
     final selectedItems = <Map<String, dynamic>>[];
 
@@ -1467,7 +1468,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     // Add all items to cart
     for (var item in selectedItems) {
-      CartService.addToCart(
+      await CartService.addToCart(
         product: widget.product,
         variation: item['variation'] as Map<String, dynamic>,
         size: item['size'] as String,
@@ -1478,15 +1479,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     final totalItems = selectedItems.fold(0, (sum, item) => sum + (item['quantity'] as int));
 
+    // Show immediate confirmation
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Added $totalItems items to cart'),
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 8),
+            Text('Added $totalItems items to cart'),
+          ],
+        ),
         backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
         action: SnackBarAction(
           label: 'View Cart',
           textColor: Colors.white,
           onPressed: () {
-            Navigator.pop(context);
+            Navigator.pop(context); // Close variations sheet
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -1497,6 +1506,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
       ),
     );
+
+    // Auto-close variations sheet after a short delay
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    });
+
+    // Trigger cart count update (if there's a listener)
+    setState(() {});
   }
 
   Map<String, dynamic> _getPriceForQuantity(int totalQty) {
@@ -2529,6 +2548,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                     _variationSizeQuantities[_activeVariationForSheet!]![s] = qty - 1;
                                                     _subtotal = calcSubtotal();
                                                   });
+                                                  setState(() {}); // Update cart count in real-time
                                                 }
                                               },
                                               icon: const Icon(Icons.remove_circle_outline),
@@ -2557,6 +2577,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                     });
                                                   }
                                                 }
+                                                setState(() {}); // Update cart count in real-time
                                               },
                                               icon: Icon(
                                                 Icons.add_circle_outline,
@@ -2615,6 +2636,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                         _variationSizeQuantities[_activeVariationForSheet!]![s] = 0;
                                                         _subtotal = calcSubtotal();
                                                       });
+                                                      setState(() {}); // Update cart count in real-time
                                                     },
                                                     child: Icon(
                                                       Icons.clear,
@@ -2675,8 +2697,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             SizedBox(
                               height: 40,
                               child: OutlinedButton(
-                                onPressed: () {
-                                  _addToCart();
+                                onPressed: () async {
+                                  await _addToCart();
                                 },
                                 style: OutlinedButton.styleFrom(
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

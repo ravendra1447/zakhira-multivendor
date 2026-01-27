@@ -7,18 +7,24 @@ import '../../services/cart_service.dart';
 import '../order/order_success_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
-  final Product product;
-  final Map<String, dynamic> selectedVariation;
-  final int quantity;
-  final double totalPrice;
+  final Product? product;
+  final Map<String, dynamic>? selectedVariation;
+  final int? quantity;
+  final double? totalPrice;
+  final List<CartItem>? cartItems;
 
   const CheckoutScreen({
     super.key,
-    required this.product,
-    required this.selectedVariation,
-    required this.quantity,
-    required this.totalPrice,
-  });
+    this.product,
+    this.selectedVariation,
+    this.quantity,
+    this.totalPrice,
+    this.cartItems,
+  }) : assert(
+          (product != null && selectedVariation != null && quantity != null && totalPrice != null) ||
+          (cartItems != null),
+          'Either provide single product details or cart items list',
+        );
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -677,23 +683,31 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   String _getSelectedSize() {
-    // Get the current variation name
-    final currentVarName = widget.selectedVariation['name']?.toString() ?? '';
-    
-    // Get sizes for current variation from product detail screen logic
-    final sizes = widget.product.sizes;
-    final variationQuantities = widget.selectedVariation['quantities'] as Map<String, int>? ?? {};
-    
-    // Find the size with quantity > 0
-    for (final size in sizes) {
-      final qty = variationQuantities[size] ?? 0;
-      if (qty > 0) {
-        return size; // Return the size that has quantity
+    if (widget.selectedVariation != null) {
+      final currentVarName = widget.selectedVariation!['name']?.toString() ?? '';
+      final sizes = widget.product?.sizes ?? [];
+      final variationQuantities = widget.selectedVariation!['quantities'] as Map<String, int>? ?? {};
+      
+      for (var size in sizes) {
+        final qty = variationQuantities[size] ?? 0;
+        if (qty > 0) {
+          return size; // Return the size that has quantity
+        }
       }
+      
+      // Fallback to first size if no quantity found
+      return sizes.isNotEmpty ? sizes.first : 'No Size';
     }
-    
-    // Fallback to first size if no quantity found
-    return sizes.isNotEmpty ? sizes.first : 'No Size';
+    return 'No Size';
+  }
+
+  // Get total price for both single product and multiple cart items
+  double _getTotalPrice() {
+    if (widget.cartItems != null) {
+      return widget.cartItems!.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+    } else {
+      return widget.totalPrice!;
+    }
   }
 
   Future<void> _placeOrder() async {
@@ -733,22 +747,30 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     try {
       final orderData = {
         'user_id': userId, // ✅ Same as ProductService - LocalAuthService.getUserId()
-        'total_amount': widget.totalPrice,
+        'total_amount': _getTotalPrice(),
         'shipping_street': _addressController.text,
         'shipping_city': _cityController.text,
         'shipping_state': _stateController.text,
         'shipping_pincode': _pincodeController.text,
         'shipping_phone': _phoneController.text,
         'payment_method': _selectedPaymentMethod,
-        'items': [
-          {
-            'product_id': widget.product.id,
-            'quantity': widget.quantity,
-            'price': widget.totalPrice / widget.quantity,
-            'size': _getSelectedSize(),
-            'color': widget.selectedVariation['name'] ?? 'Default Color',
-          }
-        ]
+        'items': widget.cartItems != null
+            ? widget.cartItems!.map((item) => {
+                'product_id': item.product.id,
+                'quantity': item.quantity,
+                'price': item.price,
+                'size': item.size,
+                'color': item.colorName,
+              }).toList()
+            : [
+                {
+                  'product_id': widget.product!.id,
+                  'quantity': widget.quantity,
+                  'price': widget.totalPrice! / widget.quantity!,
+                  'size': _getSelectedSize(),
+                  'color': widget.selectedVariation!['name'] ?? 'Default Color',
+                }
+              ]
       };
 
       print('Placing order for user_id: $userId'); // Debug log
@@ -774,7 +796,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             MaterialPageRoute(
               builder: (context) => OrderSuccessScreen(
                 orderId: responseData['orderId'].toString(),
-                totalAmount: widget.totalPrice,
+                totalAmount: _getTotalPrice(),
               ),
             ),
             (route) => false,
@@ -1051,70 +1073,133 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Product details
-                    Row(
-                      children: [
-                        Container(
-                          width: 60,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[200],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: widget.product.images.isNotEmpty
-                                ? Image.network(
-                                    widget.product.images.first,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return const Icon(Icons.image, color: Colors.grey);
-                                    },
-                                  )
-                                : const Icon(Icons.image, color: Colors.grey),
-                          ),
+                    // Product details - handle both single product and multiple cart items
+                    if (widget.cartItems != null) ...[
+                      // Multiple cart items
+                      ...widget.cartItems!.map((item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[200],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: item.productImage.isNotEmpty
+                                    ? Image.network(
+                                        item.productImage,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return const Icon(Icons.image, color: Colors.grey);
+                                        },
+                                      )
+                                    : const Icon(Icons.image, color: Colors.grey),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.product.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Qty: ${item.quantity} | ${item.colorName} | ${item.size}',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              'INR ${(item.price * item.quantity).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.product.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Quantity: ${widget.quantity}',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                ),
-                              ),
-                              if (widget.selectedVariation['size'] != null)
+                      )).toList(),
+                    ] else ...[
+                      // Single product
+                      Row(
+                        children: [
+                          Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              color: Colors.grey[200],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: widget.product!.images.isNotEmpty
+                                  ? Image.network(
+                                      widget.product!.images.first,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return const Icon(Icons.image, color: Colors.grey);
+                                      },
+                                    )
+                                  : const Icon(Icons.image, color: Colors.grey),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  'Size: ${widget.selectedVariation['size']}',
+                                  widget.product!.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Quantity: ${widget.quantity}',
                                   style: TextStyle(
                                     color: Colors.grey[600],
                                     fontSize: 14,
                                   ),
                                 ),
-                            ],
+                                if (widget.selectedVariation!['size'] != null)
+                                  Text(
+                                    'Size: ${widget.selectedVariation!['size']}',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                        Text(
-                          'INR ${widget.totalPrice.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                          Text(
+                            'INR ${widget.totalPrice!.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                     
                     const Divider(height: 32),
                     
@@ -1291,7 +1376,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ),
                         ),
                         Text(
-                          'INR ${widget.totalPrice.toStringAsFixed(2)}',
+                          'INR ${_getTotalPrice().toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 18,

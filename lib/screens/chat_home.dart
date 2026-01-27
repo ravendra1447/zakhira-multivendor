@@ -1080,19 +1080,29 @@ class _ProfileTabState extends State<ProfileTab> {
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
   String _selectedTab = 'Grid'; // Grid, Reels, or Profile
-  List<Product> _publishedProducts = []; // ✅ Changed to List<Product>
+  List<Product> _publishedProducts = []; // Changed to List<Product>
   bool _loadingProducts = false;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
-    _loadPublishedProductsFromServer(); // ✅ SERVER SE LOAD
+    _loadPublishedProductsFromServer(); // SERVER SE LOAD
+    
+    // Initialize cart service for UI persistence
+    final userId = LocalAuthService.getUserId();
+    if (userId != null) {
+      CartService.setUserId(userId);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        CartService.loadCartFromServer();
+      });
+    }
   }
 
   // Public method to refresh profile
   void refreshProfile() {
     _loadProfile();
+    _loadPublishedProductsFromServer(); // SERVER SE REFRESH
     _loadPublishedProductsFromServer(); // ✅ SERVER SE REFRESH
   }
 

@@ -12,6 +12,10 @@ class CheckoutScreen extends StatefulWidget {
   final int? quantity;
   final double? totalPrice;
   final List<CartItem>? cartItems;
+  final Map<String, int>? selectedVariations; // Map of variation name to quantity (for color-only mode)
+  final Map<String, String>? variationImages; // Map of variation name to image URL
+  final Map<String, Map<String, int>>? variationSizeQuantities; // Map of {color: {size: qty}}
+  final List<String>? availableSizes; // List of available sizes
 
   const CheckoutScreen({
     super.key,
@@ -20,10 +24,16 @@ class CheckoutScreen extends StatefulWidget {
     this.quantity,
     this.totalPrice,
     this.cartItems,
+    this.selectedVariations,
+    this.variationImages,
+    this.variationSizeQuantities,
+    this.availableSizes,
   }) : assert(
           (product != null && selectedVariation != null && quantity != null && totalPrice != null) ||
-          (cartItems != null),
-          'Either provide single product details or cart items list',
+          (cartItems != null) ||
+          (product != null && selectedVariations != null && totalPrice != null) ||
+          (product != null && variationSizeQuantities != null && totalPrice != null),
+          'Either provide single product details, cart items list, selectedVariations map, or variationSizeQuantities map',
         );
 
   @override
@@ -705,6 +715,70 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   double _getTotalPrice() {
     if (widget.cartItems != null) {
       return widget.cartItems!.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+    } else if (widget.variationSizeQuantities != null && widget.product != null) {
+      // Calculate total based on color+size combinations
+      double total = 0.0;
+      final priceSlabs = widget.product!.priceSlabs;
+      
+      // Calculate total quantity across all colors and sizes
+      int totalQty = 0;
+      for (var colorEntry in widget.variationSizeQuantities!.entries) {
+        final sizes = colorEntry.value;
+        for (var sizeEntry in sizes.entries) {
+          totalQty += sizeEntry.value;
+        }
+      }
+      
+      // Find applicable price based on total quantity
+      double unitPrice = 0.0;
+      if (priceSlabs.isNotEmpty) {
+        final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
+          ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
+        
+        for (final slab in sortedSlabs) {
+          final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+          if (totalQty >= moq) {
+            unitPrice = double.tryParse(slab['price']?.toString() ?? '0') ?? 0.0;
+            break;
+          }
+        }
+        
+        if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
+          unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
+        }
+      }
+      
+      total = unitPrice * totalQty;
+      return total;
+    } else if (widget.selectedVariations != null && widget.product != null) {
+      // Calculate total based on selected variations
+      double total = 0.0;
+      final priceSlabs = widget.product!.priceSlabs;
+      final totalQty = widget.selectedVariations!.values.fold(0, (sum, qty) => sum + qty);
+      
+      // Find applicable price based on total quantity
+      double unitPrice = 0.0;
+      if (priceSlabs.isNotEmpty) {
+        // Sort by MOQ descending to find the best price
+        final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
+          ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
+        
+        for (final slab in sortedSlabs) {
+          final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+          if (totalQty >= moq) {
+            unitPrice = double.tryParse(slab['price']?.toString() ?? '0') ?? 0.0;
+            break;
+          }
+        }
+        
+        // If no slab matched, use the first (lowest MOQ) slab
+        if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
+          unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
+        }
+      }
+      
+      total = unitPrice * totalQty;
+      return total;
     } else {
       return widget.totalPrice!;
     }
@@ -761,16 +835,100 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 'price': item.price,
                 'size': item.size,
                 'color': item.colorName,
+                'image_url': item.productImage,
               }).toList()
-            : [
-                {
-                  'product_id': widget.product!.id,
-                  'quantity': widget.quantity,
-                  'price': widget.totalPrice! / widget.quantity!,
-                  'size': _getSelectedSize(),
-                  'color': widget.selectedVariation!['name'] ?? 'Default Color',
-                }
-              ]
+            : widget.variationSizeQuantities != null && widget.product != null
+                ? // Color+Size combinations - flatten the nested structure
+                widget.variationSizeQuantities!.entries
+                    .expand((colorEntry) {
+                      final colorName = colorEntry.key;
+                      final sizes = colorEntry.value;
+                      final imageUrl = widget.variationImages?[colorName] ?? '';
+                      
+                      // Calculate total quantity across all colors and sizes
+                      int totalQty = 0;
+                      for (var cEntry in widget.variationSizeQuantities!.entries) {
+                        for (var sEntry in cEntry.value.entries) {
+                          totalQty += sEntry.value;
+                        }
+                      }
+                      
+                      // Calculate unit price based on total quantity
+                      double unitPrice = 0.0;
+                      final priceSlabs = widget.product!.priceSlabs;
+                      if (priceSlabs.isNotEmpty) {
+                        final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
+                          ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
+                        for (final slab in sortedSlabs) {
+                          final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+                          if (totalQty >= moq) {
+                            unitPrice = double.tryParse(slab['price']?.toString() ?? '0') ?? 0.0;
+                            break;
+                          }
+                        }
+                        if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
+                          unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
+                        }
+                      }
+                      
+                      return sizes.entries.where((e) => e.value > 0).map((sizeEntry) {
+                        final sizeName = sizeEntry.key;
+                        final quantity = sizeEntry.value;
+                        return {
+                          'product_id': widget.product!.id,
+                          'quantity': quantity,
+                          'price': unitPrice,
+                          'size': sizeName,
+                          'color': colorName,
+                          'image_url': imageUrl,
+                        };
+                      });
+                    }).toList()
+                : widget.selectedVariations != null && widget.product != null
+                    ? // Multiple variations - create an item for each variation
+                    widget.selectedVariations!.entries.where((e) => e.value > 0).map((entry) {
+                      final variationName = entry.key;
+                      final quantity = entry.value;
+                      final imageUrl = widget.variationImages?[variationName] ?? '';
+                      final totalQty = widget.selectedVariations!.values.fold(0, (sum, qty) => sum + qty);
+                      
+                      // Calculate unit price based on total quantity
+                      double unitPrice = 0.0;
+                      final priceSlabs = widget.product!.priceSlabs;
+                      if (priceSlabs.isNotEmpty) {
+                        final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
+                          ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
+                        for (final slab in sortedSlabs) {
+                          final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+                          if (totalQty >= moq) {
+                            unitPrice = double.tryParse(slab['price']?.toString() ?? '0') ?? 0.0;
+                            break;
+                          }
+                        }
+                        if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
+                          unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
+                        }
+                      }
+                      
+                      return {
+                        'product_id': widget.product!.id,
+                        'quantity': quantity,
+                        'price': unitPrice,
+                        'size': 'No Size',
+                        'color': variationName,
+                        'image_url': imageUrl,
+                      };
+                    }).toList()
+                    : [
+                        {
+                          'product_id': widget.product!.id,
+                          'quantity': widget.quantity,
+                          'price': widget.totalPrice! / widget.quantity!,
+                          'size': _getSelectedSize(),
+                          'color': widget.selectedVariation!['name'] ?? 'Default Color',
+                          'image_url': widget.product?.images?.isNotEmpty == true ? widget.product!.images.first : '',
+                        }
+                      ]
       };
 
       print('Placing order for user_id: $userId'); // Debug log
@@ -1073,7 +1231,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Product details - handle both single product and multiple cart items
+                    // Product details - handle cart items, multiple variations, or single product
                     if (widget.cartItems != null) ...[
                       // Multiple cart items
                       ...widget.cartItems!.map((item) => Padding(
@@ -1134,6 +1292,159 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ],
                         ),
                       )).toList(),
+                    ] else if (widget.variationSizeQuantities != null && widget.product != null) ...[
+                      // Multiple selected color+size combinations
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Product name header
+                          Text(
+                            widget.product!.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Divider(height: 1),
+                          const SizedBox(height: 12),
+                          // Show each color+size combination
+                          ...widget.variationSizeQuantities!.entries.expand((colorEntry) {
+                            final colorName = colorEntry.key;
+                            final sizes = colorEntry.value;
+                            final imageUrl = widget.variationImages?[colorName] ?? '';
+                            
+                            return sizes.entries.where((e) => e.value > 0).map((sizeEntry) {
+                              final sizeName = sizeEntry.key;
+                              final quantity = sizeEntry.value;
+                              
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 60,
+                                      height: 60,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        color: Colors.grey[200],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: imageUrl.isNotEmpty
+                                            ? Image.network(
+                                                imageUrl,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  return const Icon(Icons.image, color: Colors.grey);
+                                                },
+                                              )
+                                            : const Icon(Icons.image, color: Colors.grey),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '$colorName - Size $sizeName',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Quantity: $quantity',
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList();
+                          }).toList(),
+                        ],
+                      ),
+                    ] else if (widget.selectedVariations != null && widget.product != null) ...[
+                      // Multiple selected variations - show each variation separately
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Product name header
+                          Text(
+                            widget.product!.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Divider(height: 1),
+                          const SizedBox(height: 12),
+                          // Show each selected variation
+                          ...widget.selectedVariations!.entries.where((e) => e.value > 0).map((entry) {
+                            final variationName = entry.key;
+                            final quantity = entry.value;
+                            final imageUrl = widget.variationImages?[variationName] ?? '';
+                            
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      color: Colors.grey[200],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: imageUrl.isNotEmpty
+                                          ? Image.network(
+                                              imageUrl,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) {
+                                                return const Icon(Icons.image, color: Colors.grey);
+                                              },
+                                            )
+                                          : const Icon(Icons.image, color: Colors.grey),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          variationName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Quantity: $quantity',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ],
+                      ),
                     ] else ...[
                       // Single product
                       Row(

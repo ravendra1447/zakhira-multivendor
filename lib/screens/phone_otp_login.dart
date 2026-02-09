@@ -23,7 +23,7 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
       return;
     }
 
-    FocusScope.of(context).unfocus(); // keyboard band karo
+    FocusScope.of(context).unfocus();
 
     setState(() => loading = true);
     final res = await LocalAuthService.sendOtp(phone);
@@ -44,6 +44,8 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[100],
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -51,87 +53,161 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 40),
-              const Text(
-                "Verify your phone number",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                "WhatsApp will need to verify your phone number.\nCarrier charges may apply.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 30),
-
-              // Country dropdown (abhi static India rakha hai)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: "India",
-                    items: const [
-                      DropdownMenuItem(
-                        value: "India",
-                        child: Text("India"),
+              
+              // ZAKHIRA Logo
+              Center(
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(25),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
                     ],
-                    onChanged: (_) {},
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(25),
+                    child: Image.asset(
+                      'assets/icon/zakhira_logo.jpeg',
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: 100,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC7D325),
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              "Z",
+                              style: TextStyle(
+                                fontSize: 50,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
+              
               const SizedBox(height: 10),
-
+              
+              // ZAKHIRA® text
+              const Text(
+                "ZAKHIRA®",
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF128C7E),
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+              
+              // Verify Your Phone Number
+              const Text(
+                "Verify Your Phone Number",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              
+              const SizedBox(height: 10),
+              
+              // Subtitle
+              const Text(
+                "WhatsApp will verify your phone number.\nCarrier charges may apply.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+              
               // Phone input row
               Row(
                 children: [
+                  // +91 container
                   Container(
-                    width: 70,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 14, horizontal: 8),
+                    width: 80,
+                    height: 50,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
-                      borderRadius: BorderRadius.circular(5),
+                      color: Colors.white,
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Text(
-                      "+91",
-                      textAlign: TextAlign.center,
+                    child: const Center(
+                      child: Text(
+                        "+91",
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  
+                  const SizedBox(width: 12),
+                  
+                  // Phone number input
                   Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        hintText: "Phone number",
-                        border: OutlineInputBorder(),
+                    child: Container(
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: TextField(
+                        controller: _controller,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          hintText: "Enter Phone Number",
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-
+              
               const Spacer(),
-
-              // Green button like WhatsApp
+              
+              // Next button
               SizedBox(
                 width: double.infinity,
-                height: 48,
+                height: 50,
                 child: ElevatedButton(
                   onPressed: loading ? null : _sendOtp,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green, // WhatsApp green
+                    backgroundColor: const Color(0xFF25D366),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
+                      borderRadius: BorderRadius.circular(25),
                     ),
+                    elevation: 2,
                   ),
                   child: loading
                       ? const SizedBox(
@@ -144,11 +220,13 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
                   )
                       : const Text(
                     "Next",
-                    style: TextStyle(fontSize: 16),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
             ],
           ),
         ),

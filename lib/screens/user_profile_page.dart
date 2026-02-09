@@ -20,6 +20,7 @@ import 'chat_home.dart';
 import '../config.dart'; // Make sure you have this new config.dart file in the same lib folder
 import '../services/local_auth_service.dart';
 import 'package:whatsappchat/screens/set_mpin_page.dart';
+import 'package:whatsappchat/widgets/optimized_image_widget.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int userId;
@@ -658,8 +659,24 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     CircleAvatar(
                       radius: 50,
                       backgroundImage: _imageFile != null ? FileImage(_imageFile!) : null,
-                      child: _imageFile == null ? const Icon(Icons.person, size: 50) : null,
+                      child: _imageFile == null 
+                          ? const Icon(Icons.person, size: 50)
+                          : null,
                     ),
+                    if (_imageFile != null)
+                      Positioned.fill(
+                        child: ClipOval(
+                          child: OptimizedImageWidget(
+                            imageUrl: _imageFile!.path,
+                            width: 100,
+                            height: 100,
+                            memCacheWidth: 200,
+                            memCacheHeight: 200,
+                            enableFadeIn: true,
+                            fadeInDuration: const Duration(milliseconds: 300),
+                          ),
+                        ),
+                      ),
                     Positioned(
                       bottom: 0,
                       right: 0,

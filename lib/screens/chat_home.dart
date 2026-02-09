@@ -22,6 +22,12 @@ import '../services/my_firebase_messaging_service.dart';
 import '../services/product_service.dart';
 import '../services/cart_service.dart';
 import '../widgets/profile_image_manager/image_options_modal.dart';
+import '../widgets/optimized_image_widget.dart';
+import '../widgets/cloudflare_optimized_image.dart';
+import '../widgets/fast_image_widget.dart';
+import '../widgets/ultra_fast_image.dart';
+import '../widgets/high_quality_image.dart';
+import '../widgets/flipkart_image_widget.dart';
 import 'chat_screen.dart';
 import 'new_chat_page.dart';
 import '../config.dart';
@@ -163,15 +169,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
-
-      // Refresh marketplace when tab is selected
-      if (index == 1 && _marketplaceTabKey.currentState != null) {
-        _marketplaceTabKey.currentState!.refresh();
-      }
-      // Refresh profile tab when selected
-      if (index == 2 && _profileTabKey.currentState != null) {
-        _profileTabKey.currentState!.refreshProfile();
-      }
     });
   }
 
@@ -209,7 +206,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.dashboard, color: Colors.green),
+              leading: const Icon(Icons.dashboard, color: Color(0xFF333333)),
               title: const Text("Dashboard"),
               onTap: () {
                 Navigator.pop(context);
@@ -268,20 +265,31 @@ class _ChatHomePageState extends State<ChatHomePage> {
       appBar: (_selectedIndex == 2 || _selectedIndex == 1 || _selectedIndex == 3)
           ? null
           : AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFF075E54),
+        backgroundColor: Colors.white,
+        elevation: 2,
         title: const Text(
-          "ZAKHIRA",
+          "𝘡𝘢𝘬𝘩𝘪𝘳𝘢",
           style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-            letterSpacing: 1.5,
+            color: Colors.black87,
+            fontWeight: FontWeight.w900,
+            fontSize: 28,
+            letterSpacing: 3.2,
+            fontFamily: 'Roboto',
+            shadows: [
+              Shadow(
+                color: Colors.black12,
+                offset: Offset(1.0, 1.0),
+                blurRadius: 2.0,
+              ),
+            ],
           ),
         ),
         actions: [
-          const Icon(Icons.search, color: Colors.white),
-          const SizedBox(width: 16),
+          IconButton(
+            icon: const Icon(Icons.search, color: Color(0xFF333333)),
+            onPressed: () {},
+          ),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: () {
               Navigator.push(
@@ -292,12 +300,13 @@ class _ChatHomePageState extends State<ChatHomePage> {
               );
             },
             child: Stack(
+              alignment: Alignment.center,
               children: [
-                const Icon(Icons.shopping_cart_outlined, color: Colors.white),
+                const Icon(Icons.shopping_cart_outlined, color: Color(0xFF333333)),
                 if (CartService.totalItems > 0)
                   Positioned(
-                    right: 8,
-                    top: 8,
+                    right: 0,
+                    top: 0,
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
@@ -324,7 +333,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
+            icon: const Icon(Icons.more_vert, color: Color(0xFF333333)),
             onPressed: _showMenu,
           ),
           const SizedBox(width: 8),
@@ -337,7 +346,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
-        selectedItemColor: const Color(0xFF075E54),
+        selectedItemColor: const Color(0xFF333333),
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         items: const [
@@ -895,7 +904,7 @@ class _ChatsTabState extends State<ChatsTab> {
                                 width: 12,
                                 height: 12,
                                 decoration: BoxDecoration(
-                                  color: Colors.green,
+                                  color: Color(0xFF333333),
                                   shape: BoxShape.circle,
                                   border: Border.all(color: Colors.white, width: 2),
                                 ),
@@ -943,7 +952,7 @@ class _ChatsTabState extends State<ChatsTab> {
                               isOnline ? 'Online' : (contact.lastMessage ?? "No message"),
                               style: TextStyle(
                                 color: isOnline
-                                    ? Colors.green.shade600
+                                    ? Color(0xFF333333)
                                     : (unreadCount > 0 ? Colors.black : Colors.grey),
                                 fontWeight: isOnline || unreadCount > 0
                                     ? FontWeight.bold
@@ -1099,13 +1108,6 @@ class _ProfileTabState extends State<ProfileTab> {
     }
   }
 
-  // Public method to refresh profile
-  void refreshProfile() {
-    _loadProfile();
-    _loadPublishedProductsFromServer(); // SERVER SE REFRESH
-    _loadPublishedProductsFromServer(); // ✅ SERVER SE REFRESH
-  }
-
   // ✅ Show MPIN menu from hamburger menu
   void _showMpinMenu(BuildContext context) {
     final isMpinEnabled = LocalAuthService.isMpinEnabled();
@@ -1193,8 +1195,17 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  Future<void> _loadProfile() async {
-    setState(() => _loading = true);
+  // Optimized refresh
+  void refreshProfile() {
+    _loadProfile(silent: true);
+    _loadPublishedProductsFromServer(silent: true);
+  }
+
+  Future<void> _loadProfile({bool silent = false}) async {
+    if (!silent && _profile == null) {
+      setState(() => _loading = true);
+    }
+    
     final profile = await ApiService.getProfile();
     setState(() {
       _profile = profile;
@@ -1209,8 +1220,10 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   // ✅ SIRF SERVER SE LOAD - Local Hive se nahi
-  Future<void> _loadPublishedProductsFromServer() async {
-    setState(() => _loadingProducts = true);
+  Future<void> _loadPublishedProductsFromServer({bool silent = false}) async {
+    if (!silent && _publishedProducts.isEmpty) {
+      setState(() => _loadingProducts = true);
+    }
 
     try {
       final userId = LocalAuthService.getUserId();
@@ -1410,22 +1423,22 @@ class _ProfileTabState extends State<ProfileTab> {
                           _showProfileImageOptions(context, _profile!.profileImage!);
                         },
                         child: ClipOval(
-                          child: Image.network(
-                            _profile!.profileImage!,
+                          child: OptimizedImageWidget(
+                            imageUrl: _profile!.profileImage!,
                             width: 40,
                             height: 40,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: Colors.white24,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.person, color: Colors.white, size: 24),
-                              );
-                            },
+                            memCacheWidth: 80,
+                            memCacheHeight: 80,
+                            fadeInDuration: const Duration(milliseconds: 150),
+                            customErrorWidget: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white24,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.person, color: Colors.white, size: 24),
+                            ),
                           ),
                         ),
                       )
@@ -1693,8 +1706,13 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Widget _buildProductsGrid() {
-    if (_loadingProducts) {
-      return const Center(child: CircularProgressIndicator());
+    if (_loadingProducts && _publishedProducts.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 40.0),
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
 
     if (_publishedProducts.isEmpty) {
@@ -1928,63 +1946,16 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Widget _buildImageWidget(String imageUrl) {
-    // Handle HTTP/HTTPS URLs
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      return SizedBox.expand(
-        child: Image.network(
-          imageUrl,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              color: Colors.grey.shade200,
-              child: Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
-                      : null,
-                ),
-              ),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            print("Error loading network image: $imageUrl - $error");
-            return Container(
-              color: Colors.grey.shade300,
-              child: const Icon(Icons.broken_image, color: Colors.grey),
-            );
-          },
-        ),
-      );
-    }
-
-    // Try as local file path
-    try {
-      final file = File(imageUrl);
-      if (file.existsSync()) {
-        return SizedBox.expand(
-          child: Image.file(
-            file,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              print("Error loading file image: $imageUrl - $error");
-              return Container(
-                color: Colors.grey.shade300,
-                child: const Icon(Icons.broken_image, color: Colors.grey),
-              );
-            },
-          ),
-        );
-      }
-    } catch (e) {
-      print("Error checking file: $imageUrl - $e");
-    }
-
-    // Fallback
-    return Container(
-      color: Colors.grey.shade300,
-      child: const Icon(Icons.broken_image, color: Colors.grey),
+    // Use OptimizedImageWidget for better caching and speed
+    return OptimizedImageWidget(
+      imageUrl: imageUrl,
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.cover,
+      memCacheWidth: 300, // Small thumbs for grid
+      memCacheHeight: 300,
+      fadeInDuration: const Duration(milliseconds: 150),
+      placeholder: '...',
     );
   }
 }

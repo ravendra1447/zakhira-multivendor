@@ -1,6 +1,7 @@
 import 'dart:isolate';
 import 'dart:ui';
 import 'dart:developer'; // Added for logging
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -23,6 +24,8 @@ import 'package:whatsappchat/screens/phone_otp_login.dart';
 import 'package:whatsappchat/screens/verify_mpin_page.dart';
 import 'package:whatsappchat/utils/sound_utils.dart';
 import 'package:whatsappchat/theme/app_theme.dart';
+import 'package:whatsappchat/services/cache_initializer.dart';
+import 'package:whatsappchat/services/http_overrides.dart';
 
 // ----------------- Hive Models -----------------
 @HiveType(typeId: 3)
@@ -217,6 +220,9 @@ Future<void> main() async {
 
   // ❌ REMOVED: startupSync call. The sync will be triggered later via Isolate.spawn.
   // ContactService.startupSync(ownerUserId: 0);
+
+  // Initialize Cache Services First
+  await CacheInitializer.initializeAll();
 
   // Hive Init
   await Hive.initFlutter();

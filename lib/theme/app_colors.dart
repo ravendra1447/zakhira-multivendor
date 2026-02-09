@@ -11,6 +11,15 @@ class AppColors {
   
   static const Color _primaryDarkShade = Color(0xFF128C7E);
   static const Color _secondaryColor = Color(0xFF075E54);
+  
+  static const Gradient primaryGradient = LinearGradient(
+    colors: [
+      Color(0xFF11998E), // Teal
+      Color(0xFF38EF7D), // Vibrant Green
+    ],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
 
   // ============ Background Colors ============
   static const Color _backgroundLight = Color(0xFFF5F5F5);

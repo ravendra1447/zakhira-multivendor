@@ -31,12 +31,36 @@ class CartService {
         if (data['success']) {
           _cartItems.clear();
           
+          // Group items by product+color+size to avoid duplicates with different images
+          final Map<String, Map<String, dynamic>> groupedItems = {};
+          
           for (var item in data['items']) {
-            // Convert server item to CartItem
+            final key = '${item['product_id']}_${item['color']}_${item['size']}';
+            
+            if (groupedItems.containsKey(key)) {
+              // Add quantity to existing group
+              groupedItems[key]!['quantity'] += item['quantity'];
+            } else {
+              // First occurrence - store with first image
+              groupedItems[key] = {
+                'product_id': item['product_id'],
+                'name': item['name'] ?? 'Product',
+                'description': item['description'] ?? '',
+                'color': item['color'] ?? 'Default',
+                'size': item['size'] ?? 'M',
+                'quantity': item['quantity'],
+                'price': item['price'],
+                'image_url': item['image_url'], // Keep only first image
+              };
+            }
+          }
+          
+          // Convert grouped items to CartItems
+          for (var item in groupedItems.values) {
             final product = Product(
               id: item['product_id'],
               userId: 1, // Default user ID - you may need to get this from user data
-              name: item['name'] ?? 'Product',
+              name: item['name'],
               availableQty: '999', // Default available quantity
               description: item['description'] ?? '',
               status: 'publish', // Default status
@@ -44,14 +68,14 @@ class CartService {
               attributes: {}, // Empty attributes
               selectedAttributeValues: {}, // Empty selected values
               variations: [], // Empty variations
-              sizes: [item['size'] ?? 'M'], // Use item size or default
+              sizes: [item['size']], // Use item size
               images: item['image_url'] != null ? [item['image_url']] : [],
             );
             
             _cartItems.add(CartItem(
               product: product,
-              variation: {'name': item['color'] ?? 'Default'},
-              size: item['size'] ?? 'M',
+              variation: {'name': item['color']},
+              size: item['size'],
               quantity: item['quantity'],
               price: double.parse(item['price'].toString()),
             ));

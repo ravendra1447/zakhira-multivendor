@@ -5,6 +5,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/product.dart';
 import '../../services/catalog_service.dart';
 import '../../services/local_auth_service.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_spacing.dart';
+import '../../theme/app_typography.dart';
+import '../../widgets/modern_card.dart';
 import '../product/detail/product_detail_screen.dart';
 
 class CatalogDetailScreen extends StatefulWidget {
@@ -263,113 +267,189 @@ class _CatalogDetailScreenState extends State<CatalogDetailScreen> {
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 0.75,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.65, // Match Marketplace aspect ratio
                         ),
                         itemCount: _products.length,
                         itemBuilder: (context, index) {
                           final product = _products[index];
                           final imageUrl = _getProductImage(product);
 
-                          return Card(
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: InkWell(
-                              onTap: () {
-                                // Get first variation for navigation
-                                Map<String, dynamic> firstVariation = {};
-                                if (product.variations.isNotEmpty) {
-                                  firstVariation = product.variations.first;
-                                } else {
-                                  firstVariation = {
-                                    'name': 'Default',
-                                    'image': product.images.isNotEmpty ? product.images.first : '',
-                                    'allImages': product.images,
-                                  };
-                                }
-                                
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ProductDetailScreen(
-                                      product: product,
-                                      variation: firstVariation,
-                                    ),
+                          return ModernCard(
+                            padding: EdgeInsets.zero,
+                            elevation: 0.0, // Remove shadows as requested
+                            backgroundColor: Colors.white,
+                            onTap: () {
+                              // Get first variation for navigation
+                              Map<String, dynamic> firstVariation = {};
+                              if (product.variations.isNotEmpty) {
+                                firstVariation = product.variations.first;
+                              } else {
+                                firstVariation = {
+                                  'name': 'Default',
+                                  'image': product.images.isNotEmpty ? product.images.first : '',
+                                  'allImages': product.images,
+                                };
+                              }
+                              
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ProductDetailScreen(
+                                    product: product,
+                                    variation: firstVariation,
                                   ),
-                                );
-                              },
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    flex: 3,
-                                    child: Container(
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                                        color: Colors.grey[200],
+                                ),
+                              );
+                            },
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Product Image - Bigger size like Marketplace
+                                Expanded(
+                                  flex: 4,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Container(
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                          color: AppColors.surface(context),
+                                          child: imageUrl != null
+                                              ? CachedNetworkImage(
+                                                  imageUrl: imageUrl,
+                                                  fit: BoxFit.cover,
+                                                  width: double.infinity,
+                                                  height: double.infinity,
+                                                  placeholder: (context, url) => const Center(
+                                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                                  ),
+                                                  errorWidget: (context, url, error) => const Icon(Icons.image_not_supported, color: Colors.grey),
+                                                )
+                                              : const Center(child: Icon(Icons.image_not_supported, color: Colors.grey)),
+                                        ),
                                       ),
-                                      child: ClipRRect(
-                                        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                                        child: imageUrl != null
-                                            ? CachedNetworkImage(
-                                                imageUrl: imageUrl,
-                                                fit: BoxFit.cover,
-                                                placeholder: (context, url) => const Center(
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                      // Discount badge - Added for consistency
+                                      if (product.price != null && product.price! > 0)
+                                        Builder(
+                                          builder: (context) {
+                                            final originalPrice = product.price! * 1.3;
+                                            final discountPercent = 23; // Keeping it consistent with user screenshots
+                                            return Positioned(
+                                              top: 8,
+                                              left: 8,
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.red,
+                                                  borderRadius: BorderRadius.circular(4),
                                                 ),
-                                                errorWidget: (context, url, error) => const Icon(Icons.image_not_supported, color: Colors.grey),
-                                              )
-                                            : const Icon(Icons.image_not_supported, color: Colors.grey),
-                                      ),
-                                    ),
+                                                child: Text(
+                                                  '$discountPercent% OFF',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        ),
+                                    ],
                                   ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                ),
+                                // Product Details - Match Marketplace layout
+                                Padding(
+                                  padding: AppSpacing.paddingSM,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Product Name
+                                      Text(
+                                        product.name,
+                                        style: AppTypography.bodyMedium(context).copyWith(
+                                          fontWeight: AppTypography.semibold,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+
+                                      // Rating stars (as seen in screenshots)
+                                      Row(
                                         children: [
-                                          Text(
-                                            product.name,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 12,
-                                              color: Colors.black87,
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: List.generate(5, (index) {
+                                              return Icon(
+                                                index < 4 ? Icons.star : Icons.star_border,
+                                                color: Colors.amber,
+                                                size: 12,
+                                              );
+                                            }),
                                           ),
-                                          const SizedBox(height: 4),
-                                          if (product.category != null)
-                                            Text(
-                                              product.category!,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[600],
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '(24)',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey[600],
                                             ),
-                                          const Spacer(),
-                                          if (product.price != null && product.price! > 0)
-                                            Text(
-                                              '₹${product.price!.toStringAsFixed(0)}',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12,
-                                                color: Color(0xFF25D366),
-                                              ),
-                                            ),
+                                          ),
                                         ],
                                       ),
-                                    ),
+                                      const SizedBox(height: 4),
+
+                                      // Price Row
+                                      if (product.price != null && product.price! > 0)
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                '₹${product.price!.toStringAsFixed(0)}',
+                                                style: AppTypography.price(context).copyWith(
+                                                  fontSize: 14,
+                                                  color: const Color(0xFF25D366),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Flexible(
+                                              child: Text(
+                                                '₹${(product.price! * 1.3).toStringAsFixed(0)}',
+                                                style: AppTypography.discount(context).copyWith(fontSize: 11),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                      // Stock info - Restoration requested by user
+                                      if (product.availableQty.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            'Stock: ${product.availableQty}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: int.tryParse(product.availableQty) != null && 
+                                                     int.parse(product.availableQty) > 0 
+                                                  ? Colors.green[600]
+                                                  : Colors.red[600],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           );
                         },

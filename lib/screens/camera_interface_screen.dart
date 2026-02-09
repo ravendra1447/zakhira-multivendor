@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:camera/camera.dart';
 import 'selected_images_review_screen.dart';
 import 'product_selection_screen.dart';
+import '../services/image_enhancement_service.dart';
 
 class CameraInterfaceScreen extends StatefulWidget {
   final bool returnImagesDirectly; // If true, return images directly instead of opening ProductSelectionScreen
@@ -24,13 +25,34 @@ class _CameraInterfaceScreenState extends State<CameraInterfaceScreen> {
   List<File> _selectedImages = [];
   Set<String> _selectedImagePaths = {}; // Track selected image paths for gallery ticks
   bool _isMultipleMode = false;
-  final int _maxImages = 5;
+  final int _maxImages = 10;
   bool _isNavigatingToProduct = false; // Flag to hide camera when navigating
+
+  final List<String> _angleGuides = [
+    'FRONT VIEW',
+    'BACK VIEW',
+    'SIDE VIEW (LEFT)',
+    'SIDE VIEW (RIGHT)',
+    'TOP VIEW',
+    'BOTTOM VIEW',
+    'LABEL/DETAIL',
+    'INNER VIEW',
+    'PACKAGING',
+    'LIFESTYLE SHOT'
+  ];
+
+  String _getCurrentAngleGuide() {
+    if (_selectedImages.length < _angleGuides.length) {
+      return _angleGuides[_selectedImages.length];
+    }
+    return 'EXTRA SHOT';
+  }
 
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized = false;
   bool _isInitializing = false;
+  bool _isProcessingMagic = false;
 
   @override
   void initState() {
@@ -159,6 +181,40 @@ class _CameraInterfaceScreenState extends State<CameraInterfaceScreen> {
               ),
             ),
 
+            // Angle Guide Overlay
+            if (_isCameraInitialized && !_isNavigatingToProduct)
+              Positioned(
+                top: 80,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: Colors.white24, width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.info_outline, color: Colors.yellow, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'NEXT SHOT: ${_getCurrentAngleGuide()}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
             // Top bar with close button and flash
             Positioned(
               top: 0,
@@ -281,8 +337,39 @@ class _CameraInterfaceScreenState extends State<CameraInterfaceScreen> {
                         _buildModeButton('VIDEO NOTE', Icons.note),
                         const SizedBox(width: 12),
                         if (_selectedImages.isNotEmpty)
-                          GestureDetector(
-                            onTap: () async {
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Magic Fix & Send Button
+                              GestureDetector(
+                                onTap: _isProcessingMagic ? null : () => _enhanceAndSend(),
+                                child: Container(
+                                  width: 42,
+                                  height: 42,
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [Colors.purple, Colors.blue],
+                                    ),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.blue.withOpacity(0.4),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: _isProcessingMagic 
+                                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // Standard Send Button
+                              GestureDetector(
+                                onTap: () async {
                               if (widget.returnImagesDirectly) {
                                 Navigator.pop(context, _selectedImages);
                                 return;
@@ -350,9 +437,11 @@ class _CameraInterfaceScreenState extends State<CameraInterfaceScreen> {
                               ),
                             ),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
 
                     // Selected images slider (if any images selected)
                     if (_selectedImages.isNotEmpty)
@@ -573,6 +662,47 @@ class _CameraInterfaceScreenState extends State<CameraInterfaceScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _enhanceAndSend() async {
+    if (_selectedImages.isEmpty) return;
+    
+    setState(() {
+      _isProcessingMagic = true;
+      _isNavigatingToProduct = true; // Use overlay
+    });
+
+    try {
+      List<File> enhancedImages = [];
+      for (var file in _selectedImages) {
+        final enhanced = await ImageEnhancementService.enhanceProductImage(file);
+        enhancedImages.add(enhanced);
+      }
+
+      if (mounted) {
+        final finalResult = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductSelectionScreen(
+              selectedImages: enhancedImages,
+            ),
+          ),
+        );
+        
+        if (finalResult != null && finalResult is List<File>) {
+          Navigator.pop(context, finalResult);
+        }
+      }
+    } catch (e) {
+      print("Magic enhancement error: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingMagic = false;
+          _isNavigatingToProduct = false;
+        });
+      }
+    }
   }
 
   Widget _buildModeButton(String mode, IconData icon) {

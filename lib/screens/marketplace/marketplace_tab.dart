@@ -25,6 +25,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   List<dynamic> _marketplaceProducts = [];
   List<dynamic> _filteredProducts = [];
   bool _loadingProducts = false;
+  bool _loadingMore = false;
+  int _currentPage = 0;
+  final int _pageSize = 20;
+  bool _hasMoreProducts = true;
   final TextEditingController _searchController = TextEditingController();
   String? _selectedCategory;
   String? _selectedGender;
@@ -77,70 +81,78 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     _applyFilters();
   }
 
-  Future<void> _loadMarketplaceProducts({bool showLocalFirst = false}) async {
-    setState(() => _loadingProducts = true);
+  Future<void> _loadMarketplaceProducts({bool showLocalFirst = false, bool loadMore = false}) async {
+    if (loadMore) {
+      if (_loadingMore || !_hasMoreProducts) return;
+      setState(() => _loadingMore = true);
+    } else {
+      if (_loadingProducts && _marketplaceProducts.isEmpty) return; 
+      // Only show full loading if we have NO products yet.
+      // If we have products, we update them silently in the background.
+      if (_marketplaceProducts.isEmpty) {
+        setState(() => _loadingProducts = true);
+      }
+      _currentPage = 0;
+      // Note: Don't clear _marketplaceProducts here to avoid blank screen while fetching.
+    }
+
     try {
-      // Get all users' products from server ONLY (no local products to avoid duplicates)
+      // Get products in smaller batches for faster initial load
       final result = await ProductService.getProducts(
         status: 'publish',
-        marketplace: true, // Get all users' products
-        limit: 200, // Get more products for marketplace
+        marketplace: true,
+        limit: _pageSize,
+        offset: _currentPage * _pageSize,
       );
 
-      List<Product> serverProducts = [];
+      List<Product> newProducts = [];
       if (result['success'] == true && result['data'] != null) {
         final productsData = result['data'] as List<dynamic>;
-        serverProducts = productsData.map((p) {
+        newProducts = productsData.map((p) {
           try {
-            // Convert server data (0/1) to Product model (boolean)
             final productMap = Map<String, dynamic>.from(p);
-            // Handle marketplace_enabled: server sends 0/1, Product expects boolean
             if (productMap['marketplace_enabled'] != null) {
               productMap['marketplace_enabled'] = productMap['marketplace_enabled'] == 1 ||
-                                                  productMap['marketplace_enabled'] == '1' ||
-                                                  productMap['marketplace_enabled'] == true;
+                  productMap['marketplace_enabled'] == '1' ||
+                  productMap['marketplace_enabled'] == true;
             }
             return Product.fromMap(productMap);
           } catch (e) {
             print('❌ Error parsing product: $e');
-            print('   Product data: $p');
             return null;
           }
         }).whereType<Product>().toList();
       }
 
-      // Deduplicate by product ID to ensure no duplicates
-      final Map<int, Product> productsMap = {};
-      for (var product in serverProducts) {
-        if (product.id != null) {
-          // Use server ID as key for deduplication
-          productsMap[product.id!] = product;
-        }
+      // Check if there are more products
+      _hasMoreProducts = newProducts.length >= _pageSize;
+
+      // Add new products to existing list
+      if (loadMore) {
+        _marketplaceProducts.addAll(newProducts);
+      } else {
+        _marketplaceProducts = newProducts;
       }
 
-      // Convert to list and sort by updated_at DESC (latest first)
-      final marketplaceProducts = productsMap.values.toList();
-      marketplaceProducts.sort((a, b) {
-        if (a.updatedAt == null && b.updatedAt == null) return 0;
-        if (a.updatedAt == null) return 1;
-        if (b.updatedAt == null) return -1;
-        return b.updatedAt!.compareTo(a.updatedAt!);
-      });
-
-      print('✅ Loaded ${marketplaceProducts.length} marketplace products from server (deduplicated)');
+      print('✅ Loaded ${newProducts.length} products (page ${_currentPage + 1}) - Total: ${_marketplaceProducts.length}');
 
       setState(() {
-        _marketplaceProducts = marketplaceProducts;
-        _filteredProducts = marketplaceProducts;
+        _filteredProducts = List.from(_marketplaceProducts);
         _loadingProducts = false;
+        _loadingMore = false;
       });
-      _applyFilters();
+
+      if (!loadMore) {
+        _currentPage++;
+        _applyFilters();
+      } else {
+        _currentPage++;
+      }
     } catch (e) {
       print("❌ Error loading marketplace products: $e");
       setState(() {
-        _marketplaceProducts = [];
-        _filteredProducts = [];
         _loadingProducts = false;
+        _loadingMore = false;
       });
     }
   }
@@ -221,21 +233,43 @@ class MarketplaceTabState extends State<MarketplaceTab> {
 
             // Scrollable Content
             Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    // Delivery Location Banner
-                    _buildDeliveryBanner(),
+              child: RefreshIndicator(
+                onRefresh: () => _loadMarketplaceProducts(),
+                color: Colors.orange,
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (scrollInfo) {
+                    if (scrollInfo.metrics.pixels == scrollInfo.metrics.maxScrollExtent) {
+                      _loadMarketplaceProducts(loadMore: true);
+                    }
+                    return false;
+                  },
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      children: [
+                        // Delivery Location Banner
+                        _buildDeliveryBanner(),
 
-                    // Category Icons
-                    _buildCategoryIcons(),
+                        // Category Icons
+                        _buildCategoryIcons(),
 
-                    // Sale Banner
-                    _buildSaleBanner(),
+                        // Sale Banner
+                        _buildSaleBanner(),
 
-                    // Products Grid
-                    _buildProductsGrid(),
-                  ],
+                        // Products Grid
+                        _buildProductsGrid(),
+
+                        // Load More Indicator
+                        if (_loadingMore)
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            child: const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -596,12 +630,12 @@ class MarketplaceTabState extends State<MarketplaceTab> {
             return Container(
               margin: AppSpacing.marginVerticalXS,
               decoration: BoxDecoration(
-                color: isSelected 
+                color: isSelected
                     ? AppColors.primary(context).withOpacity(0.1)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: isSelected 
+                  color: isSelected
                       ? AppColors.primary(context)
                       : AppColors.border(context),
                   width: isSelected ? 2 : 1,
@@ -683,12 +717,12 @@ class MarketplaceTabState extends State<MarketplaceTab> {
             return Container(
               margin: AppSpacing.marginVerticalXS,
               decoration: BoxDecoration(
-                color: isSelected 
+                color: isSelected
                     ? AppColors.primary(context).withOpacity(0.1)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: isSelected 
+                  color: isSelected
                       ? AppColors.primary(context)
                       : AppColors.border(context),
                   width: isSelected ? 2 : 1,
@@ -806,13 +840,13 @@ class MarketplaceTabState extends State<MarketplaceTab> {
             }
 
             if (allImages.isNotEmpty) {
-              final lastImage = allImages.last;
-              final imageIndex = allImages.length - 1;
+              final firstImage = allImages.first;
+              final imageIndex = 0;
 
               productItems.add({
                 'product': product,
                 'variation': variation,
-                'imageUrl': lastImage,
+                'imageUrl': firstImage,
                 'imageIndex': imageIndex,
                 'allImages': allImages,
               });
@@ -840,7 +874,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           crossAxisCount: 2,
           crossAxisSpacing: 8,
           mainAxisSpacing: 12,
-          childAspectRatio: 0.75, // Increased to make images bigger
+          childAspectRatio: 0.65, // Increased height to make images bigger
         ),
         itemCount: productItems.length,
         itemBuilder: (context, index) {
@@ -906,6 +940,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
       },
       child: ModernCard(
         padding: EdgeInsets.zero,
+        elevation: 0.0,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -917,7 +952,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                 fit: StackFit.expand,
                 children: [
                   ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
                     child: Container(
                       width: double.infinity,
                       height: double.infinity,
@@ -990,16 +1025,6 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (originalPrice != null) ...[
-                          AppSpacing.horizontalSpaceSM,
-                          Flexible(
-                            child: Text(
-                              '₹${originalPrice.toStringAsFixed(0)}',
-                              style: AppTypography.discount(context),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
                       ],
                     ],
                   ),

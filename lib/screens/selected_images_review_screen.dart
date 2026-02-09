@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../services/image_enhancement_service.dart';
 
 class SelectedImagesReviewScreen extends StatefulWidget {
   final List<File> selectedImages;
@@ -17,6 +18,8 @@ class SelectedImagesReviewScreen extends StatefulWidget {
 class _SelectedImagesReviewScreenState extends State<SelectedImagesReviewScreen> {
   late List<File> _images;
   final PageController _pageController = PageController();
+  bool _isEnhancing = false;
+  int? _enhancingIndex;
 
   @override
   void initState() {
@@ -52,6 +55,32 @@ class _SelectedImagesReviewScreenState extends State<SelectedImagesReviewScreen>
       Navigator.pop(context, []);
     } else {
       Navigator.pop(context, _images);
+    }
+  }
+
+  Future<void> _enhanceImage(int index) async {
+    setState(() {
+      _isEnhancing = true;
+      _enhancingIndex = index;
+    });
+
+    try {
+      final enhancedFile = await ImageEnhancementService.enhanceProductImage(_images[index]);
+      setState(() {
+        _images[index] = enhancedFile;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Professional background applied! ✨')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enhancement failed. Please try again.')),
+      );
+    } finally {
+      setState(() {
+        _isEnhancing = false;
+        _enhancingIndex = null;
+      });
     }
   }
 
@@ -288,6 +317,55 @@ class _SelectedImagesReviewScreenState extends State<SelectedImagesReviewScreen>
                         ),
                       ),
                     ),
+                    // Magic Enhance button in bottom left
+                    Positioned(
+                      bottom: 16,
+                      left: 16,
+                      child: GestureDetector(
+                        onTap: (_isEnhancing) ? null : () => _enhanceImage(index),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Colors.purple, Colors.blue],
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.blue.withOpacity(0.3),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_isEnhancing && _enhancingIndex == index)
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              else
+                                const Icon(Icons.auto_awesome, color: Colors.white, size: 16),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Magic Enhance ✨',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                     // Done button in bottom right corner
                     Positioned(
                       bottom: 16,
@@ -326,15 +404,26 @@ class _SelectedImagesReviewScreenState extends State<SelectedImagesReviewScreen>
               },
             ),
           ),
-          // Thumbnail strip at bottom
+          // Thumbnail strip at bottom (Drag to reorder)
           Container(
-            height: 100,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: ListView.builder(
+            height: 110,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            color: Colors.black,
+            child: ReorderableListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _images.length,
+              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (oldIndex < newIndex) {
+                    newIndex -= 1;
+                  }
+                  final item = _images.removeAt(oldIndex);
+                  _images.insert(newIndex, item);
+                });
+              },
               itemBuilder: (context, index) {
                 return GestureDetector(
+                  key: ValueKey(_images[index].path),
                   onTap: () {
                     _pageController.animateToPage(
                       index,
@@ -347,14 +436,16 @@ class _SelectedImagesReviewScreenState extends State<SelectedImagesReviewScreen>
                     height: 80,
                     margin: const EdgeInsets.symmetric(horizontal: 4),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.3),
-                        width: 1,
+                        color: _pageController.hasClients && _pageController.page?.round() == index 
+                            ? const Color(0xFF25D366) 
+                            : Colors.white24,
+                        width: 2,
                       ),
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(8),
                       child: Image.file(
                         _images[index],
                         fit: BoxFit.cover,

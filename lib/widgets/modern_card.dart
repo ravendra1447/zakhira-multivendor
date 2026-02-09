@@ -11,6 +11,8 @@ class ModernCard extends StatelessWidget {
   final BorderRadius? borderRadius;
   final VoidCallback? onTap;
   final Border? border;
+  final Gradient? gradientBorder;
+  final double? gradientBorderWidth;
 
   const ModernCard({
     super.key,
@@ -21,6 +23,8 @@ class ModernCard extends StatelessWidget {
     this.borderRadius,
     this.onTap,
     this.border,
+    this.gradientBorder,
+    this.gradientBorderWidth,
   });
 
   @override
@@ -29,7 +33,7 @@ class ModernCard extends StatelessWidget {
     final defaultElevation = isDark ? 4.0 : 2.0;
     final defaultBorderRadius = BorderRadius.circular(12);
 
-    final cardWidget = Container(
+    Widget cardContent = Container(
       decoration: BoxDecoration(
         color: backgroundColor ?? AppColors.card(context),
         borderRadius: borderRadius ?? defaultBorderRadius,
@@ -48,14 +52,38 @@ class ModernCard extends StatelessWidget {
       ),
     );
 
+    // Wrap with gradient border if provided
+    if (gradientBorder != null) {
+      final borderWidth = gradientBorderWidth ?? 2.0;
+      cardContent = Container(
+        decoration: BoxDecoration(
+          gradient: gradientBorder,
+          borderRadius: (borderRadius ?? defaultBorderRadius).add(
+            BorderRadius.circular(borderWidth),
+          ),
+        ),
+        padding: EdgeInsets.all(borderWidth),
+        child: Container(
+          decoration: BoxDecoration(
+            color: backgroundColor ?? AppColors.card(context),
+            borderRadius: borderRadius ?? defaultBorderRadius,
+          ),
+          child: Padding(
+            padding: padding ?? AppSpacing.paddingLG,
+            child: child,
+          ),
+        ),
+      );
+    }
+
     if (onTap != null) {
       return InkWell(
         onTap: onTap,
         borderRadius: borderRadius ?? defaultBorderRadius,
-        child: cardWidget,
+        child: cardContent,
       );
     }
 
-    return cardWidget;
+    return cardContent;
   }
 }

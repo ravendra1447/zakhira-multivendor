@@ -19,7 +19,10 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
   Future<void> _verifyOtp() async {
     if (otp.isEmpty || otp.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter valid 6-digit OTP")),
+        const SnackBar(
+          content: Text("Enter valid 6-digit OTP"),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -42,7 +45,10 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res["message"] ?? "Invalid OTP")),
+        SnackBar(
+          content: Text(res["message"] ?? "Invalid OTP"),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -50,12 +56,40 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Verifying your number")),
+      appBar: AppBar(
+        title: const Text("Verifying your number"),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF25D366), Color(0xFF128C7E)], // Light green gradient
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // Message Logo
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: const Color(0xFF25D366).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.message,
+                size: 40,
+                color: Color(0xFF25D366),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
+            
             Text(
               "Waiting to automatically detect 6-digit code sent by SMS to\n${widget.phone}",
               textAlign: TextAlign.center,

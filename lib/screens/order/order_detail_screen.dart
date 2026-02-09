@@ -663,7 +663,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
-                    if (item['size'] != null && item['size'].toString().isNotEmpty)
+                    if (item['size'] != null && item['size'].toString().isNotEmpty && item['size'].toString().toLowerCase() != 'no size')
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(

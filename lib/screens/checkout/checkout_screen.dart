@@ -819,9 +819,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
 
     try {
+      final double totalPrice = _getTotalPrice();
+      // Shipping is now free, processing fee removed as per request
+      final double grandTotal = totalPrice;
+
       final orderData = {
         'user_id': userId, // ✅ Same as ProductService - LocalAuthService.getUserId()
-        'total_amount': _getTotalPrice(),
+        'total_amount': grandTotal,
         'shipping_street': _addressController.text,
         'shipping_city': _cityController.text,
         'shipping_state': _stateController.text,
@@ -981,753 +985,800 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final totalPrice = _getTotalPrice();
+    
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text(
-          'Checkout',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
+        title: Column(
+          children: [
+            const Text(
+              'Checkout',
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            Text(
+              'Your information is encrypted and secure',
+              style: TextStyle(
+                color: Colors.green[700],
+                fontSize: 10,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
         ),
         backgroundColor: Colors.white,
         elevation: 0,
+        centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.help_outline, color: Colors.black),
+            icon: const Icon(Icons.headset_mic_outlined, color: Colors.black),
             onPressed: () {
-              // Add help functionality
+              // Support toggle
             },
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Security message
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green[200]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.lock, color: Colors.green[700], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Your information is encrypted and secure',
-                        style: TextStyle(
-                          color: Colors.green[700],
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 24),
-              
-              // Delivery Address Section
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Form(
+                key: _formKey,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Delivery Address',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            _showEditAddressDialog();
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.red[50],
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.red[200]!),
-                            ),
-                            child: Text(
-                              _nameController.text.isEmpty ? 'Add' : 'Change',
-                              style: TextStyle(
-                                color: Colors.red[700],
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    // Address Section
+                    _buildAddressSection(),
+                    
                     const SizedBox(height: 12),
-                    if (!_addressLoaded || _nameController.text.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.location_on_outlined, color: Colors.grey[600], size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Please add a delivery address',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    
+                    // Delivery Section
+                    _buildDeliverySection(),
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Items Section
+                    _buildItemsSection(),
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Payment Method Section
+                    _buildPaymentSection(),
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Order Summary Section
+                    _buildOrderSummarySection(totalPrice),
+                    
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Fixed Bottom Bar
+          _buildBottomBar(totalPrice),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddressSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_nameController.text.isNotEmpty) ...[
+                      Row(
                         children: [
                           Text(
                             _nameController.text,
                             style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(width: 8),
                           Text(
                             _phoneController.text,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _addressController.text,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${_cityController.text}, ${_stateController.text} - ${_pincodeController.text}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
+                              color: Colors.black,
                             ),
                           ),
                         ],
                       ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 16),
-              
-              // Delivery Information
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Delivery by 18 Feb',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_addressController.text}, ${_cityController.text}, ${_stateController.text}, ${_pincodeController.text}, India',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[800],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Shipping fee: INR 4,029.95',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ] else
+                      const Text(
+                        'Add delivery address',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
                         ),
-                      ],
-                    ),
-                    Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+                      ),
                   ],
                 ),
               ),
-              
-              const SizedBox(height: 24),
-              
-              // Order Summary
-              const Text(
-                'Order Summary',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+              IconButton(
+                icon: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                onPressed: _showEditAddressDialog,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
-              const SizedBox(height: 16),
-              
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeliverySection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Product details - handle cart items, multiple variations, or single product
-                    if (widget.cartItems != null) ...[
-                      // Multiple cart items
-                      ...widget.cartItems!.map((item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                color: Colors.grey[200],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: item.productImage.isNotEmpty
-                                    ? Image.network(
-                                        item.productImage,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) {
-                                          return const Icon(Icons.image, color: Colors.grey);
-                                        },
-                                      )
-                                    : const Icon(Icons.image, color: Colors.grey),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.product.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Qty: ${item.quantity} | ${item.colorName} | ${item.size}',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              'INR ${(item.price * item.quantity).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )).toList(),
-                    ] else if (widget.variationSizeQuantities != null && widget.product != null) ...[
-                      // Multiple selected color+size combinations
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Product name header
-                          Text(
-                            widget.product!.name,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          const Divider(height: 1),
-                          const SizedBox(height: 12),
-                          // Show each color+size combination
-                          ...widget.variationSizeQuantities!.entries.expand((colorEntry) {
-                            final colorName = colorEntry.key;
-                            final sizes = colorEntry.value;
-                            final imageUrl = widget.variationImages?[colorName] ?? '';
-                            
-                            return sizes.entries.where((e) => e.value > 0).map((sizeEntry) {
-                              final sizeName = sizeEntry.key;
-                              final quantity = sizeEntry.value;
-                              
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 60,
-                                      height: 60,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(8),
-                                        color: Colors.grey[200],
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: imageUrl.isNotEmpty
-                                            ? Image.network(
-                                                imageUrl,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (context, error, stackTrace) {
-                                                  return const Icon(Icons.image, color: Colors.grey);
-                                                },
-                                              )
-                                            : const Icon(Icons.image, color: Colors.grey),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '$colorName - Size $sizeName',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'Quantity: $quantity',
-                                            style: TextStyle(
-                                              color: Colors.grey[600],
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList();
-                          }).toList(),
-                        ],
-                      ),
-                    ] else if (widget.selectedVariations != null && widget.product != null) ...[
-                      // Multiple selected variations - show each variation separately
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Product name header
-                          Text(
-                            widget.product!.name,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          const Divider(height: 1),
-                          const SizedBox(height: 12),
-                          // Show each selected variation
-                          ...widget.selectedVariations!.entries.where((e) => e.value > 0).map((entry) {
-                            final variationName = entry.key;
-                            final quantity = entry.value;
-                            final imageUrl = widget.variationImages?[variationName] ?? '';
-                            
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 60,
-                                    height: 60,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(8),
-                                      color: Colors.grey[200],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: imageUrl.isNotEmpty
-                                          ? Image.network(
-                                              imageUrl,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, error, stackTrace) {
-                                                return const Icon(Icons.image, color: Colors.grey);
-                                              },
-                                            )
-                                          : const Icon(Icons.image, color: Colors.grey),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          variationName,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'Quantity: $quantity',
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ],
-                      ),
-                    ] else ...[
-                      // Single product
-                      Row(
-                        children: [
-                          Container(
-                            width: 60,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              color: Colors.grey[200],
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: widget.product!.images.isNotEmpty
-                                  ? Image.network(
-                                      widget.product!.images.first,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return const Icon(Icons.image, color: Colors.grey);
-                                      },
-                                    )
-                                  : const Icon(Icons.image, color: Colors.grey),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.product!.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Quantity: ${widget.quantity}',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                if (widget.selectedVariation!['size'] != null)
-                                  Text(
-                                    'Size: ${widget.selectedVariation!['size']}',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            'INR ${widget.totalPrice!.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                    
-                    const Divider(height: 32),
-                    
-                    // Payment method
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Payment Method',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 16,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          
-                          // Add a new card option
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey[300]!),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Radio<String>(
-                                  value: 'Credit Card',
-                                  groupValue: _selectedPaymentMethod,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedPaymentMethod = value!;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Row(
-                                    children: [
-                                      const Text(
-                                        'Add a new card',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Image.asset('assets/icons/visa.png', width: 24, height: 16, errorBuilder: (context, error, stackTrace) => const SizedBox()),
-                                      Image.asset('assets/icons/mastercard.png', width: 24, height: 16, errorBuilder: (context, error, stackTrace) => const SizedBox()),
-                                      Image.asset('assets/icons/amex.png', width: 24, height: 16, errorBuilder: (context, error, stackTrace) => const SizedBox()),
-                                      const Spacer(),
-                                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          
-                          const SizedBox(height: 12),
-                          
-                          // PayPal option
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey[300]!),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Radio<String>(
-                                  value: 'PayPal',
-                                  groupValue: _selectedPaymentMethod,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedPaymentMethod = value!;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 60,
-                                        height: 20,
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue[600],
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Center(
-                                          child: Text(
-                                            'PayPal',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          
-                          const SizedBox(height: 12),
-                          
-                          // Other payment methods
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey[300]!),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Radio<String>(
-                                  value: 'T/T',
-                                  groupValue: _selectedPaymentMethod,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedPaymentMethod = value!;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Text(
-                                    'Other payment methods (T/T)',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                                const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                              ],
-                            ),
-                          ),
-                        ],
+                    Text(
+                      'Estimated delivery by 24 Feb-10 Mar',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
                       ),
                     ),
-                    
-                    const Divider(height: 32),
-                    
-                    // Total
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Total Amount',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                        Text(
-                          'INR ${_getTotalPrice().toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
+                    SizedBox(height: 4),
+                    Text(
+                      'Shipping fee: Free',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.green,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
               ),
-              
-              const SizedBox(height: 32),
-              
-              // Place Order Button
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _placeOrder,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                          'Place Order',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
+              Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey.withOpacity(0.5)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildItemsSection() {
+    int totalItems = 0;
+    if (widget.cartItems != null) {
+      totalItems = widget.cartItems!.length;
+    } else if (widget.variationSizeQuantities != null) {
+      widget.variationSizeQuantities!.forEach((_, sizes) {
+        sizes.forEach((_, qty) => totalItems += qty);
+      });
+    } else if (widget.selectedVariations != null) {
+      widget.selectedVariations!.forEach((_, qty) => totalItems += qty);
+    } else {
+      totalItems = widget.quantity ?? 1;
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '$totalItems items in total',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+              Text(
+                'View or edit',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                  decoration: TextDecoration.underline,
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          _buildItemList(),
+          const SizedBox(height: 16),
+          Text(
+            'Add note to supplier',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey[700],
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildItemList() {
+    if (widget.cartItems != null) {
+      return SizedBox(
+        height: 140,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: widget.cartItems!.length,
+          itemBuilder: (context, index) {
+            final item = widget.cartItems![index];
+            return _buildItemCard(
+              imageUrl: item.productImage,
+              title: '${item.colorName} , ${item.size}',
+              price: item.price,
+              quantity: item.quantity,
+            );
+          },
+        ),
+      );
+    } else if (widget.variationSizeQuantities != null) {
+      List<Widget> cards = [];
+      widget.variationSizeQuantities!.forEach((color, sizes) {
+        sizes.forEach((size, qty) {
+          if (qty > 0) {
+            cards.add(_buildItemCard(
+              imageUrl: widget.variationImages?[color] ?? '',
+              title: '$color , $size',
+              price: _getUnitPrice(),
+              quantity: qty,
+            ));
+          }
+        });
+      });
+      return SizedBox(
+        height: 140,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: cards,
+        ),
+      );
+    } else if (widget.selectedVariations != null) {
+      List<Widget> cards = [];
+      widget.selectedVariations!.forEach((variation, qty) {
+        if (qty > 0) {
+          cards.add(_buildItemCard(
+            imageUrl: widget.variationImages?[variation] ?? '',
+            title: variation,
+            price: _getUnitPrice(),
+            quantity: qty,
+          ));
+        }
+      });
+      return SizedBox(
+        height: 140,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: cards,
+        ),
+      );
+    } else {
+      return _buildItemCard(
+        imageUrl: widget.product?.images.isNotEmpty == true ? widget.product!.images.first : '',
+        title: '${widget.selectedVariation?['name'] ?? ''} , ${_getSelectedSize()}',
+        price: _getUnitPrice(),
+        quantity: widget.quantity ?? 1,
+      );
+    }
+  }
+
+  double _getUnitPrice() {
+    if (widget.product != null) {
+      final priceSlabs = widget.product!.priceSlabs;
+      int totalQty = 0;
+      if (widget.variationSizeQuantities != null) {
+        widget.variationSizeQuantities!.forEach((_, sizes) {
+          sizes.forEach((_, qty) => totalQty += qty);
+        });
+      } else if (widget.selectedVariations != null) {
+        widget.selectedVariations!.forEach((_, qty) => totalQty += qty);
+      } else {
+        totalQty = widget.quantity ?? 1;
+      }
+
+      if (priceSlabs.isNotEmpty) {
+        final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
+          ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
+        
+        for (final slab in sortedSlabs) {
+          final moq = (slab['moq'] as num?)?.toInt() ?? 0;
+          if (totalQty >= moq) {
+            return double.tryParse(slab['price']?.toString() ?? '0') ?? 0.0;
+          }
+        }
+        return double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
+      }
+    }
+    return (widget.totalPrice ?? 0) / (widget.quantity ?? 1);
+  }
+
+  Widget _buildItemCard({required String imageUrl, required String title, required double price, required int quantity}) {
+    return Container(
+      width: 100,
+      margin: const EdgeInsets.only(right: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 80,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.grey[200],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Stack(
+                children: [
+                  imageUrl.isNotEmpty
+                      ? Image.network(imageUrl, fit: BoxFit.cover, width: 100, height: 80)
+                      : const Center(child: Icon(Icons.image, color: Colors.grey)),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      color: Colors.black.withOpacity(0.5),
+                      child: Text(
+                        title,
+                        style: const TextStyle(color: Colors.white, fontSize: 10),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'INR ${price.toStringAsFixed(2)}',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              _buildQtyBtn(Icons.remove, () {}),
+              Expanded(
+                child: Center(
+                  child: Text('$quantity', style: const TextStyle(fontSize: 12)),
+                ),
+              ),
+              _buildQtyBtn(Icons.add, () {}),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQtyBtn(IconData icon, VoidCallback onTap) {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Icon(icon, size: 14, color: Colors.grey[600]),
+    );
+  }
+
+  Widget _buildPaymentSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Payment method',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.security, size: 14, color: Colors.green[600]),
+              const SizedBox(width: 4),
+              Text(
+                'Secure payment',
+                style: TextStyle(fontSize: 11, color: Colors.green[600], fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildPaymentOption(
+            'Credit Card',
+            'Add a new card',
+            Icons.credit_card,
+            showLogos: true,
+          ),
+          const SizedBox(height: 12),
+          _buildPaymentOption(
+            'PayPal',
+            'PayPal',
+            null,
+            isPaypal: true,
+          ),
+          const SizedBox(height: 12),
+          _buildPaymentOption(
+            'T/T',
+            'Other payment methods',
+            Icons.account_balance,
+            subtitle: 'Place order first, pay later with your preferred method.',
+            isTT: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentOption(String value, String title, IconData? icon, {bool showLogos = false, bool isPaypal = false, bool isTT = false, String? subtitle}) {
+    final bool isSelected = _selectedPaymentMethod == value;
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedPaymentMethod = value;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.orange[50]?.withOpacity(0.3) : Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? Colors.orange[800]! : Colors.grey[200]!,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 2),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? Colors.orange[800]! : Colors.grey[400]!,
+                  width: isSelected ? 5 : 1.5,
+                ),
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      if (isPaypal)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF003087),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('PayPal', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        )
+                      else if (icon != null)
+                        Icon(icon, size: 20, color: isSelected ? Colors.orange[800] : Colors.grey[600])
+                      else
+                        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      
+                      const SizedBox(width: 8),
+                      if (isPaypal || icon != null)
+                        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      
+                      if (showLogos) ...[
+                        const Spacer(),
+                        Row(
+                          children: [
+                            _buildPaymentLogo('assets/icons/visa.png', Icons.payment),
+                            const SizedBox(width: 4),
+                            _buildPaymentLogo('assets/icons/mastercard.png', Icons.credit_card),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentLogo(String asset, IconData fallback) {
+    return Container(
+      width: 24,
+      height: 16,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(2),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Image.asset(
+        asset,
+        errorBuilder: (context, error, stackTrace) => Icon(fallback, size: 10, color: Colors.grey),
+      ),
+    );
+  }
+
+  Widget _buildOrderSummarySection(double total) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.receipt_long, size: 18, color: Colors.orange[800]),
+              const SizedBox(width: 8),
+              const Text(
+                'Order summary',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          _buildSummaryRow('Item subtotal', 'INR ${total.toStringAsFixed(2)}'),
+          const SizedBox(height: 12),
+          _buildSummaryRow('Shipping fee', 'Free', isGreen: true),
+          const SizedBox(height: 16),
+          const Divider(height: 1, thickness: 0.5),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Total Amount',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black),
+              ),
+              Text(
+                'INR ${total.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange[800],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value, {bool isBold = false, bool hasInfo = false, bool isGreen = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: isBold ? Colors.black : Colors.grey[600],
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w400,
+              ),
+            ),
+            if (hasInfo) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.info_outline, size: 14, color: Colors.grey),
+            ],
+          ],
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: isGreen ? Colors.green[700] : Colors.black,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomBar(double total) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            offset: const Offset(0, -2),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  showModalBottomSheet(
+                    context: context,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) {
+                      return Container(
+                        padding: const EdgeInsets.only(top: 12),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 4,
+                              margin: const EdgeInsets.only(bottom: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[300],
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            _buildOrderSummarySection(total),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'INR ${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.keyboard_arrow_up, size: 20),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              height: 48,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _placeOrder,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange[800],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  elevation: 0,
+                ),
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            'Proceed to pay',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );

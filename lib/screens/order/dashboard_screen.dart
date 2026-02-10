@@ -6,6 +6,7 @@ import '../../services/admin_dashboard_service.dart';
 import '../../config.dart';
 import 'all_orders_screen.dart';
 import 'admin_all_orders_screen.dart';
+import '../role/role_management_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -235,6 +236,34 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         iconTheme: const IconThemeData(
           color: Colors.black,
         ),
+        actions: [
+          if (isAdmin)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: Colors.purple.shade700),
+              onSelected: (value) {
+                if (value == 'roles') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RoleManagementScreen(),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'roles',
+                  child: Row(
+                    children: [
+                      Icon(Icons.manage_accounts, color: Colors.purple),
+                      SizedBox(width: 8),
+                      Text('Manage Roles'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.purple,

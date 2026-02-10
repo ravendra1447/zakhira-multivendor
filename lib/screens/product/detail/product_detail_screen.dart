@@ -2405,10 +2405,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                     shrinkWrap: true,
                                     physics: const NeverScrollableScrollPhysics(),
                                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 3,
-                                      crossAxisSpacing: 10,
+                                      crossAxisCount: 4,
+                                      crossAxisSpacing: 4,
                                       mainAxisSpacing: 8,
-                                      childAspectRatio: 0.85,
+                                      childAspectRatio: 0.75,
                                     ),
                                     itemCount: gridCount,
                                     itemBuilder: (context, index) {
@@ -2470,12 +2470,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                           });
                                         },
                                         child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Stack(
                                               children: [
                                                 Container(
-                                                  width: 90,
+                                                  width: double.infinity,
                                                   height: 90,
                                                   decoration: BoxDecoration(
                                                     borderRadius: BorderRadius.circular(8),
@@ -2527,13 +2528,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                                   right: 0,
                                                                   child: Container(
                                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                                                    color: Colors.white.withOpacity(0.9),
+                                                                    decoration: BoxDecoration(
+                                                                      color: Colors.black.withOpacity(0.6),
+                                                                      borderRadius: const BorderRadius.only(
+                                                                        bottomLeft: Radius.circular(7),
+                                                                        bottomRight: Radius.circular(7),
+                                                                      ),
+                                                                    ),
                                                                     child: Text(
                                                                       vColorName,
+                                                                      textAlign: TextAlign.center,
                                                                       overflow: TextOverflow.ellipsis,
                                                                       style: const TextStyle(
                                                                         fontSize: 11,
                                                                         fontWeight: FontWeight.w600,
+                                                                        color: Colors.white,
                                                                       ),
                                                                     ),
                                                                   ),
@@ -2574,9 +2583,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   );
                                 },
                               ),
-
-                              const SizedBox(height: 8),
-
+                              const SizedBox(height: 2),
                               // Size selection header - Show different text when no sizes
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

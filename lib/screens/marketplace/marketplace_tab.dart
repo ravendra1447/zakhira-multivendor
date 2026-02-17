@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -5,7 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/product.dart';
 import '../../services/product_database_service.dart';
 import '../../services/product_service.dart';
-import '../product/detail/product_detail_screen.dart';
+import '../../services/banner_service.dart';
+import 'package:whatsappchat/screens/product/detail/product_detail_screen.dart';
 import '../product/category_selection_screen.dart';
 import 'package:whatsappchat/theme/app_theme.dart';
 import 'package:whatsappchat/theme/app_colors.dart';
@@ -34,6 +36,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   String? _selectedGender;
   String? _sortOption;
   int? _selectedCategoryIndex;
+  
+  // Banner related variables
+  List<dynamic> _banners = [];
+  bool _loadingBanners = false;
 
   final List<Map<String, dynamic>> _categories = [
     {'icon': Icons.grid_view, 'label': 'Categories', 'color': Colors.pink, 'value': null},
@@ -62,6 +68,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   void initState() {
     super.initState();
     _loadMarketplaceProducts(); // Load products from server only
+    _loadBanners(); // Load dynamic banners
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -75,6 +82,25 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   // Method to refresh from outside
   void refresh() {
     _loadMarketplaceProducts();
+    _loadBanners();
+  }
+
+  // Load dynamic banners
+  Future<void> _loadBanners() async {
+    setState(() => _loadingBanners = true);
+    
+    try {
+      print('🎯 Loading banners from API...');
+      final banners = await BannerService.getActiveBanners();
+      print('🎯 Banners loaded: ${banners.length}');
+      setState(() {
+        _banners = banners;
+        _loadingBanners = false;
+      });
+    } catch (e) {
+      print('❌ Error loading banners: $e');
+      setState(() => _loadingBanners = false);
+    }
   }
 
   void _onSearchChanged() {
@@ -234,7 +260,10 @@ class MarketplaceTabState extends State<MarketplaceTab> {
             // Scrollable Content
             Expanded(
               child: RefreshIndicator(
-                onRefresh: () => _loadMarketplaceProducts(),
+                onRefresh: () async {
+                  await _loadMarketplaceProducts();
+                  _loadBanners(); // Also refresh banners
+                },
                 color: Colors.orange,
                 child: NotificationListener<ScrollNotification>(
                   onNotification: (scrollInfo) {
@@ -253,8 +282,8 @@ class MarketplaceTabState extends State<MarketplaceTab> {
                         // Category Icons
                         _buildCategoryIcons(),
 
-                        // Sale Banner
-                        _buildSaleBanner(),
+                        // Dynamic Banners
+                        _buildDynamicBanners(),
 
                         // Products Grid
                         _buildProductsGrid(),
@@ -482,7 +511,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
   Widget _buildSaleBanner() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      height: 90, // Slightly increased to prevent overflow
+      height: 90, // Fixed height to prevent overflow
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         gradient: LinearGradient(
@@ -585,6 +614,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               isSelected: _sortOption != null,
               onTap: _showSortDialog,
               icon: Icons.swap_vert,
+              color: Colors.grey.shade600,
             ),
             AppSpacing.horizontalSpaceSM,
             FilterChipWidget(
@@ -592,6 +622,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               isSelected: _selectedCategory != null,
               onTap: _showCategoryDialog,
               icon: Icons.category,
+              color: Colors.grey.shade600,
             ),
             AppSpacing.horizontalSpaceSM,
             FilterChipWidget(
@@ -599,6 +630,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               isSelected: _selectedGender != null,
               onTap: _showGenderDialog,
               icon: Icons.person,
+              color: Colors.grey.shade600,
             ),
             AppSpacing.horizontalSpaceSM,
             FilterChipWidget(
@@ -606,6 +638,75 @@ class MarketplaceTabState extends State<MarketplaceTab> {
               isSelected: false,
               onTap: _showFiltersDialog,
               icon: Icons.tune,
+              color: Colors.grey.shade600,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModernFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required IconData icon,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [
+                    Color.lerp(color, Colors.black, 0.3) ?? color,
+                    Color.lerp(color, Colors.black, 0.5) ?? color,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isSelected ? null : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? color : Colors.grey.shade300,
+            width: isSelected ? 1.5 : 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: color.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isSelected ? Colors.white : color,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? Colors.white : Colors.grey.shade700,
+              ),
             ),
           ],
         ),
@@ -874,7 +975,7 @@ class MarketplaceTabState extends State<MarketplaceTab> {
           crossAxisCount: 2,
           crossAxisSpacing: 8,
           mainAxisSpacing: 12,
-          childAspectRatio: 0.65, // Increased height to make images bigger
+          childAspectRatio: 0.65,
         ),
         itemCount: productItems.length,
         itemBuilder: (context, index) {
@@ -1081,6 +1182,238 @@ class MarketplaceTabState extends State<MarketplaceTab> {
     return Container(
       color: Colors.grey.shade300,
       child: const Icon(Icons.broken_image, color: Colors.grey),
+    );
+  }
+
+  // Build dynamic banners carousel
+  Widget _buildDynamicBanners() {
+    if (_loadingBanners) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        height: 90,
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (_banners.isEmpty) {
+      // Show fallback banner if no banners from API
+      return _buildFallbackBanner();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      height: 90, // Same as fallback banner
+      child: PageView.builder(
+        itemCount: _banners.length,
+        pageSnapping: true,
+        controller: PageController(viewportFraction: 1.0),
+        itemBuilder: (context, index) {
+          final banner = _banners[index];
+          return _buildBannerItem(banner);
+        },
+      ),
+    );
+  }
+
+  // Fallback banner (similar to original)
+  Widget _buildFallbackBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      height: 90,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          colors: [Colors.yellow.shade400, Colors.purple.shade600],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'MAHA INDIAN',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                  Text(
+                    'SAVINGS SALE',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.bolt, color: Colors.yellow, size: 16),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: const Text(
+                          'UP TO 70%* OFF',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      '3-4 JAN',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Build individual banner item
+  Widget _buildBannerItem(Map<String, dynamic> banner) {
+    // Use original fallback banner colors for better look
+    final backgroundColor = Colors.yellow.shade400;
+    final textColor = Colors.red.shade700;
+    
+    return GestureDetector(
+      onTap: () {
+        // Handle banner click
+        if (banner['button_url'] != null && banner['button_url'].toString().isNotEmpty) {
+          // TODO: Navigate to banner URL
+          print('Banner clicked: ${banner['button_url']}');
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              backgroundColor,
+              Colors.purple.shade600,
+            ],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: backgroundColor.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      banner['title']?.toString() ?? 'MAHA INDIAN',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                    Text(
+                      banner['subtitle']?.toString() ?? 'SAVINGS SALE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    if (banner['description'] != null && banner['description'].toString().isNotEmpty)
+                      Text(
+                        banner['description'].toString(),
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: textColor.withOpacity(0.8),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Text(
+                banner['button_text']?.toString() ?? 'Shop Now',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.purple.shade600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+        ),
+      ),
     );
   }
 }

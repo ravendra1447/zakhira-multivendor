@@ -1,4 +1,3 @@
-﻿// TODO Implement this library.import 'dart:io';
 import 'dart:io';
 import 'dart:ui'; // Added for ImageFilter
 import 'dart:convert';
@@ -6,14 +5,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:hive/hive.dart';
 import '../../../models/product.dart';
 import '../../cart/cart_screen.dart';
 import '../../checkout/checkout_screen.dart';
-import '../../marketplace/marketplace_tab.dart'; // For marketplace products
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../marketplace/marketplace_chat_screen.dart';
 import '../../../services/marketplace/marketplace_chat_service.dart';
-import '../../../models/marketplace/marketplace_chat_room.dart';
+import '../../../services/marketplace/chat_room.dart';
 
 import '../../../services/cart_service.dart';
 
@@ -55,7 +53,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   int _swipeAttemptCount = 0; // Simple counter for swipe attempts
   Timer? _swipeTimer; // Timer to detect swipe attempts
   late PageController _variationsPageController; // Controller for variations swipe navigation
-
+  
   // Chat related variables
   final MarketplaceChatService _chatService = MarketplaceChatService();
   bool _isLoadingChat = false;
@@ -202,7 +200,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           }
           if (fallbackList is List) {
             allImagesData = fallbackList;
-            print('?? allImages JSON malformed, applied fallback parsing');
+            print('⚠️ allImages JSON malformed, applied fallback parsing');
           } else {
             print('Error decoding allImages JSON: $e');
           }
@@ -220,7 +218,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         }
       }
 
-      print('?? Found ${images.length} images in variation ${_currentVariation['name']}');
+      print('📸 Found ${images.length} images in variation ${_currentVariation['name']}');
     }
 
     // Fallback to single image if allImages not available
@@ -228,7 +226,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       final img = _currentVariation['image'];
       if (img is String && img.isNotEmpty) {
         images.add(img);
-        print('?? Using single image fallback');
+        print('📸 Using single image fallback');
       }
     }
 
@@ -899,7 +897,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        '?$price',
+                                        '₹$price',
                                         style: const TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
@@ -1079,38 +1077,41 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             child: SafeArea(
               child: Row(
                 children: [
-                  Expanded(
-                    child: SizedBox(/*  */
-                      height: 40,
-                      child: OutlinedButton(
-                        onPressed: _isLoadingChat ? null : _startChat,
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.black, width: 1),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
+                  // Show chat button only to buyers, not sellers
+                  if (!_isCurrentUserSeller()) ...[
+                    Expanded(
+                      child: SizedBox(
+                        height: 40,
+                        child: OutlinedButton(
+                          onPressed: _isLoadingChat ? null : _startChat,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.black, width: 1),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
+                          child: _isLoadingChat
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                                  ),
+                                )
+                              : const Text(
+                                  'Chat now',
+                                  style: TextStyle(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
                         ),
-                        child: _isLoadingChat
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                                ),
-                              )
-                            : const Text(
-                                'Chat now',
-                                style: TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
-                              ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     child: SizedBox(
                       height: 40,
@@ -2312,7 +2313,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          '?${double.tryParse(price)?.toStringAsFixed(2) ?? price}',
+                                          '₹${double.tryParse(price)?.toStringAsFixed(2) ?? price}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
@@ -3078,7 +3079,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    Text('$s � $q'),
+                                                    Text('$s × $q'),
                                                     const SizedBox(width: 4),
                                                     GestureDetector(
                                                       onTap: () {
@@ -3130,7 +3131,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Subtotal: ?${_subtotal.toStringAsFixed(2)}',
+                                    'Subtotal: ₹${_subtotal.toStringAsFixed(2)}',
                                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                                   ),
                                   const SizedBox(height: 2),
@@ -3278,7 +3279,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                         }
                                       }
                                     }
-                                    
                                     Navigator.pop(context);
                                     Navigator.push(
                                       context,
@@ -3301,17 +3301,54 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                             ),
                           ],
-                        ),
-                      ),
-                    ),
-                  ],
+                        );
+                      }
+                    );
+                  }
                 );
-              },
+              }
             );
           },
         );
       },
     );
+  }
+  bool _isCurrentUserSeller() {
+    // TODO: Get current user ID and compare with product seller ID
+    return true;
+  }
+
+  // Start chat with seller
+  void _startChat() async {
+    if (_isLoadingChat) return;
+
+    setState(() {
+      _isLoadingChat = true;
+    });
+
+    try {
+      // TODO: Get current user ID and implement chat functionality
+      // For now, just show a snackbar
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Chat functionality will be available soon'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error starting chat: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingChat = false;
+        });
+      }
+    }
   }
 
   void _openImageViewer(String imageUrl, String colorName, List<Map<String, dynamic>> priceSlabs) {
@@ -3375,7 +3412,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
-                                      '?${double.tryParse(price)?.toStringAsFixed(2) ?? price}',
+                                      '₹${double.tryParse(price)?.toStringAsFixed(2) ?? price}',
                                       style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
                                     ),
                                     const SizedBox(height: 2),
@@ -3399,92 +3436,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         );
       },
     );
-  }
-
-  // Check if current user is the seller of this product
-  bool _isCurrentUserSeller() {
-    // Get current user ID from auth service (Hive box)
-    final authBox = Hive.box('authBox');
-    final currentUserId = authBox.get('userId');
-    
-    // If current user is the one who published this product, hide chat button
-    if (currentUserId == widget.product.userId) {
-      return true; // Current user is seller
-    }
-    
-    return false; // Current user is not seller (buyer)
-  }
-
-  // Start chat with seller
-  void _startChat() async {
-    if (_isLoadingChat) return;
-
-    setState(() {
-      _isLoadingChat = true;
-    });
-
-    try {
-      // Create or get chat room for this product
-      final chatService = MarketplaceChatService();
-      
-      // Get current user ID from auth service (Hive box)
-      final authBox = Hive.box('authBox');
-      final currentUserId = authBox.get('userId') ?? 1; // Fallback to 1 if not found
-      
-      // Get seller ID from product (userId is the seller/creator)
-      final sellerId = widget.product.userId;
-      
-      // Check if current user is trying to chat with themselves (seller chatting with seller)
-      if (currentUserId == sellerId) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('You cannot chat with yourself - you are the seller of this product'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-      
-      print('Starting chat - User ID: $currentUserId, Seller ID: $sellerId, Product ID: ${widget.product.id}');
-      
-      // Initialize socket connection
-      await chatService.initializeSocket(currentUserId);
-      
-      // Create chat room for this product
-      final chatRoom = await chatService.createOrGetChatRoom(
-        productId: widget.product.id!,
-        buyerId: currentUserId,
-        sellerId: sellerId,
-      );
-      
-      if (chatRoom != null && mounted) {
-        // Navigate to marketplace chat screen with new parameters
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => MarketplaceChatScreen(
-              chatRoom: chatRoom,
-              currentUserId: currentUserId,
-              product: widget.product,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error starting chat: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error starting chat: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingChat = false;
-        });
-      }
-    }
   }
 }
 
@@ -3687,3 +3638,5 @@ class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
     );
   }
 }
+
+

@@ -9,6 +9,7 @@ class FilterChipWidget extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final IconData? icon;
+  final Color? color;
 
   const FilterChipWidget({
     super.key,
@@ -16,10 +17,13 @@ class FilterChipWidget extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     this.icon,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    final chipColor = color ?? AppColors.primary(context);
+    
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeInOut,
@@ -33,10 +37,10 @@ class FilterChipWidget extends StatelessWidget {
             padding: AppSpacing.paddingHorizontalMD,
             decoration: BoxDecoration(
               color: isSelected
-                  ? AppColors.primary(context)
+                  ? chipColor
                   : Colors.transparent,
               border: Border.all(
-                color: AppColors.primary(context),
+                color: chipColor,
                 width: 1.5,
               ),
               borderRadius: BorderRadius.circular(20),
@@ -50,7 +54,7 @@ class FilterChipWidget extends StatelessWidget {
                     size: 16,
                     color: isSelected
                         ? Colors.white
-                        : AppColors.primary(context),
+                        : chipColor,
                   ),
                   AppSpacing.horizontalSpaceSM,
                 ],
@@ -59,7 +63,7 @@ class FilterChipWidget extends StatelessWidget {
                   style: AppTypography.label(context).copyWith(
                     color: isSelected
                         ? Colors.white
-                        : AppColors.primary(context),
+                        : chipColor,
                     fontWeight: AppTypography.medium,
                   ),
                 ),

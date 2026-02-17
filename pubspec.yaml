@@ -48,6 +48,7 @@ dependencies:
   cryptography: ^2.5.0
   encrypt: ^5.0.1
   flutter_secure_storage: ^9.2.2
+  sqflite: ^2.3.0
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   uuid: ^4.4.0

@@ -140,7 +140,7 @@ class ContactAdapter extends TypeAdapter<Contact> {
       ..writeByte(0)
       ..write(obj.contactId)
       ..writeByte(1)
-      ..write(obj.ownerUserId)
+      ..write(obj.ownerUserId ?? 0) // Handle nullable int
       ..writeByte(2)
       ..write(obj.contactName)
       ..writeByte(3)

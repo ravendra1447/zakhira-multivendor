@@ -31,20 +31,22 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     {'name': 'Electronics', 'icon': '📱'},
     {'name': 'Beauty & Personal Care', 'icon': '💄'},
     {'name': 'Footwear', 'icon': '👠'},
+    {'name': 'Other', 'icon': '📦'},
   ];
 
   // Map of categories to their subcategories
   final Map<String, List<String>> _subcategories = {
     'Popular': ['Kurtis & Dress Materials', 'Sarees', 'Westernwear', 'Jewellery', 'Men Fashion', 'Kids', 'Footwear', 'Beauty & Personal Care', 'Grocery'],
-    'Kurti, Saree & Lehenga': ['Kurtis', 'Sarees', 'Lehengas', 'Dress Materials', 'Dupattas', 'Anarkali Suits'],
-    'Women Western': ['Tops', 'Shirts', 'Jeans', 'Dresses', 'Skirts', 'Shorts', 'Jackets', 'Blazers'],
-    'Lingerie': ['Bras', 'Panties', 'Lingerie Sets', 'Shapewear', 'Nightwear'],
-    'Men': ['Men Fashion', 'Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Formal Wear', 'Casual Wear', 'Accessories'],
-    'Kids & Toys': ['Kids Clothing', 'Toys', 'Baby Care', 'School Supplies', 'Games'],
-    'Home & Kitchen': ['Kitchenware', 'Home Decor', 'Furniture', 'Bedding', 'Bath', 'Storage'],
-    'Electronics': ['Mobiles', 'Laptops', 'Accessories', 'Audio', 'Cameras', 'Gaming'],
-    'Beauty & Personal Care': ['Skincare', 'Makeup', 'Hair Care', 'Fragrances', 'Personal Hygiene'],
-    'Footwear': ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sandals', 'Boots', 'Slippers'],
+    'Kurti, Saree & Lehenga': ['Kurtis', 'Sarees', 'Lehengas', 'Dress Materials', 'Dupattas', 'Anarkali Suits', 'Other'],
+    'Women Western': ['Tops', 'Shirts', 'Jeans', 'Dresses', 'Skirts', 'Shorts', 'Jackets', 'Blazers', 'Other'],
+    'Lingerie': ['Bras', 'Panties', 'Lingerie Sets', 'Shapewear', 'Nightwear', 'Other'],
+    'Men': ['Men Fashion', 'Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Formal Wear', 'Casual Wear', 'Accessories', 'Other'],
+    'Kids & Toys': ['Kids Clothing', 'Toys', 'Baby Care', 'School Supplies', 'Games', 'Other'],
+    'Home & Kitchen': ['Kitchenware', 'Home Decor', 'Furniture', 'Bedding', 'Bath', 'Storage', 'Other'],
+    'Electronics': ['Mobiles', 'Laptops', 'Accessories', 'Audio', 'Cameras', 'Gaming', 'Other'],
+    'Beauty & Personal Care': ['Skincare', 'Makeup', 'Hair Care', 'Fragrances', 'Personal Hygiene', 'Other'],
+    'Footwear': ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sandals', 'Boots', 'Slippers', 'Other'],
+    'Other': ['Custom Category', 'Special Items', 'Miscellaneous'],
   };
 
   @override
@@ -130,6 +132,138 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     return category['icon']!;
   }
 
+  String _getIconForSubcategory(String subcategoryName) {
+    final name = subcategoryName.toLowerCase();
+    switch (name) {
+      case 'kurtis':
+        return '👕';
+      case 'sarees':
+        return '🥻';
+      case 'lehengas':
+        return '👗';
+      case 'dress materials':
+        return '🧵';
+      case 'dupattas':
+        return '🧣';
+      case 'anarkali suits':
+        return '👘';
+      case 'tops':
+        return '👚';
+      case 'shirts':
+        return '👔';
+      case 'jeans':
+        return '👖';
+      case 'dresses':
+        return '👗';
+      case 'skirts':
+        return '👗';
+      case 'shorts':
+        return '🩳';
+      case 'jackets':
+        return '🧥';
+      case 'blazers':
+        return '🥋';
+      case 'bras':
+        return '👙';
+      case 'panties':
+        return '🩲';
+      case 'lingerie sets':
+        return '👙';
+      case 'shapewear':
+        return '🦺';
+      case 'nightwear':
+        return '🌙';
+      case 'men fashion':
+        return '👔';
+      case 't-shirts':
+        return '👕';
+      case 'trousers':
+        return '👖';
+      case 'formal wear':
+        return '🤵';
+      case 'casual wear':
+        return '👕';
+      case 'accessories':
+        return '⌚';
+      case 'kids clothing':
+        return '👶';
+      case 'toys':
+        return '🧸';
+      case 'baby care':
+        return '🍼';
+      case 'school supplies':
+        return '📚';
+      case 'games':
+        return '🎮';
+      case 'kitchenware':
+        return '🍳';
+      case 'home decor':
+        return '🏠';
+      case 'furniture':
+        return '🪑';
+      case 'bedding':
+        return '🛏️';
+      case 'bath':
+        return '🚿';
+      case 'storage':
+        return '📦';
+      case 'mobiles':
+        return '📱';
+      case 'laptops':
+        return '💻';
+      case 'audio':
+        return '🎧';
+      case 'cameras':
+        return '📷';
+      case 'gaming':
+        return '🎮';
+      case 'skincare':
+        return '🧴';
+      case 'makeup':
+        return '💄';
+      case 'hair care':
+        return '💇';
+      case 'fragrances':
+        return '🌸';
+      case 'personal hygiene':
+        return '🧼';
+      case 'sneakers':
+        return '👟';
+      case 'formal shoes':
+        return '👞';
+      case 'casual shoes':
+        return '👟';
+      case 'sandals':
+        return '👡';
+      case 'boots':
+        return '👢';
+      case 'slippers':
+        return '🩴';
+      case 'westernwear':
+        return '👗';
+      case 'jewellery':
+        return '💍';
+      case 'kids':
+        return '🧸';
+      case 'footwear':
+        return '👠';
+      case 'beauty & personal care':
+        return '💄';
+      case 'grocery':
+        return '🛒';
+      case 'other':
+        return '📦';
+      case 'custom category':
+        return '🏷️';
+      case 'special items':
+        return '✨';
+      case 'miscellaneous':
+        return '📦';
+      default:
+        return '📦';
+    }
+  }
+
   List<String> get _currentSubcategories {
     return _subcategories[_selectedCategory] ?? [];
   }
@@ -138,13 +272,29 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     if (_searchQuery.isEmpty) {
       return _categories;
     }
-    return _categories
+    final query = _searchQuery.toLowerCase();
+    
+    // Search in category names
+    final categoryMatches = _categories
         .where(
-          (category) => category['name']!.toLowerCase().contains(
-            _searchQuery.toLowerCase(),
-          ),
+          (category) => category['name']!.toLowerCase().contains(query),
         )
         .toList();
+    
+    // Also search in subcategories and include their parent categories
+    final subcategoryMatches = <String>{};
+    _subcategories.forEach((category, subcategories) {
+      if (subcategories.any((sub) => sub.toLowerCase().contains(query))) {
+        subcategoryMatches.add(category);
+      }
+    });
+    
+    // Combine both results
+    final allMatches = <String>{};
+    allMatches.addAll(categoryMatches.map((c) => c['name']!));
+    allMatches.addAll(subcategoryMatches);
+    
+    return _categories.where((cat) => allMatches.contains(cat['name']!)).toList();
   }
 
   List<Map<String, dynamic>> get _displayedRecentItems {
@@ -175,20 +325,29 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           title: _showSearch
-              ? TextField(
-                  controller: _searchController,
-                  autofocus: true,
-                  style: const TextStyle(fontSize: 16),
-                  decoration: const InputDecoration(
-                    hintText: 'Search categories...',
-                    border: InputBorder.none,
-                    hintStyle: TextStyle(color: Colors.grey),
+              ? Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
+                  child: TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 16),
+                    decoration: InputDecoration(
+                      hintText: 'Search categories...',
+                      border: InputBorder.none,
+                      hintStyle: TextStyle(color: Colors.grey.shade600),
+                      prefixIcon: Icon(Icons.search, color: Colors.grey.shade600, size: 20),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                  ),
                 )
               : const Text(
                   'CATEGORIES',
@@ -360,18 +519,24 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                               decoration: BoxDecoration(
                                                 color: Colors.grey.shade200,
                                                 shape: BoxShape.circle,
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black.withOpacity(0.1),
+                                                    blurRadius: 4,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
                                               ),
                                               child: Center(
                                                 child: Text(
-                                                  item['image'] as String,
+                                                  item['image'] as String? ?? _getIconForCategory(item['category'] as String? ?? item['name'] as String),
                                                   style: const TextStyle(
                                                     fontSize: 32,
                                                   ),
                                                 ),
                                               ),
                                             ),
-                                            if ((item['badges'] as List)
-                                                .isNotEmpty)
+                                            if ((item['badges'] as List? ?? []).isNotEmpty)
                                               Positioned(
                                                 top: -2,
                                                 right: -2,
@@ -389,8 +554,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                                         ),
                                                   ),
                                                   child: Text(
-                                                    (item['badges'] as List)
-                                                        .first,
+                                                    ((item['badges'] as List? ?? []).first).toString(),
                                                     style: const TextStyle(
                                                       fontSize: 7,
                                                       color: Colors.white,
@@ -499,10 +663,25 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                                             border: isSelected 
                                                 ? Border.all(color: Colors.purple, width: 2)
                                                 : null,
+                                            boxShadow: isSelected
+                                                ? [
+                                                    BoxShadow(
+                                                      color: Colors.purple.withOpacity(0.3),
+                                                      blurRadius: 8,
+                                                      spreadRadius: 2,
+                                                    ),
+                                                  ]
+                                                : [
+                                                    BoxShadow(
+                                                      color: Colors.black.withOpacity(0.1),
+                                                      blurRadius: 4,
+                                                      offset: const Offset(0, 2),
+                                                    ),
+                                                  ],
                                           ),
                                           child: Center(
                                             child: Text(
-                                              _getIconForCategory(_selectedCategory),
+                                              _getIconForSubcategory(subcategory),
                                               style: const TextStyle(
                                                 fontSize: 32,
                                               ),
@@ -546,9 +725,46 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   }
 
   Widget _buildSearchResults() {
+    if (_searchQuery.isEmpty) {
+      return const Center(
+        child: Text(
+          'Type to search categories...',
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+        ),
+      );
+    }
+    
+    final query = _searchQuery.toLowerCase();
+    final results = <Map<String, dynamic>>[];
+    
+    // Add matching categories
+    for (final category in _categories) {
+      if (category['name']!.toLowerCase().contains(query)) {
+        results.add({
+          'type': 'category',
+          'name': category['name'],
+          'icon': category['icon'],
+        });
+      }
+    }
+    
+    // Add matching subcategories
+    _subcategories.forEach((categoryName, subcategories) {
+      for (final subcategory in subcategories) {
+        if (subcategory.toLowerCase().contains(query)) {
+          results.add({
+            'type': 'subcategory',
+            'name': subcategory,
+            'category': categoryName,
+            'icon': _getIconForSubcategory(subcategory),
+          });
+        }
+      }
+    });
+    
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: _filteredCategories.isEmpty
+      child: results.isEmpty
           ? const Center(
               child: Text(
                 'No categories found',
@@ -562,18 +778,28 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                 mainAxisSpacing: 16,
                 childAspectRatio: 0.75,
               ),
-              itemCount: _filteredCategories.length,
+              itemCount: results.length,
               itemBuilder: (context, index) {
-                final category = _filteredCategories[index];
+                final result = results[index];
+                final isCategory = result['type'] == 'category';
                 return GestureDetector(
                   onTap: () async {
-                    // For search, just return category without subcategory
-                    await _saveRecentCategory(category['name']!, null);
-                    if (mounted) {
-                      Navigator.pop(context, {
-                        'category': category['name'],
-                        'subcategory': null,
-                      });
+                    if (isCategory) {
+                      await _saveRecentCategory(result['name'], null);
+                      if (mounted) {
+                        Navigator.pop(context, {
+                          'category': result['name'],
+                          'subcategory': null,
+                        });
+                      }
+                    } else {
+                      await _saveRecentCategory(result['category'], result['name']);
+                      if (mounted) {
+                        Navigator.pop(context, {
+                          'category': result['category'],
+                          'subcategory': result['name'],
+                        });
+                      }
                     }
                   },
                   child: Column(
@@ -583,12 +809,19 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                         width: 70,
                         height: 70,
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
+                          color: isCategory ? Colors.purple.shade100 : Colors.grey.shade200,
                           shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: Center(
                           child: Text(
-                            category['icon']!,
+                            result['icon'],
                             style: const TextStyle(fontSize: 32),
                           ),
                         ),
@@ -596,11 +829,11 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                       const SizedBox(height: 6),
                       Flexible(
                         child: Text(
-                          category['name']!,
-                          style: const TextStyle(
+                          result['name'],
+                          style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
-                            color: Colors.black87,
+                            color: isCategory ? Colors.purple : Colors.black87,
                           ),
                           textAlign: TextAlign.center,
                           maxLines: 2,

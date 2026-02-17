@@ -43,6 +43,7 @@ import 'order/my_orders_screen.dart';
 import 'order/dashboard_screen.dart';
 import 'product/detail/product_detail_screen.dart';
 import 'marketplace/marketplace_tab.dart';
+import 'seller/seller_dashboard_screen.dart'; // Update path to seller folder
 import 'insta_pages_screen.dart';
 import 'website_selection_screen.dart';
 import 'website/website_tab.dart';
@@ -249,6 +250,20 @@ class _ChatHomePageState extends State<ChatHomePage> {
                     const SnackBar(content: Text("User not found. Please login again.")),
                   );
                 }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.dashboard),
+              title: const Text("Seller Dashboard"),
+              subtitle: const Text("Manage your products and orders"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SellerDashboardScreen(),
+                  ),
+                );
               },
             ),
             const SizedBox(height: 10),

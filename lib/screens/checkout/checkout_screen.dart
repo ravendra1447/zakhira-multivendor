@@ -57,11 +57,34 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   // Address data
   Map<String, dynamic>? _savedAddress;
   bool _addressLoaded = false;
+  
+  // Quantity management for different item types
+  List<int>? _cartItemQuantities; // For cart items
+  Map<String, int>? _variationQuantities; // For selected variations
+  Map<String, Map<String, int>>? _variationSizeQuantities; // For color+size combinations
 
   @override
   void initState() {
     super.initState();
+    _initializeQuantities();
     _loadSavedAddress();
+  }
+
+  // Initialize quantities based on item type
+  void _initializeQuantities() {
+    if (widget.cartItems != null) {
+      // Initialize cart item quantities
+      _cartItemQuantities = widget.cartItems!.map((item) => item.quantity).toList();
+    } else if (widget.variationSizeQuantities != null) {
+      // Deep copy variation size quantities for modification
+      _variationSizeQuantities = {};
+      widget.variationSizeQuantities!.forEach((color, sizes) {
+        _variationSizeQuantities![color] = Map<String, int>.from(sizes);
+      });
+    } else if (widget.selectedVariations != null) {
+      // Deep copy selected variations for modification
+      _variationQuantities = Map<String, int>.from(widget.selectedVariations!);
+    }
   }
 
   // Load saved address from database
@@ -713,16 +736,21 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   // Get total price for both single product and multiple cart items
   double _getTotalPrice() {
-    if (widget.cartItems != null) {
-      return widget.cartItems!.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
-    } else if (widget.variationSizeQuantities != null && widget.product != null) {
-      // Calculate total based on color+size combinations
+    if (widget.cartItems != null && _cartItemQuantities != null) {
+      return widget.cartItems!.asMap().entries.fold(0.0, (sum, entry) {
+        final index = entry.key;
+        final item = entry.value;
+        final quantity = _cartItemQuantities![index];
+        return sum + (item.price * quantity);
+      });
+    } else if (_variationSizeQuantities != null && widget.product != null) {
+      // Calculate total based on modified color+size combinations
       double total = 0.0;
       final priceSlabs = widget.product!.priceSlabs;
       
-      // Calculate total quantity across all colors and sizes
+      // Calculate total quantity across all colors and sizes using modified quantities
       int totalQty = 0;
-      for (var colorEntry in widget.variationSizeQuantities!.entries) {
+      for (var colorEntry in _variationSizeQuantities!.entries) {
         final sizes = colorEntry.value;
         for (var sizeEntry in sizes.entries) {
           totalQty += sizeEntry.value;
@@ -732,6 +760,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // Find applicable price based on total quantity
       double unitPrice = 0.0;
       if (priceSlabs.isNotEmpty) {
+        // Sort by MOQ descending to find best price
         final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
           ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
         
@@ -743,6 +772,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
         }
         
+        // If no slab matched, use first (lowest MOQ) slab
         if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
           unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
         }
@@ -750,16 +780,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       
       total = unitPrice * totalQty;
       return total;
-    } else if (widget.selectedVariations != null && widget.product != null) {
-      // Calculate total based on selected variations
+    } else if (_variationQuantities != null && widget.product != null) {
+      // Calculate total based on modified selected variations
       double total = 0.0;
       final priceSlabs = widget.product!.priceSlabs;
-      final totalQty = widget.selectedVariations!.values.fold(0, (sum, qty) => sum + qty);
+      final totalQty = _variationQuantities!.values.fold(0, (sum, qty) => sum + qty);
       
       // Find applicable price based on total quantity
       double unitPrice = 0.0;
       if (priceSlabs.isNotEmpty) {
-        // Sort by MOQ descending to find the best price
+        // Sort by MOQ descending to find best price
         final sortedSlabs = List<Map<String, dynamic>>.from(priceSlabs)
           ..sort((a, b) => ((b['moq'] as num?)?.toInt() ?? 0).compareTo((a['moq'] as num?)?.toInt() ?? 0));
         
@@ -771,7 +801,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
         }
         
-        // If no slab matched, use the first (lowest MOQ) slab
+        // If no slab matched, use first (lowest MOQ) slab
         if (unitPrice == 0.0 && sortedSlabs.isNotEmpty) {
           unitPrice = double.tryParse(sortedSlabs.last['price']?.toString() ?? '0') ?? 0.0;
         }
@@ -833,25 +863,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'shipping_phone': _phoneController.text,
         'payment_method': _selectedPaymentMethod,
         'items': widget.cartItems != null
-            ? widget.cartItems!.map((item) => {
-                'product_id': item.product.id,
-                'quantity': item.quantity,
-                'price': item.price,
-                'size': item.size,
-                'color': item.colorName,
-                'image_url': item.productImage,
+            ? widget.cartItems!.asMap().entries.map((entry) {
+                final index = entry.key;
+                final item = entry.value;
+                return {
+                  'product_id': item.product.id,
+                  'quantity': _cartItemQuantities![index],
+                  'price': item.price,
+                  'size': item.size,
+                  'color': item.colorName,
+                  'image_url': item.productImage,
+                };
               }).toList()
-            : widget.variationSizeQuantities != null && widget.product != null
+            : _variationSizeQuantities != null && widget.product != null
                 ? // Color+Size combinations - flatten the nested structure
-                widget.variationSizeQuantities!.entries
+                _variationSizeQuantities!.entries
                     .expand((colorEntry) {
                       final colorName = colorEntry.key;
                       final sizes = colorEntry.value;
                       final imageUrl = widget.variationImages?[colorName] ?? '';
                       
-                      // Calculate total quantity across all colors and sizes
+                      // Calculate total quantity across all colors and sizes using modified quantities
                       int totalQty = 0;
-                      for (var cEntry in widget.variationSizeQuantities!.entries) {
+                      for (var cEntry in _variationSizeQuantities!.entries) {
                         for (var sEntry in cEntry.value.entries) {
                           totalQty += sEntry.value;
                         }
@@ -888,13 +922,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         };
                       });
                     }).toList()
-                : widget.selectedVariations != null && widget.product != null
+                : _variationQuantities != null && widget.product != null
                     ? // Multiple variations - create an item for each variation
-                    widget.selectedVariations!.entries.where((e) => e.value > 0).map((entry) {
+                    _variationQuantities!.entries.where((e) => e.value > 0).map((entry) {
                       final variationName = entry.key;
                       final quantity = entry.value;
                       final imageUrl = widget.variationImages?[variationName] ?? '';
-                      final totalQty = widget.selectedVariations!.values.fold(0, (sum, qty) => sum + qty);
+                      final totalQty = _variationQuantities!.values.fold(0, (sum, qty) => sum + qty);
                       
                       // Calculate unit price based on total quantity
                       double unitPrice = 0.0;
@@ -1193,14 +1227,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Widget _buildItemsSection() {
     int totalItems = 0;
-    if (widget.cartItems != null) {
-      totalItems = widget.cartItems!.length;
-    } else if (widget.variationSizeQuantities != null) {
-      widget.variationSizeQuantities!.forEach((_, sizes) {
+    if (widget.cartItems != null && _cartItemQuantities != null) {
+      totalItems = _cartItemQuantities!.fold(0, (sum, qty) => sum + qty);
+    } else if (_variationSizeQuantities != null) {
+      _variationSizeQuantities!.forEach((_, sizes) {
         sizes.forEach((_, qty) => totalItems += qty);
       });
-    } else if (widget.selectedVariations != null) {
-      widget.selectedVariations!.forEach((_, qty) => totalItems += qty);
+    } else if (_variationQuantities != null) {
+      _variationQuantities!.forEach((_, qty) => totalItems += qty);
     } else {
       totalItems = widget.quantity ?? 1;
     }
@@ -1253,7 +1287,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildItemList() {
-    if (widget.cartItems != null) {
+    if (widget.cartItems != null && _cartItemQuantities != null) {
       return SizedBox(
         height: 140,
         child: ListView.builder(
@@ -1261,18 +1295,21 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           itemCount: widget.cartItems!.length,
           itemBuilder: (context, index) {
             final item = widget.cartItems![index];
+            final quantity = _cartItemQuantities![index];
             return _buildItemCard(
               imageUrl: item.productImage,
               title: '${item.colorName} , ${item.size}',
               price: item.price,
-              quantity: item.quantity,
+              quantity: quantity,
+              onIncrease: () => _updateCartItemQuantity(index, quantity + 1),
+              onDecrease: () => _updateCartItemQuantity(index, quantity - 1),
             );
           },
         ),
       );
-    } else if (widget.variationSizeQuantities != null) {
+    } else if (_variationSizeQuantities != null) {
       List<Widget> cards = [];
-      widget.variationSizeQuantities!.forEach((color, sizes) {
+      _variationSizeQuantities!.forEach((color, sizes) {
         sizes.forEach((size, qty) {
           if (qty > 0) {
             cards.add(_buildItemCard(
@@ -1280,6 +1317,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               title: '$color , $size',
               price: _getUnitPrice(),
               quantity: qty,
+              onIncrease: () => _updateVariationSizeQuantity(color, size, qty + 1),
+              onDecrease: () => _updateVariationSizeQuantity(color, size, qty - 1),
             ));
           }
         });
@@ -1291,15 +1330,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           children: cards,
         ),
       );
-    } else if (widget.selectedVariations != null) {
+    } else if (_variationQuantities != null) {
       List<Widget> cards = [];
-      widget.selectedVariations!.forEach((variation, qty) {
+      _variationQuantities!.forEach((variation, qty) {
         if (qty > 0) {
           cards.add(_buildItemCard(
             imageUrl: widget.variationImages?[variation] ?? '',
             title: variation,
             price: _getUnitPrice(),
             quantity: qty,
+            onIncrease: () => _updateVariationQuantity(variation, qty + 1),
+            onDecrease: () => _updateVariationQuantity(variation, qty - 1),
           ));
         }
       });
@@ -1350,7 +1391,39 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return (widget.totalPrice ?? 0) / (widget.quantity ?? 1);
   }
 
-  Widget _buildItemCard({required String imageUrl, required String title, required double price, required int quantity}) {
+  // Quantity update methods
+  void _updateCartItemQuantity(int index, int newQuantity) {
+    if (newQuantity < 1) return;
+    
+    setState(() {
+      _cartItemQuantities![index] = newQuantity;
+    });
+  }
+
+  void _updateVariationQuantity(String variation, int newQuantity) {
+    if (newQuantity < 1) return;
+    
+    setState(() {
+      _variationQuantities![variation] = newQuantity;
+    });
+  }
+
+  void _updateVariationSizeQuantity(String color, String size, int newQuantity) {
+    if (newQuantity < 1) return;
+    
+    setState(() {
+      _variationSizeQuantities![color]![size] = newQuantity;
+    });
+  }
+
+  Widget _buildItemCard({
+    required String imageUrl, 
+    required String title, 
+    required double price, 
+    required int quantity,
+    VoidCallback? onIncrease,
+    VoidCallback? onDecrease,
+  }) {
     return Container(
       width: 100,
       margin: const EdgeInsets.only(right: 12),
@@ -1398,13 +1471,43 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           const SizedBox(height: 4),
           Row(
             children: [
-              _buildQtyBtn(Icons.remove, () {}),
+              GestureDetector(
+                onTap: onDecrease != null && quantity > 1 ? onDecrease : null,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(4),
+                    color: (onDecrease != null && quantity > 1) ? Colors.white : Colors.grey[100],
+                  ),
+                  child: Icon(
+                    Icons.remove, 
+                    size: 14, 
+                    color: (onDecrease != null && quantity > 1) ? Colors.grey[600] : Colors.grey[400],
+                  ),
+                ),
+              ),
               Expanded(
                 child: Center(
                   child: Text('$quantity', style: const TextStyle(fontSize: 12)),
                 ),
               ),
-              _buildQtyBtn(Icons.add, () {}),
+              GestureDetector(
+                onTap: onIncrease,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(4),
+                    color: onIncrease != null ? Colors.white : Colors.grey[100],
+                  ),
+                  child: Icon(
+                    Icons.add, 
+                    size: 14, 
+                    color: onIncrease != null ? Colors.grey[600] : Colors.grey[400],
+                  ),
+                ),
+              ),
             ],
           ),
         ],

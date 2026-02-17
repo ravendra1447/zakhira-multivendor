@@ -3330,10 +3330,10 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
                                               Flexible(
                                                 child: Text(
                                                   colorName,
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w600,
-                                                    color: Colors.white,
+                                                    color: _getTextColorForBackground(color),
                                                   ),
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,

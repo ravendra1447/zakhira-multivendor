@@ -52,20 +52,20 @@ class _CartScreenState extends State<CartScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.background,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          'My Cart',
+        title: Text(
+          'Shopping Cart',
           style: TextStyle(
             fontWeight: FontWeight.w600,
             fontSize: 18,
-            color: Colors.black,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         centerTitle: true,
@@ -86,7 +86,7 @@ class _CartScreenState extends State<CartScreen> {
               child: Text(
                 _selectAll ? 'Deselect All' : 'Select All',
                 style: TextStyle(
-                  color: Colors.blue[700],
+                  color: Theme.of(context).colorScheme.primary,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -106,11 +106,11 @@ class _CartScreenState extends State<CartScreen> {
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    color: Colors.blue[50],
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                     child: Text(
                       '${_selectedItems.length} item${_selectedItems.length > 1 ? 's' : ''} selected',
                       style: TextStyle(
-                        color: Colors.blue[700],
+                        color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -144,9 +144,9 @@ class _CartScreenState extends State<CartScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -156,7 +156,7 @@ class _CartScreenState extends State<CartScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.blue[50],
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
@@ -172,17 +172,17 @@ class _CartScreenState extends State<CartScreen> {
                       }
                     });
                   },
-                  activeColor: Colors.blue[700],
+                  activeColor: Theme.of(context).colorScheme.primary,
                   shape: const CircleBorder(),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     product.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: Colors.black87,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -190,7 +190,7 @@ class _CartScreenState extends State<CartScreen> {
                   '${variants.length} variants',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                   ),
                 ),
               ],
@@ -209,12 +209,12 @@ class _CartScreenState extends State<CartScreen> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.grey[50],
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.black.withOpacity(0.1),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -234,7 +234,7 @@ class _CartScreenState extends State<CartScreen> {
                         }
                       });
                     },
-                    activeColor: Colors.blue[700],
+                    activeColor: Theme.of(context).colorScheme.primary,
                     shape: const CircleBorder(),
                   ),
                   const SizedBox(width: 4),
@@ -244,7 +244,7 @@ class _CartScreenState extends State<CartScreen> {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: ClipRRect(
@@ -256,10 +256,10 @@ class _CartScreenState extends State<CartScreen> {
                               height: 80,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {
-                                return Icon(Icons.image, color: Colors.grey[400], size: 32);
+                                return Icon(Icons.image, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4), size: 32);
                               },
                             )
-                          : Icon(Icons.image, color: Colors.grey[400], size: 32),
+                          : Icon(Icons.image, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4), size: 32),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -275,15 +275,15 @@ class _CartScreenState extends State<CartScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.blue[50],
+                                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.blue[200]!),
+                                border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
                               ),
                               child: Text(
                                 variant.colorName,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.blue[700],
+                                  color: Theme.of(context).colorScheme.primary,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -295,15 +295,15 @@ class _CartScreenState extends State<CartScreen> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[100],
+                                  color: Theme.of(context).colorScheme.surface,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey[300]!),
+                                  border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
                                 ),
                                 child: Text(
                                   'Size: ${variant.size}',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.grey[700],
+                                    color: Theme.of(context).colorScheme.onSurface,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -319,10 +319,10 @@ class _CartScreenState extends State<CartScreen> {
                             Expanded(
                               child: Text(
                                 '₹${variant.price.toStringAsFixed(2)}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
+                                  color: Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                             ),
@@ -337,7 +337,7 @@ class _CartScreenState extends State<CartScreen> {
                             // Quantity Controls
                             Container(
                               decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey[300]!),
+                                border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Row(
@@ -363,7 +363,7 @@ class _CartScreenState extends State<CartScreen> {
                                     alignment: Alignment.center,
                                     decoration: BoxDecoration(
                                       border: Border.symmetric(
-                                        vertical: BorderSide(color: Colors.grey[300]!),
+                                        vertical: BorderSide(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
                                       ),
                                     ),
                                     child: Text(
@@ -401,7 +401,7 @@ class _CartScreenState extends State<CartScreen> {
                                 padding: const EdgeInsets.all(4),
                                 child: Icon(
                                   Icons.delete,
-                                  color: Colors.red[600],
+                                  color: Theme.of(context).colorScheme.error,
                                   size: 18,
                                 ),
                               ),
@@ -462,15 +462,15 @@ class _CartScreenState extends State<CartScreen> {
           Icon(
             Icons.shopping_cart_outlined,
             size: 100,
-            color: Colors.grey[400],
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
           ),
           const SizedBox(height: 20),
           Text(
             'Your cart is empty',
             style: TextStyle(
               fontSize: 20,
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w600,
-              color: Colors.grey[600],
             ),
           ),
           const SizedBox(height: 10),
@@ -478,7 +478,7 @@ class _CartScreenState extends State<CartScreen> {
             'Add some products to get started',
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey[500],
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
             ),
           ),
           const SizedBox(height: 30),

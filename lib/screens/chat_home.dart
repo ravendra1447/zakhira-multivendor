@@ -47,6 +47,10 @@ import 'seller/seller_dashboard_screen.dart'; // Update path to seller folder
 import 'insta_pages_screen.dart';
 import 'website_selection_screen.dart';
 import 'website/website_tab.dart';
+import '../services/marketplace/marketplace_chat_service.dart';
+import '../models/marketplace/marketplace_chat_room.dart';
+import 'marketplace/marketplace_chat_screen.dart';
+import '../widgets/theme_toggle_switch.dart';
 
 class ChatHomePage extends StatefulWidget {
   final int? initialTabIndex;
@@ -395,8 +399,21 @@ class ChatsTab extends StatefulWidget {
   State<ChatsTab> createState() => _ChatsTabState();
 }
 
-class _ChatsTabState extends State<ChatsTab> {
+class _ChatsTabState extends State<ChatsTab> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   static final _cryptoManager = CryptoManager();
+  
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   // ✅ SWIPE ACTION METHODS
   void _showMoreOptions(BuildContext context, Contact contact) {
@@ -817,6 +834,44 @@ class _ChatsTabState extends State<ChatsTab> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Tab Bar for Chat Types
+        Container(
+          color: Colors.white,
+          child: TabBar(
+            controller: _tabController,
+            labelColor: const Color(0xFF25D366),
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: const Color(0xFF25D366),
+            indicatorWeight: 2,
+            tabs: const [
+              Tab(
+                icon: Icon(Icons.chat),
+                text: 'Regular',
+              ),
+              Tab(
+                icon: Icon(Icons.store),
+                text: 'Marketplace',
+              ),
+            ],
+          ),
+        ),
+        // Tab Content
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildRegularChats(),
+              _buildMarketplaceChats(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegularChats() {
     return ValueListenableBuilder<Box<Message>>(
       valueListenable: Hive.box<Message>('messages').listenable(),
       builder: (context, box, _) {
@@ -1045,6 +1100,248 @@ class _ChatsTabState extends State<ChatsTab> {
         );
       },
     );
+  }
+
+  Widget _buildMarketplaceChats() {
+    return FutureBuilder<List<MarketplaceChatRoom>>(
+      future: _loadMarketplaceChats(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          print("Marketplace chats error: ${snapshot.error}");
+          return Center(
+            child: Text("Error loading marketplace chats: ${snapshot.error}"),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.store_outlined, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No marketplace chats yet',
+                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Start chatting with sellers or buyers!',
+                  style: TextStyle(color: Colors.grey, fontSize: 14),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final chatRooms = snapshot.data!;
+
+        return RefreshIndicator(
+          onRefresh: () async {
+            // Don't use setState here, instead reload the future
+            await _refreshMarketplaceChats();
+          },
+          child: ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            itemCount: chatRooms.length,
+            itemBuilder: (context, index) {
+              final chatRoom = chatRooms[index];
+              final userId = LocalAuthService.getUserId() ?? 0;
+              final otherUserName = chatRoom.getOtherUserName(userId);
+              final unreadCount = chatRoom.unreadCount;
+
+              return ListTile(
+                leading: Stack(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.grey.shade300,
+                      child: chatRoom.firstProductImage != null
+                          ? ClipOval(
+                        child: Image.network(
+                          chatRoom.firstProductImage!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Icon(Icons.store, color: Colors.white);
+                          },
+                        ),
+                      )
+                          : const Icon(Icons.store, color: Colors.white),
+                    ),
+                    if (unreadCount > 0)
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        child: Container(
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                          child: Center(
+                            child: Text(
+                              unreadCount > 9 ? '9+' : unreadCount.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                title: Text(
+                  otherUserName,
+                  style: TextStyle(
+                    fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      chatRoom.productName ?? 'Product',
+                      style: TextStyle(
+                        color: unreadCount > 0 ? Colors.black87 : Colors.grey.shade600,
+                        fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      chatRoom.lastMessage ?? 'No messages yet',
+                      style: TextStyle(
+                        color: unreadCount > 0 ? Colors.black87 : Colors.grey.shade600,
+                        fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      chatRoom.formattedLastMessageTime,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: unreadCount > 0 ? Colors.black : Colors.grey,
+                        fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (unreadCount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF25D366),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          unreadCount > 9 ? '9+' : unreadCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                onTap: () async {
+                  try {
+                    // Initialize socket connection for marketplace chat
+                    await MarketplaceChatService().initializeSocket(userId);
+
+                    // Check if current user is seller or buyer
+                    final isSeller = chatRoom.isCurrentUserSeller(userId);
+                    final isBuyer = chatRoom.isCurrentUserBuyer(userId);
+
+                    print('🔍 Opening marketplace chat - User is Seller: $isSeller, Buyer: $isBuyer');
+                    print('🔍 Chat Room ID: ${chatRoom.id}, Product ID: ${chatRoom.productId}');
+
+                    // Get the other user's ID for regular chat
+                    final otherUserId = isSeller ? chatRoom.buyerId : chatRoom.sellerId;
+                    final otherUserName = isSeller ? chatRoom.buyerName ?? 'Buyer' : chatRoom.sellerName ?? 'Seller';
+
+                    // Navigate and wait for result
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatScreen(
+                          chatId: chatRoom.id,
+                          otherUserId: otherUserId,
+                          otherUserName: otherUserName,
+                          isMarketplaceChat: true, // Enable marketplace chat
+                          marketplaceChatRoom: chatRoom, // Pass chat room data
+                        ),
+                      ),
+                    );
+
+                    // Refresh when returning from chat - Fixed: Use proper refresh method
+                    if (mounted) {
+                      // Trigger a refresh of the FutureBuilder
+                      setState(() {
+                        // This will rebuild the widget and call _loadMarketplaceChats again
+                      });
+                    }
+                  } catch (e) {
+                    print('❌ Error opening marketplace chat: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to open chat: $e')),
+                      );
+                    }
+                  }
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // Add this helper method outside the build method
+  Future<void> _refreshMarketplaceChats() async {
+    // This will trigger the FutureBuilder to reload
+    setState(() {});
+  }
+
+  Future<List<MarketplaceChatRoom>> _loadMarketplaceChats() async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) return [];
+
+      final chatRooms = await MarketplaceChatService().getUserChatRooms(userId);
+      
+      // Sort by last message time (most recent first)
+      chatRooms.sort((a, b) {
+        if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
+        if (a.lastMessageTime == null) return 1;
+        if (b.lastMessageTime == null) return -1;
+        return b.lastMessageTime!.compareTo(a.lastMessageTime!);
+      });
+      
+      return chatRooms;
+    } catch (e) {
+      print('Error loading marketplace chats: $e');
+      return [];
+    }
   }
 
   String _formatTime(DateTime timestamp) {

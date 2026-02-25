@@ -21,6 +21,7 @@ import '../config.dart'; // Make sure you have this new config.dart file in the 
 import '../services/local_auth_service.dart';
 import 'package:whatsappchat/screens/set_mpin_page.dart';
 import 'package:whatsappchat/widgets/optimized_image_widget.dart';
+import '../widgets/theme_toggle_switch.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int userId;
@@ -744,6 +745,45 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   ),
                 ),
                 validator: (value) => value!.isEmpty ? "Location is required" : null,
+              ),
+              const SizedBox(height: 24),
+              // Theme Toggle Switch
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Theme',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Choose your preferred theme',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const ThemeToggleSwitch(),
+                  ],
+                ),
               ),
               const SizedBox(height: 24),
               ElevatedButton(

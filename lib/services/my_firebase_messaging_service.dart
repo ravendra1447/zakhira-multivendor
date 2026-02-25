@@ -20,9 +20,10 @@ import '../screens/order/order_detail_screen.dart';
 import '../screens/order/dashboard_screen.dart';
 import '../services/local_auth_service.dart';
 import '../utils/sound_utils.dart';
+import '../config.dart';
 
 class MyFirebaseMessagingService {
-  static const String _fcmTokenSaveUrl = 'https://bangkokmart.in/api/save_fcm_token';
+  static String get _fcmTokenSaveUrl => '${Config.baseNodeApiUrl}/save_fcm_token';
   static final fln.FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = fln.FlutterLocalNotificationsPlugin();
   static final _messageStreamController = StreamController<Message>.broadcast();
   static Stream<Message> get onNewMessage => _messageStreamController.stream;
@@ -343,10 +344,17 @@ class MyFirebaseMessagingService {
 
               navigatorKey.currentState?.push(
                 MaterialPageRoute(
-                  builder: (_) => MarketplaceChatScreen(
-                    chatRoom: chatRoom,
-                    currentUserId: currentUserId,
-                    product: product,
+                  builder: (_) => ChatScreen(
+                    chatId: chatRoom.id,
+                    otherUserId: currentUserId == chatRoom.sellerId 
+                        ? chatRoom.buyerId 
+                        : chatRoom.sellerId,
+                    otherUserName: currentUserId == chatRoom.sellerId 
+                        ? "Buyer" 
+                        : "Seller",
+                    isMarketplaceChat: true, // ✅ Enable marketplace chat
+                    marketplaceChatRoom: chatRoom, // ✅ Pass chat room data
+                    product: product, // ✅ Pass product info
                   ),
                 ),
               );
@@ -471,10 +479,17 @@ class MyFirebaseMessagingService {
 
       navigatorKey.currentState?.push(
         MaterialPageRoute(
-          builder: (_) => MarketplaceChatScreen(
-            chatRoom: chatRoom,
-            currentUserId: currentUserId,
-            product: product, // Product info loaded
+          builder: (_) => ChatScreen(
+            chatId: chatRoom.id,
+            otherUserId: currentUserId == chatRoom.sellerId 
+                ? chatRoom.buyerId 
+                : chatRoom.sellerId,
+            otherUserName: currentUserId == chatRoom.sellerId 
+                ? "Buyer" 
+                : "Seller",
+            isMarketplaceChat: true, // ✅ Enable marketplace chat
+            marketplaceChatRoom: chatRoom, // ✅ Pass chat room data
+            product: product, // ✅ Pass product info
           ),
         ),
       );

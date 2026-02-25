@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Marketplace Banner</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #25D366;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #128C7E;
+        }
+        .success {
+            color: green;
+            margin-top: 10px;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Add Marketplace Banner</h2>
+    <form id="bannerForm">
+        <div class="form-group">
+            <label for="title">Title *</label>
+            <input type="text" id="title" name="title" required placeholder="e.g., MAHA INDIAN">
+        </div>
+
+        <div class="form-group">
+            <label for="subtitle">Subtitle</label>
+            <input type="text" id="subtitle" name="subtitle" placeholder="e.g., SAVINGS SALE">
+        </div>
+
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" rows="3" placeholder="Banner description..."></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="imageUrl">Image URL *</label>
+            <input type="url" id="imageUrl" name="imageUrl" required placeholder="https://example.com/image.jpg">
+        </div>
+
+        <div class="form-group">
+            <label for="backgroundColor">Background Color</label>
+            <input type="color" id="backgroundColor" name="backgroundColor" value="#FF6B35">
+        </div>
+
+        <div class="form-group">
+            <label for="textColor">Text Color</label>
+            <input type="color" id="textColor" name="textColor" value="#FFFFFF">
+        </div>
+
+        <div class="form-group">
+            <label for="buttonText">Button Text</label>
+            <input type="text" id="buttonText" name="buttonText" placeholder="e.g., Shop Now">
+        </div>
+
+        <div class="form-group">
+            <label for="buttonUrl">Button URL</label>
+            <input type="url" id="buttonUrl" name="buttonUrl" placeholder="/marketplace">
+        </div>
+
+        <div class="form-group">
+            <label for="displayOrder">Display Order</label>
+            <input type="number" id="displayOrder" name="displayOrder" value="1" min="0">
+        </div>
+
+        <div class="form-group">
+            <label for="isActive">Active</label>
+            <select id="isActive" name="isActive">
+                <option value="1">Yes</option>
+                <option value="0">No</option>
+            </select>
+        </div>
+
+        <button type="submit">Create Banner</button>
+        <div id="message"></div>
+    </form>
+
+    <script>
+        document.getElementById('bannerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            
+            try {
+                const response = await fetch('http://localhost:3000/api/banners', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('message').innerHTML = 
+                        '<div class="success">✅ Banner created successfully!</div>';
+                    e.target.reset();
+                } else {
+                    document.getElementById('message').innerHTML = 
+                        '<div class="error">❌ Error: ' + result.message + '</div>';
+                }
+            } catch (error) {
+                document.getElementById('message').innerHTML = 
+                    '<div class="error">❌ Error: ' + error.message + '</div>';
+            }
+        });
+    </script>
+</body>
+</html>

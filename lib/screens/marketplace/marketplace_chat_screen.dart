@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../services/marketplace/marketplace_chat_service.dart';
+import '../../../services/product_service.dart';
 import '../../../models/marketplace/marketplace_chat_message.dart';
 import '../../../models/marketplace/marketplace_chat_room.dart';
 import '../../../models/product.dart';
 import '../../../theme/app_colors.dart';
 import '../../../theme/app_spacing.dart';
 import '../../../theme/app_typography.dart';
+import '../product/detail/product_detail_screen.dart';
 
 class MarketplaceChatScreen extends StatefulWidget {
   final MarketplaceChatRoom chatRoom;
@@ -181,7 +183,7 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
     // Check if message already exists to avoid duplicates
     // First, remove any temporary messages with the same content from the same sender
     final tempMessagesToRemove = _messages.where((msg) =>
-    msg.id.toString().startsWith('17') && // Temporary IDs start with current timestamp
+        msg.id.toString().length >= 13 && // Temporary IDs are timestamps (13+ digits)
         msg.senderId == message.senderId &&
         msg.messageContent.trim() == message.messageContent.trim()
     ).toList();
@@ -509,8 +511,31 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
                 ),
               ),
               errorWidget: (context, url, error) => Container(
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.image, color: Colors.grey),
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(AppSpacing.sm),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.shopping_bag_outlined,
+                      size: 24,
+                      color: Colors.grey.shade400,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'No Image',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -628,6 +653,20 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
                   width: 32,
                   height: 32,
                   fit: BoxFit.cover,
+                  errorWidget: (context, url, error) => Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Icon(
+                      Icons.person_outline,
+                      size: 20,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
                 ),
               )
                   : Icon(
@@ -722,70 +761,257 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
           ),
           errorWidget: (context, url, error) => Container(
             height: 150,
-            color: Colors.grey.shade200,
-            child: const Icon(Icons.broken_image, color: Colors.grey),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(AppSpacing.md),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.image_not_supported_outlined,
+                  size: 32,
+                  color: Colors.grey.shade400,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Image not available',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  void _navigateToProductDetail(int productId, MarketplaceProductInfo? productInfo) async {
+    try {
+      print('🔍 Navigating to product detail for product ID: $productId');
+      print('🔍 Current user ID: ${widget.currentUserId}');
+      
+      // Try to fetch actual product details using ProductService
+      final productResult = await ProductService.getProduct(productId);
+      print('🔍 Product service result: $productResult');
+      
+      if (productResult['success'] == true && productResult['data'] != null) {
+        print('✅ Product found, creating Product object...');
+        final product = Product.fromMap(productResult['data']);
+        print('✅ Product created: ${product.name}');
+        
+        // Navigate to product detail screen with actual product
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: product,
+              variation: product.variations.isNotEmpty 
+                  ? product.variations.first 
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      } else {
+        print('❌ API failed, using fallback product info from chat message');
+        
+        // Create fallback product using productInfo from chat message
+        final fallbackProduct = Product(
+          id: productId,
+          userId: widget.currentUserId,
+          name: productInfo?.productName ?? 'Product $productId',
+          availableQty: '50', // Default from min order
+          description: 'Product from chat',
+          status: 'publish',
+          priceSlabs: [],
+          attributes: {},
+          selectedAttributeValues: {},
+          variations: [
+            {
+              'name': productInfo?.productName ?? 'Product $productId',
+              'image': productInfo?.image ?? '',
+              'allImages': [productInfo?.image ?? ''], // Add proper image structure
+              'price': productInfo?.price ?? 0.0,
+            }
+          ],
+          sizes: [],
+          images: [productInfo?.image ?? ''], // Keep for compatibility
+          marketplaceEnabled: true,
+          stockMode: 'simple',
+        );
+        
+        print('✅ Fallback product created: ${fallbackProduct.name}');
+        print('✅ Fallback variations: ${fallbackProduct.variations}');
+        print('✅ Fallback images: ${fallbackProduct.images}');
+        
+        // Navigate to product detail screen with fallback product
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: fallbackProduct,
+              variation: fallbackProduct.variations.isNotEmpty 
+                  ? fallbackProduct.variations.first 
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error navigating to product detail: $e');
+      
+      // Final fallback - try to create product from chat info
+      if (productInfo != null) {
+        final emergencyProduct = Product(
+          id: productId,
+          userId: widget.currentUserId,
+          name: productInfo.productName,
+          availableQty: '50',
+          description: 'Product from chat',
+          status: 'publish',
+          priceSlabs: [],
+          attributes: {},
+          selectedAttributeValues: {},
+          variations: [
+            {
+              'name': productInfo.productName,
+              'image': productInfo.image,
+              'allImages': [productInfo.image], // Add proper image structure
+              'price': productInfo.price,
+            }
+          ],
+          sizes: [],
+          images: [productInfo.image], // Keep for compatibility
+          marketplaceEnabled: true,
+          stockMode: 'simple',
+        );
+        
+        print('✅ Emergency product created: ${emergencyProduct.name}');
+        print('✅ Emergency variations: ${emergencyProduct.variations}');
+        print('✅ Emergency images: ${emergencyProduct.images}');
+        
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: emergencyProduct,
+              variation: emergencyProduct.variations.isNotEmpty 
+                  ? emergencyProduct.variations.first 
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open product details')),
+        );
+      }
+    }
+  }
+
   Widget _buildProductInfoMessage(MarketplaceProductInfo productInfo) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(AppSpacing.md),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Row(
-        children: [
+    return GestureDetector(
+      onTap: () => _navigateToProductDetail(productInfo.productId, productInfo),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+        constraints: const BoxConstraints(
+          maxWidth: 200,
+          minWidth: 200,
+          minHeight: 300, // Increased height for better image display
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppSpacing.md),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+          // Product Image
           ClipRRect(
-            borderRadius: BorderRadius.circular(AppSpacing.sm),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(AppSpacing.md),
+              topRight: Radius.circular(AppSpacing.md),
+            ),
             child: CachedNetworkImage(
               imageUrl: productInfo.image,
-              width: 50,
-              height: 50,
+              width: double.infinity,
+              height: 220,
               fit: BoxFit.cover,
               placeholder: (context, url) => Container(
+                height: 220,
                 color: Colors.grey.shade200,
                 child: const Center(
                   child: CircularProgressIndicator(),
                 ),
               ),
               errorWidget: (context, url, error) => Container(
+                height: 220,
                 color: Colors.grey.shade200,
-                child: const Icon(Icons.image, color: Colors.grey),
+                child: const Icon(Icons.image, color: Colors.grey, size: 50),
               ),
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
-
-          Expanded(
+          
+          // Product Details
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.sm,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Product Name
                 Text(
                   productInfo.productName,
-                  style: AppTypography.bodySmall(context).copyWith(
+                  style: AppTypography.bodyMedium(context).copyWith(
                     fontWeight: FontWeight.w600,
+                    fontSize: 14,
                   ),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
+                
+                // Price
                 Text(
                   productInfo.formattedPrice,
-                  style: AppTypography.bodySmall(context).copyWith(
+                  style: AppTypography.bodyMedium(context).copyWith(
                     color: AppColors.primary(context),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                
+                // Min Order Info
+                Text(
+                  'Min.Order: 50',
+                  style: AppTypography.caption(context).copyWith(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
       ),
     );
   }

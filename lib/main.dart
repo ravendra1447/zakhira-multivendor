@@ -24,6 +24,7 @@ import 'package:whatsappchat/screens/phone_otp_login.dart';
 import 'package:whatsappchat/screens/verify_mpin_page.dart';
 import 'package:whatsappchat/utils/sound_utils.dart';
 import 'package:whatsappchat/theme/app_theme.dart';
+import 'package:whatsappchat/services/theme_service.dart';
 import 'package:whatsappchat/services/cache_initializer.dart';
 import 'package:whatsappchat/services/http_overrides.dart';
 
@@ -285,20 +286,38 @@ Future<void> main() async {
 }
 
 // ----------------- App UI -----------------
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final ThemeService _themeService = ThemeService();
+
+  @override
+  void initState() {
+    super.initState();
+    _themeService.init();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      navigatorKey: navigatorKey,
-      title: 'Chatting App',
-      themeMode: ThemeMode.system,
-      theme: AppTheme.lightTheme(),
-      darkTheme: AppTheme.darkTheme(),
-      home: const SplashGate(),
-      //home: const ChatListScreen(),
+    return ListenableBuilder(
+      listenable: _themeService,
+      builder: (context, child) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          navigatorKey: navigatorKey,
+          title: 'Chatting App',
+          themeMode: _themeService.themeMode,
+          theme: AppTheme.lightTheme(),
+          darkTheme: AppTheme.darkTheme(),
+          home: const SplashGate(),
+          //home: const ChatListScreen(),
+        );
+      },
     );
   }
 }

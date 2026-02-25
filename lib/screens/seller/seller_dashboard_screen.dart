@@ -6,6 +6,7 @@ import '../../services/marketplace/marketplace_chat_service.dart';
 import '../../services/product_service.dart';
 import '../../models/marketplace/marketplace_chat_room.dart';
 import '../../models/product.dart';
+import '../chat_screen.dart';
 import '../product/detail/product_detail_screen.dart';
 import '../order/order_detail_screen.dart';
 import '../marketplace/marketplace_chat_screen.dart';
@@ -472,10 +473,17 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => MarketplaceChatScreen(
-              chatRoom: chatRoom,
-              currentUserId: _currentUserId!,
-              product: product, // Pass product for context
+            builder: (context) => ChatScreen(
+              chatId: chatRoom.id,
+              otherUserId: _currentUserId! == chatRoom.sellerId 
+                  ? chatRoom.buyerId 
+                  : chatRoom.sellerId,
+              otherUserName: _currentUserId! == chatRoom.sellerId 
+                  ? "Buyer" 
+                  : "Seller",
+              isMarketplaceChat: true, // ✅ Enable marketplace chat
+              marketplaceChatRoom: chatRoom, // ✅ Pass chat room data
+              product: product, // ✅ Pass product info
             ),
           ),
         );
@@ -497,10 +505,17 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => MarketplaceChatScreen(
-              chatRoom: mockChatRoom,
-              currentUserId: _currentUserId!,
-              product: product,
+            builder: (context) => ChatScreen(
+              chatId: mockChatRoom.id,
+              otherUserId: _currentUserId! == mockChatRoom.sellerId 
+                  ? mockChatRoom.buyerId 
+                  : mockChatRoom.sellerId,
+              otherUserName: _currentUserId! == mockChatRoom.sellerId 
+                  ? "Buyer" 
+                  : "Seller",
+              isMarketplaceChat: true, // ✅ Enable marketplace chat
+              marketplaceChatRoom: mockChatRoom, // ✅ Pass chat room data
+              product: product, // ✅ Pass product info
             ),
           ),
         );

@@ -81,6 +81,7 @@ class MarketplaceChatMessage {
       encryptionKey: json['encryption_key'] as String? ?? '',
       localStatus: MessageLocalStatus.sent,
       attachments: attachments,
+      tempId: json['temp_id'] as String?, // ✅ Add tempId parsing
     );
   }
 
@@ -337,13 +338,17 @@ class MarketplaceProductInfo {
   final int productId;
   final String productName;
   final double price;
+  final double? maxPrice; // For price range
   final String image;
+  final int? minimumOrder; // Minimum order quantity
 
   MarketplaceProductInfo({
     required this.productId,
     required this.productName,
     required this.price,
+    this.maxPrice,
     required this.image,
+    this.minimumOrder,
   });
 
   factory MarketplaceProductInfo.fromJson(Map<String, dynamic> json) {
@@ -351,7 +356,9 @@ class MarketplaceProductInfo {
       productId: json['product_id'] as int,
       productName: json['product_name'] as String,
       price: (json['price'] as num).toDouble(),
+      maxPrice: json['max_price'] != null ? (json['max_price'] as num).toDouble() : null,
       image: json['image'] as String,
+      minimumOrder: json['minimum_order'] as int?,
     );
   }
 
@@ -360,12 +367,17 @@ class MarketplaceProductInfo {
       'product_id': productId,
       'product_name': productName,
       'price': price,
+      if (maxPrice != null) 'max_price': maxPrice,
       'image': image,
+      if (minimumOrder != null) 'minimum_order': minimumOrder,
     };
   }
 
   // Get formatted price
   String get formattedPrice {
+    if (maxPrice != null && maxPrice! > price) {
+      return '₹${price.toStringAsFixed(2)}-${maxPrice!.toStringAsFixed(2)}';
+    }
     return '₹${price.toStringAsFixed(1)}';
   }
 }

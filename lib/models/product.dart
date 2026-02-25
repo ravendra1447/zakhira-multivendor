@@ -282,5 +282,21 @@ class Product {
     }
     return lowestPrice;
   }
+
+  // Get minimum order quantity from price slabs
+  int? get minimumOrder {
+    if (priceSlabs.isEmpty) return null;
+    
+    int? minMoq;
+    for (final slab in priceSlabs) {
+      final moq = slab['moq'] as int?;
+      if (moq != null && moq > 0) {
+        if (minMoq == null || moq < minMoq) {
+          minMoq = moq;
+        }
+      }
+    }
+    return minMoq;
+  }
 }
 

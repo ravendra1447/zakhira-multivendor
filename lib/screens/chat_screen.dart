@@ -13,13 +13,22 @@ import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:whatsappchat/screens/product/detail/product_detail_screen.dart';
 
 // Import the necessary models and services
 import '../config.dart';
 import '../models/chat_model.dart';
+import '../models/marketplace/marketplace_chat_message.dart';
+import '../models/marketplace/marketplace_chat_room.dart';
+import '../models/product.dart';
 import '../services/chat_service.dart';
 import '../services/local_auth_service.dart';
 import '../services/contact_service.dart';
+import '../services/marketplace/marketplace_chat_service.dart';
+import '../services/product_service.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
 import 'new_chat_page.dart';
 import 'media_viewer_screen.dart';
 import 'multi_image_picker_screen.dart';
@@ -125,12 +134,18 @@ class ChatScreen extends StatefulWidget {
   final int chatId;
   final int otherUserId;
   final String otherUserName;
+  final bool isMarketplaceChat;
+  final MarketplaceChatRoom? marketplaceChatRoom;
+  final Product? product;
 
   const ChatScreen({
     Key? key,
     required this.chatId,
     required this.otherUserId,
     required this.otherUserName,
+    this.isMarketplaceChat = false,
+    this.marketplaceChatRoom,
+    this.product,
   }) : super(key: key);
 
   @override
@@ -141,6 +156,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _controller = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
   final FocusNode _focusNode = FocusNode();
+  final MarketplaceChatService _marketplaceChatService = MarketplaceChatService();
 
   Set<String> selectedMessageIds = {};
   late ScrollController _scrollController;
@@ -160,6 +176,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String _resolvedTitle = "";
   String? _otherUserPhone;
+
+  // Marketplace chat state variables
+  List<MarketplaceChatMessage> _marketplaceMessages = [];
+  bool _isMarketplaceLoading = false;
+  bool _isMarketplaceConnected = false;
+  int _currentUserId = 0; // Initialize with 0 as int for marketplace service
 
   StreamSubscription? _typingSubscription;
   StreamSubscription? _statusSubscription;
@@ -400,6 +422,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
 
     _initializeChat();
+
+    // Initialize marketplace chat if enabled
+    if (widget.isMarketplaceChat) {
+      _initializeMarketplaceChat();
+    }
 
     // ✅ RESTORE SCROLL POSITION
     _restoreScrollPosition();
@@ -932,6 +959,913 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  // Initialize marketplace chat functionality
+  void _initializeMarketplaceChat() async {
+    if (!mounted || widget.marketplaceChatRoom == null) return;
+
+    setState(() => _isMarketplaceLoading = true);
+    _currentUserId = LocalAuthService.getUserId() ?? 0; // Directly get int from LocalAuthService
+
+    try {
+      print('🔍 Initializing marketplace chat for room: ${widget.marketplaceChatRoom!.id}');
+      print('🔍 Current user ID: $_currentUserId');
+
+      // Initialize socket connection with retry
+      bool socketConnected = false;
+      int retryCount = 0;
+      const maxRetries = 3;
+
+      while (!socketConnected && retryCount < maxRetries) {
+        try {
+          print('🔄 Marketplace socket connection attempt ${retryCount + 1}/$maxRetries');
+          await _marketplaceChatService.initializeSocket(_currentUserId);
+
+          // Wait a bit for connection to establish
+          await Future.delayed(const Duration(seconds: 1));
+
+          if (_marketplaceChatService.isConnected) {
+            socketConnected = true;
+            print('✅ Marketplace socket connected successfully on attempt ${retryCount + 1}');
+            break;
+          } else {
+            print('❌ Marketplace socket not connected after attempt ${retryCount + 1}');
+            retryCount++;
+            if (retryCount < maxRetries) {
+              await Future.delayed(const Duration(seconds: 2));
+            }
+          }
+        } catch (e) {
+          print('❌ Marketplace socket initialization failed on attempt ${retryCount + 1}: $e');
+          retryCount++;
+          if (retryCount < maxRetries) {
+            await Future.delayed(const Duration(seconds: 2));
+          }
+        }
+      }
+
+      if (!socketConnected) {
+        print('❌ Marketplace socket failed to connect after $maxRetries attempts');
+        // Load local messages as fallback
+        _loadLocalMarketplaceMessages();
+        if (mounted) {
+          setState(() => _isMarketplaceLoading = false);
+        }
+        return;
+      }
+
+      // ✅ FIX: Clear messages before setting up new connection to avoid duplicates
+      _marketplaceMessages.clear();
+
+      // Set up socket listeners
+      _setupMarketplaceSocketListeners();
+      print('✅ Marketplace socket listeners set up');
+
+      // Join chat room
+      _marketplaceChatService.joinChatRoom(widget.marketplaceChatRoom!.id);
+      print('✅ Joined marketplace chat room: ${widget.marketplaceChatRoom!.id}');
+
+      // Wait a moment for room to be joined, then get chat history
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) {
+          print('🔍 Fetching marketplace chat history...');
+          try {
+            _marketplaceChatService.getChatHistory(widget.marketplaceChatRoom!.id);
+          } catch (e) {
+            print('❌ Error fetching marketplace chat history: $e');
+            _loadLocalMarketplaceMessages();
+          }
+        }
+      });
+
+      // Also try to load local messages immediately as fallback
+      _loadLocalMarketplaceMessages();
+
+      // Set timeout for chat history - if not loaded in 5 seconds, show local messages
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _marketplaceMessages.isEmpty) {
+          print('⚠️ Marketplace chat history timeout, using local messages only');
+          _loadLocalMarketplaceMessages();
+        }
+      });
+
+      // Send product info message if product is provided
+      if (widget.product != null) {
+        _sendProductInfoMessage();
+      }
+
+    } catch (e) {
+      print('Error initializing marketplace chat: $e');
+      // If socket fails, at least load local messages
+      _loadLocalMarketplaceMessages();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to initialize marketplace chat: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isMarketplaceLoading = false);
+      }
+    }
+  }
+
+  // Setup marketplace socket listeners
+  void _setupMarketplaceSocketListeners() {
+    _marketplaceChatService.on('new_message', _onMarketplaceNewMessage);
+    _marketplaceChatService.on('chat_history', _onMarketplaceChatHistory);
+    _marketplaceChatService.on('connect', (_) {
+      setState(() => _isMarketplaceConnected = true);
+    });
+    _marketplaceChatService.on('disconnect', (_) {
+      setState(() => _isMarketplaceConnected = false);
+    });
+  }
+
+  // Handle new marketplace message
+  void _onMarketplaceNewMessage(dynamic data) {
+    print('🔍 DEBUG: Received message data: $data'); // Debug log
+    final message = MarketplaceChatMessage.fromJson(data);
+    print('🔍 DEBUG: Parsed message - ID: ${message.id}, TempId: ${message.tempId}, Content: ${message.messageContent}'); // Debug log
+
+    // ✅ FIX: Check if this message has a tempId and replace the temporary message
+    if (message.tempId != null) {
+      final tempIndex = _marketplaceMessages.indexWhere((msg) => msg.tempId == message.tempId);
+      print('🔍 DEBUG: Looking for tempId ${message.tempId}, found at index: $tempIndex'); // Debug log
+      if (tempIndex != -1) {
+        // Replace temporary message with actual message
+        setState(() {
+          _marketplaceMessages[tempIndex] = message;
+        });
+        _scrollToBottom();
+
+        // Save to local SQLite
+        _marketplaceChatService.saveMessageToLocal(message);
+
+        print('✅ Temporary message replaced with actual message: ${message.id}');
+        return;
+      }
+    }
+
+    // ✅ ADDITIONAL FIX: Remove temporary messages with same content from same sender
+    if (message.isFromCurrentUser(_currentUserId)) {
+      final tempMessagesToRemove = _marketplaceMessages.where((msg) =>
+          msg.tempId != null && // It's a temporary message
+          msg.senderId == message.senderId &&
+          msg.messageContent.trim() == message.messageContent.trim()
+      ).toList();
+
+      if (tempMessagesToRemove.isNotEmpty) {
+        setState(() {
+          for (final tempMsg in tempMessagesToRemove) {
+            _marketplaceMessages.remove(tempMsg);
+          }
+        });
+        print('✅ Removed ${tempMessagesToRemove.length} temporary messages with same content');
+      }
+    }
+
+    // ✅ EXTRA SAFETY: Check for duplicate messages with same content from same sender within 5 seconds
+    final now = DateTime.now();
+    final duplicateMessages = _marketplaceMessages.where((msg) =>
+        msg.senderId == message.senderId &&
+        msg.messageContent.trim() == message.messageContent.trim() &&
+        msg.id != message.id && // Not the same message object
+        now.difference(msg.createdAt).inSeconds <= 5 // Within 5 seconds
+    ).toList();
+
+    if (duplicateMessages.isNotEmpty) {
+      setState(() {
+        for (final duplicate in duplicateMessages) {
+          _marketplaceMessages.remove(duplicate);
+        }
+      });
+      print('✅ Removed ${duplicateMessages.length} duplicate messages within 5 seconds');
+    }
+
+    // ✅ FIX: Check if message already exists to avoid duplicates
+    final existingIndex = _marketplaceMessages.indexWhere((msg) => msg.id == message.id);
+    if (existingIndex == -1) {
+      setState(() {
+        _marketplaceMessages.add(message);
+      });
+      _scrollToBottom();
+
+      // Save to local SQLite
+      _marketplaceChatService.saveMessageToLocal(message);
+
+      print('✅ New marketplace message added: ${message.id} from ${message.senderName}');
+    } else {
+      print('⚠️ Duplicate marketplace message ignored: ${message.id} from ${message.senderName}');
+    }
+
+    // Mark as read if not from current user
+    if (!message.isFromCurrentUser(_currentUserId)) {
+      _marketplaceChatService.markMessagesRead(widget.marketplaceChatRoom!.id, message.id);
+    }
+  }
+
+  // Handle marketplace chat history
+  void _onMarketplaceChatHistory(dynamic data) {
+    print('🔍 Received marketplace chat history data: ${data.runtimeType}');
+
+    if (data is Map && data.containsKey('messages')) {
+      final messagesList = data['messages'] as List;
+      print('🔍 Marketplace messages list length: ${messagesList.length}');
+
+      final newMessages = messagesList
+          .map((msg) => MarketplaceChatMessage.fromJson(msg))
+          .toList();
+
+      setState(() {
+        // ✅ FIX: Clear existing messages and add only new ones to avoid duplicates
+        _marketplaceMessages.clear();
+        _marketplaceMessages.addAll(newMessages);
+      });
+      _scrollToBottom();
+
+      // Save all messages to local SQLite
+      for (final message in newMessages) {
+        _marketplaceChatService.saveMessageToLocal(message);
+      }
+
+      print('✅ Marketplace chat history loaded: ${newMessages.length} messages');
+    } else {
+      print('❌ Invalid marketplace chat history data format');
+    }
+  }
+
+  // Load local marketplace messages as fallback
+  void _loadLocalMarketplaceMessages() async {
+    try {
+      final localMessages = await _marketplaceChatService.getLocalMessages(widget.marketplaceChatRoom!.id);
+      if (localMessages.isNotEmpty) {
+        setState(() {
+          // ✅ FIX: Clear existing messages and add local ones to avoid duplicates
+          _marketplaceMessages.clear();
+          _marketplaceMessages.addAll(localMessages);
+        });
+        _scrollToBottom();
+        print('✅ Local marketplace messages loaded: ${localMessages.length} messages');
+      }
+    } catch (e) {
+      print('Error loading local marketplace messages: $e');
+    }
+  }
+
+  // Send product info message
+  void _sendProductInfoMessage() {
+    if (widget.product == null || widget.marketplaceChatRoom == null) return;
+
+    _marketplaceChatService.sendProductInfoMessage(
+      chatRoomId: widget.marketplaceChatRoom!.id,
+      productId: widget.product!.id!,
+      productName: widget.product!.name,
+      price: widget.product!.price ?? 0.0,
+      image: _getProductImage(),
+      minimumOrder: widget.product!.minimumOrder,
+    );
+  }
+
+  // Get product image
+  String _getProductImage() {
+    if (widget.product == null) return '';
+
+    // Get first image from variations or main images
+    if (widget.product!.variations.isNotEmpty) {
+      final variation = widget.product!.variations.first;
+      if (variation['image'] != null) {
+        return variation['image'].toString();
+      }
+    }
+
+    if (widget.product!.images.isNotEmpty) {
+      return widget.product!.images.first;
+    }
+
+    return '';
+  }
+
+  // Send marketplace message
+  void _sendMarketplaceMessage() {
+    final message = _controller.text.trim();
+    if (message.isEmpty) return;
+
+    setState(() => _isSending = true);
+
+    try {
+      // Create temporary message for immediate display with unique temporary ID
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+      print('🔍 DEBUG: Creating temp message with tempId: $tempId'); // Debug log
+      
+      final tempMessage = MarketplaceChatMessage(
+        id: DateTime.now().millisecondsSinceEpoch, // Temporary ID
+        chatRoomId: widget.marketplaceChatRoom!.id,
+        senderId: _currentUserId,
+        messageType: 'text',
+        messageContent: message,
+        isRead: false,
+        isDelivered: false,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        senderName: 'You',
+        encryptedContent: '',
+        encryptionKey: '',
+        localStatus: MessageLocalStatus.sending,
+        tempId: tempId, // ✅ Add tempId for tracking
+      );
+
+      // Add message immediately to UI
+      setState(() {
+        _marketplaceMessages.add(tempMessage);
+        print('🔍 DEBUG: Added temp message. Total messages: ${_marketplaceMessages.length}'); // Debug log
+      });
+      _scrollToBottom();
+
+      _controller.clear();
+
+      // Send via socket
+      print('🔍 DEBUG: Sending message with tempId: $tempId'); // Debug log
+      _marketplaceChatService.sendMessage(
+        chatRoomId: widget.marketplaceChatRoom!.id,
+        messageContent: message,
+        tempId: tempId, // ✅ Pass tempId to server
+      );
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send message: $e')),
+      );
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  // Send marketplace image
+  Future<void> _sendMarketplaceImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 70,
+      );
+
+      if (image != null) {
+        final File imageFile = File(image.path);
+        final imageUrl = await _marketplaceChatService.uploadChatImage(imageFile);
+
+        _marketplaceChatService.sendMessage(
+          chatRoomId: widget.marketplaceChatRoom!.id,
+          messageContent: imageUrl,
+          messageType: 'image',
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send image: $e')),
+      );
+    }
+  }
+
+  // Navigate to product detail
+  void _navigateToProductDetail(int productId, MarketplaceProductInfo? productInfo) async {
+    try {
+      print('🔍 Navigating to product detail for product ID: $productId');
+      print('🔍 Current user ID: $_currentUserId');
+
+      // Try to fetch actual product details using ProductService
+      final productResult = await ProductService.getProduct(productId);
+      print('🔍 Product service result: $productResult');
+
+      if (productResult['success'] == true && productResult['data'] != null) {
+        print('✅ Product found, creating Product object...');
+        final product = Product.fromMap(productResult['data']);
+        print('✅ Product created: ${product.name}');
+
+        // Navigate to product detail screen with actual product
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: product,
+              variation: product.variations.isNotEmpty
+                  ? product.variations.first
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      } else {
+        print('❌ API failed, using fallback product info from chat message');
+
+        // Create fallback product using productInfo from chat message
+        final fallbackProduct = Product(
+          id: productId,
+          userId: _currentUserId,
+          name: productInfo?.productName ?? 'Product $productId',
+          availableQty: '50', // Default from min order
+          description: 'Product from chat',
+          status: 'publish',
+          priceSlabs: [],
+          attributes: {},
+          selectedAttributeValues: {},
+          variations: [
+            {
+              'name': productInfo?.productName ?? 'Product $productId',
+              'image': productInfo?.image ?? '',
+              'allImages': [productInfo?.image ?? ''], // Add proper image structure
+              'price': productInfo?.price ?? 0.0,
+            }
+          ],
+          sizes: [],
+          images: [productInfo?.image ?? ''], // Keep for compatibility
+          marketplaceEnabled: true,
+          stockMode: 'simple',
+        );
+
+        print('✅ Fallback product created: ${fallbackProduct.name}');
+
+        // Navigate to product detail screen with fallback product
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: fallbackProduct,
+              variation: fallbackProduct.variations.isNotEmpty
+                  ? fallbackProduct.variations.first
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error navigating to product detail: $e');
+
+      // Final fallback - try to create product from chat info
+      if (productInfo != null) {
+        final emergencyProduct = Product(
+          id: productId,
+          userId: _currentUserId,
+          name: productInfo.productName,
+          availableQty: '50',
+          description: 'Product from chat',
+          status: 'publish',
+          priceSlabs: [],
+          attributes: {},
+          selectedAttributeValues: {},
+          variations: [
+            {
+              'name': productInfo.productName,
+              'image': productInfo.image,
+              'allImages': [productInfo.image], // Add proper image structure
+              'price': productInfo.price,
+            }
+          ],
+          sizes: [],
+          images: [productInfo.image], // Keep for compatibility
+          marketplaceEnabled: true,
+          stockMode: 'simple',
+        );
+
+        print('✅ Emergency product created: ${emergencyProduct.name}');
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(
+              product: emergencyProduct,
+              variation: emergencyProduct.variations.isNotEmpty
+                  ? emergencyProduct.variations.first
+                  : {},
+              initialImageIndex: 0,
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open product details')),
+        );
+      }
+    }
+  }
+
+  // Build marketplace message list
+  Widget _buildMarketplaceMessageList() {
+    // Add product info at the top if product is available
+    return Column(
+      children: [
+        if (widget.product != null) _buildProductInfo(),
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            itemCount: _marketplaceMessages.length,
+            itemBuilder: (context, index) {
+              final message = _marketplaceMessages[index];
+              return _buildMarketplaceMessageBubble(message);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Build product info widget
+  Widget _buildProductInfo() {
+    if (widget.product == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(AppSpacing.md),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          // Product Image
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppSpacing.sm),
+            child: CachedNetworkImage(
+              imageUrl: _getProductImage(),
+              width: 60,
+              height: 60,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                color: Colors.grey.shade200,
+                child: const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+              errorWidget: (context, url, error) => Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(AppSpacing.sm),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.shopping_bag_outlined,
+                      size: 24,
+                      color: Colors.grey.shade400,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'No Image',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+
+          // Product Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.product!.name,
+                  style: AppTypography.bodyMedium(context).copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  '₹${widget.product!.price?.toStringAsFixed(1) ?? '0.0'}',
+                  style: AppTypography.bodySmall(context).copyWith(
+                    color: AppColors.primary(context),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Row(
+                  children: [
+                    Text(
+                      'Product ID: ${widget.product!.id}',
+                      style: AppTypography.caption(context).copyWith(
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        // Navigate to product detail
+                        Navigator.pop(context);
+                      },
+                      child: const Text('View Product'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Build marketplace message bubble
+  Widget _buildMarketplaceMessageBubble(MarketplaceChatMessage message) {
+    final isFromMe = message.isFromCurrentUser(_currentUserId);
+
+    print('🔍 Building marketplace message bubble: ID=${message.id}, FromMe=$isFromMe, Sender=${message.senderName}, Content=${message.messageContent}');
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        mainAxisAlignment: isFromMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!isFromMe) ...[
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.grey.shade300,
+              child: message.senderAvatar != null
+                  ? ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: CachedNetworkImage(
+                  imageUrl: message.senderAvatar!,
+                  width: 32,
+                  height: 32,
+                  fit: BoxFit.cover,
+                  errorWidget: (context, url, error) => Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Icon(
+                      Icons.person_outline,
+                      size: 20,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+                ),
+              )
+                  : Icon(
+                Icons.person,
+                size: 20,
+                color: Colors.grey.shade600,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+
+          Flexible(
+            child: Column(
+              crossAxisAlignment: isFromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                if (message.hasProductInfo) _buildMarketplaceProductInfoMessage(message.productInfo!),
+                if (message.messageType == 'image') _buildMarketplaceImageMessage(message),
+                if (message.messageType == 'text') _buildMarketplaceTextMessage(message, isFromMe),
+
+                const SizedBox(height: 2),
+                Text(
+                  message.displayTime,
+                  style: AppTypography.caption(context).copyWith(
+                    color: Colors.grey.shade500,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (isFromMe) ...[
+            const SizedBox(width: AppSpacing.sm),
+            // Show message status
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Icon(
+                  _getMarketplaceMessageStatusIcon(message.status),
+                  size: 16,
+                  color: _getMarketplaceMessageStatusColor(message.status),
+                ),
+                if (message.readTimeDisplay != null)
+                  Text(
+                    message.readTimeDisplay!,
+                    style: AppTypography.caption(context).copyWith(
+                      color: Colors.grey.shade500,
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Build marketplace text message
+  Widget _buildMarketplaceTextMessage(MarketplaceChatMessage message, bool isFromMe) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: isFromMe ? AppColors.primary(context) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(AppSpacing.md),
+      ),
+      child: Text(
+        message.messageContent,
+        style: AppTypography.bodySmall(context).copyWith(
+          color: isFromMe ? Colors.white : Colors.black.withOpacity(0.87),
+        ),
+      ),
+    );
+  }
+
+  // Build marketplace image message
+  Widget _buildMarketplaceImageMessage(MarketplaceChatMessage message) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 200),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppSpacing.md),
+        child: CachedNetworkImage(
+          imageUrl: message.messageContent,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            height: 150,
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: CircularProgressIndicator(),
+            ),
+          ),
+          errorWidget: (context, url, error) => Container(
+            height: 150,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(AppSpacing.md),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.image_not_supported_outlined,
+                  size: 32,
+                  color: Colors.grey.shade400,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Image not available',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Build marketplace product info message
+  Widget _buildMarketplaceProductInfoMessage(MarketplaceProductInfo productInfo) {
+    return GestureDetector(
+      onTap: () => _navigateToProductDetail(productInfo.productId, productInfo),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+        constraints: const BoxConstraints(
+          maxWidth: 200,
+          minWidth: 200,
+          minHeight: 300, // Increased height for better image display
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppSpacing.md),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Product Image
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(AppSpacing.md),
+                topRight: Radius.circular(AppSpacing.md),
+              ),
+              child: CachedNetworkImage(
+                imageUrl: productInfo.image,
+                width: double.infinity,
+                height: 220,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(
+                  height: 220,
+                  color: Colors.grey.shade200,
+                  child: const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                ),
+                errorWidget: (context, url, error) => Container(
+                  height: 220,
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.image, color: Colors.grey, size: 50),
+                ),
+              ),
+            ),
+
+            // Product Details
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+                vertical: AppSpacing.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Product Name
+                  Text(
+                    productInfo.productName,
+                    style: AppTypography.bodyMedium(context).copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+
+                  // Price
+                  Text(
+                    productInfo.formattedPrice,
+                    style: AppTypography.bodyMedium(context).copyWith(
+                      color: AppColors.primary(context),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+
+                  // Min Order Info - only show if minimum order is set and greater than 0
+                  if (productInfo.minimumOrder != null && productInfo.minimumOrder! > 0) ...[
+                    Text(
+                      'Min.Order: ${productInfo.minimumOrder}',
+                      style: AppTypography.caption(context).copyWith(
+                        color: Colors.grey.shade600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Helper methods for marketplace message status
+  IconData _getMarketplaceMessageStatusIcon(MessageStatus status) {
+    switch (status) {
+      case MessageStatus.sent:
+        return Icons.done;
+      case MessageStatus.delivered:
+        return Icons.done_all;
+      case MessageStatus.read:
+        return Icons.done_all;
+    }
+  }
+
+  Color _getMarketplaceMessageStatusColor(MessageStatus status) {
+    switch (status) {
+      case MessageStatus.sent:
+        return Colors.grey.shade400;
+      case MessageStatus.delivered:
+        return Colors.grey.shade600;
+      case MessageStatus.read:
+        return Colors.blue;
+    }
+  }
+
   // ✅ OPTIMIZED: GET MESSAGES WITH CACHING
   List<Message> _getOptimizedMessages() {
     // ✅ CRITICAL: Bypass cache if any group is marked for forced rebuild
@@ -1423,6 +2357,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _uploadProgress.clear();
     _imageLoadStages.clear();
     _fullyLoadedMessages.clear();
+
+    // Clean up marketplace chat resources
+    if (widget.isMarketplaceChat) {
+      _marketplaceChatService.off('new_message');
+      _marketplaceChatService.off('chat_history');
+      _marketplaceChatService.off('connect');
+      _marketplaceChatService.off('disconnect');
+    }
+
     super.dispose();
   }
 
@@ -3928,18 +4871,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 height: 20,
 
                                 decoration: BoxDecoration(
-                                  color: isSelected 
-                                      ? Colors.green 
-                                      : (Theme.of(context).brightness == Brightness.dark 
-                                          ? Colors.grey[700]! 
-                                          : Colors.white),
+                                  color: isSelected
+                                      ? Colors.green
+                                      : (Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.grey[700]!
+                                      : Colors.white),
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isSelected 
-                                        ? Colors.green 
-                                        : (Theme.of(context).brightness == Brightness.dark 
-                                            ? Colors.grey[600]! 
-                                            : Colors.grey),
+                                    color: isSelected
+                                        ? Colors.green
+                                        : (Theme.of(context).brightness == Brightness.dark
+                                        ? Colors.grey[600]!
+                                        : Colors.grey),
                                     width: 2,
                                   ),
                                 ),
@@ -4060,18 +5003,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                    color: isSelected 
-                                        ? Colors.green 
-                                        : (Theme.of(context).brightness == Brightness.dark 
-                                            ? Colors.grey[700]! 
-                                            : Colors.white),
+                                    color: isSelected
+                                        ? Colors.green
+                                        : (Theme.of(context).brightness == Brightness.dark
+                                        ? Colors.grey[700]!
+                                        : Colors.white),
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: isSelected 
-                                          ? Colors.green 
-                                          : (Theme.of(context).brightness == Brightness.dark 
-                                              ? Colors.grey[600]! 
-                                              : Colors.grey),
+                                      color: isSelected
+                                          ? Colors.green
+                                          : (Theme.of(context).brightness == Brightness.dark
+                                          ? Colors.grey[600]!
+                                          : Colors.grey),
                                       width: 2,
                                     ),
                                   ),
@@ -4199,8 +5142,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // }
 
     //final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = isMe 
-        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6)) 
+    final color = isMe
+        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6))
         : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
 
     final bool contentDeleted = !isMe && msg.isDeletedSender == 1;
@@ -4304,8 +5247,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 Text(
                                   _formatTime(msg.timestamp),
                                   style: TextStyle(
-                                    color: isDark ? Colors.white70 : Colors.black54, 
-                                    fontSize: 12
+                                      color: isDark ? Colors.white70 : Colors.black54,
+                                      fontSize: 12
                                   ),
                                 ),
                                 if (isMe) const SizedBox(width: 4),
@@ -4371,7 +5314,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Text(
           "Original message not found",
           style: TextStyle(
-            fontSize: 12, 
+            fontSize: 12,
             color: isDark ? Colors.grey[400] : Colors.grey,
           ),
         ),
@@ -4589,8 +5532,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = isMe 
-        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6)) 
+    final color = isMe
+        ? (isDark ? const Color(0xFF056162) : const Color(0xFFDCF8C6))
         : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
     final textColor = isDark ? Colors.white : Colors.black;
 
@@ -7490,8 +8433,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.65,
                 height: 300, // ✅ SAME HEIGHT MAINTAINED
-                color: Theme.of(context).brightness == Brightness.dark 
-                    ? Colors.grey[800]! 
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.grey[800]!
                     : Colors.grey[300]!,
                 child: Image.file(
                   File(localPath),
@@ -7562,8 +8505,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return Icon(
         Icons.access_time,
         size: 12,
-        color: Theme.of(context).brightness == Brightness.dark 
-            ? Colors.grey[500] 
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey[500]
             : Colors.grey[300],
       );
     }
@@ -7866,16 +8809,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.lock_outline, 
-            size: 14, 
-            color: isDark ? Colors.grey[400] : Colors.grey
+              Icons.lock_outline,
+              size: 14,
+              color: isDark ? Colors.grey[400] : Colors.grey
           ),
           const SizedBox(width: 8),
           Text(
             'Messages and calls are end-to-end encrypted',
             style: TextStyle(
-              fontSize: 12, 
-              color: isDark ? Colors.grey[400] : Colors.grey[600]
+                fontSize: 12,
+                color: isDark ? Colors.grey[400] : Colors.grey[600]
             ),
           ),
         ],
@@ -7942,10 +8885,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
-                        onPressed: () {},
+                        onPressed: widget.isMarketplaceChat
+                            ? () {} // Marketplace chat emoji functionality can be added later
+                            : () {},
                         icon: Icon(
-                          Icons.emoji_emotions_outlined, 
-                          color: isDark ? Colors.grey[400] : Colors.grey[600]
+                            Icons.emoji_emotions_outlined,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600]
                         ),
                       ),
                       Expanded(
@@ -7954,13 +8899,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           focusNode: _focusNode,
                           autofocus: false,
                           maxLines: null,
-                          onChanged: (_) => _startTyping(),
+                          onChanged: widget.isMarketplaceChat ? null : (_) => _startTyping(),
+                          onSubmitted: widget.isMarketplaceChat ? (_) => _sendMarketplaceMessage() : null,
                           textCapitalization: TextCapitalization.sentences,
                           style: TextStyle(
                             color: isDark ? Colors.white : Colors.black,
                           ),
                           decoration: InputDecoration(
-                            hintText: "Type a message...",
+                            hintText: widget.isMarketplaceChat ? "Type a message..." : "Type a message...",
                             hintStyle: TextStyle(
                               color: isDark ? Colors.grey[500] : Colors.grey[600],
                             ),
@@ -7971,30 +8917,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       // ✅ FIX: Add camera option alongside gallery
                       PopupMenuButton<String>(
                         icon: Icon(
-                          Icons.add_circle_outline, 
-                          color: isDark ? Colors.grey[400] : Colors.grey[600]
+                            Icons.add_circle_outline,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600]
                         ),
                         onSelected: (value) async {
-                          if (value == 'gallery') {
-                            _openMultiPicker();
-                          } else if (value == 'camera') {
-                            await _pickImageFromCamera();
+                          if (widget.isMarketplaceChat) {
+                            if (value == 'gallery') {
+                              await _sendMarketplaceImage();
+                            }
+                          } else {
+                            if (value == 'gallery') {
+                              _openMultiPicker();
+                            } else if (value == 'camera') {
+                              await _pickImageFromCamera();
+                            }
                           }
                         },
                         itemBuilder: (context) => [
-                          PopupMenuItem(
-                            value: 'camera',
-                            child: Row(
-                              children: [
-                                Icon(Icons.camera_alt, color: isDark ? Colors.grey[400] : Colors.grey),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Camera',
-                                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                                ),
-                              ],
+                          if (!widget.isMarketplaceChat) ...[
+                            PopupMenuItem(
+                              value: 'camera',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.camera_alt, color: isDark ? Colors.grey[400] : Colors.grey),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Camera',
+                                    style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
+                          ],
                           PopupMenuItem(
                             value: 'gallery',
                             child: Row(
@@ -8002,7 +8956,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 Icon(Icons.photo_library, color: isDark ? Colors.grey[400] : Colors.grey),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'Gallery',
+                                  widget.isMarketplaceChat ? 'Image' : 'Gallery',
                                   style: TextStyle(color: isDark ? Colors.white : Colors.black),
                                 ),
                               ],
@@ -8018,7 +8972,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               CircleAvatar(
                 backgroundColor: const Color(0xFF075E54),
                 child: IconButton(
-                  onPressed: _isSending ? null : _sendMessage,
+                  onPressed: _isSending ? null : (widget.isMarketplaceChat ? _sendMarketplaceMessage : _sendMessage),
                   icon: const Icon(Icons.send, color: Colors.white),
                 ),
               ),
@@ -8217,7 +9171,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: Text(
                     initial,
                     style: TextStyle(
-                      color: isDark ? Colors.white : const Color(0xFF075E54)
+                        color: isDark ? Colors.white : const Color(0xFF075E54)
                     ),
                   ),
                 ),
@@ -8229,23 +9183,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       Text(
                         titleText,
                         style: TextStyle(
-                          fontSize: 16, 
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        _isOtherUserTyping
+                        widget.isMarketplaceChat
+                            ? (_isMarketplaceConnected ? 'Online' : 'Connecting...')
+                            : (_isOtherUserTyping
                             ? 'Typing...'
                             : (_userStatus == "online"
                             ? "online"
-                            : "offline"),
+                            : "offline")),
                         style: TextStyle(
                           fontSize: 12,
-                          color: _isOtherUserTyping || _userStatus == "online"
+                          color: widget.isMarketplaceChat
+                              ? (_isMarketplaceConnected ? Colors.greenAccent : Colors.orangeAccent)
+                              : (_isOtherUserTyping || _userStatus == "online"
                               ? Colors.greenAccent
-                              : Colors.white.withOpacity(0.7),
+                              : Colors.white.withOpacity(0.7)),
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -8317,8 +9275,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             return ValueListenableBuilder<Box<Message>>(
                               valueListenable: _messageBox.listenable(),
                               builder: (context, box, __) {
-                                final messages = _getOptimizedMessages();
+                                final messages = widget.isMarketplaceChat
+                                    ? [] // Use marketplace messages instead
+                                    : _getOptimizedMessages();
 
+                                // For marketplace chat, show marketplace messages
+                                if (widget.isMarketplaceChat) {
+                                  if (_isMarketplaceLoading) {
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  }
+
+                                  if (_marketplaceMessages.isEmpty) {
+                                    return Center(
+                                      child: Text(
+                                        "Start a conversation",
+                                        style: TextStyle(
+                                          color: Theme.of(context).brightness == Brightness.dark
+                                              ? Colors.white70
+                                              : Colors.black54,
+                                        ),
+                                      ),
+                                    );
+                                  }
+
+                                  return _buildMarketplaceMessageList();
+                                }
+
+                                // Regular chat logic
                                 if (messages.isEmpty) {
                                   return Center(
                                     child: Text(

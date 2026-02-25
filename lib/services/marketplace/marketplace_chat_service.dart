@@ -198,6 +198,7 @@ class MarketplaceChatService {
     String messageType = 'text',
     Map<String, dynamic>? productInfo,
     List<Map<String, dynamic>>? attachments,
+    String? tempId, // ✅ Add tempId parameter
   }) {
     if (_socket == null || !_isConnected) {
       throw Exception('Socket not connected');
@@ -219,6 +220,7 @@ class MarketplaceChatService {
         'messageType': messageType,
         'productInfo': productInfo,
         'attachments': attachments ?? [], // Add attachments
+        'tempId': tempId, // ✅ Send tempId for tracking
       });
     } catch (e) {
       print('Error encrypting message: $e');
@@ -233,12 +235,14 @@ class MarketplaceChatService {
     required String productName,
     required double price,
     required String image,
+    int? minimumOrder,
   }) {
     final productInfo = {
       'product_id': productId,
       'product_name': productName,
       'price': price,
       'image': image,
+      if (minimumOrder != null) 'minimum_order': minimumOrder,
     };
 
     sendMessage(

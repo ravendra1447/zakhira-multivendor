@@ -6,6 +6,12 @@ class Config {
 
   //static const String baseNodeApiUrl = "http://184.168.126.71:3000/api";
   static const String baseNodeApiUrl = "https://node-api.bangkokmart.in/api";
+  
+  // Development mode - use local server (temporary fix until production is updated)
+  static const bool isDevelopment = true;
+  static const String baseNodeApiUrlDev = "http://localhost:3000";
+  
+  static String get currentNodeApiUrl => isDevelopment ? baseNodeApiUrlDev : baseNodeApiUrl;
   static const int chunkSize = 512 * 1024; // 512KB
   static const int concurrency = 3;
   

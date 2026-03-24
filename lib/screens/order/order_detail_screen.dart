@@ -8,9 +8,11 @@ import '../../config.dart';
 import '../../services/local_auth_service.dart';
 import '../../services/whatsapp_payment_service.dart';
 import '../../services/whatsapp_direct_service.dart';
+import '../../services/payment_url_obfuscator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'edit_delivery_fee_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
@@ -26,6 +28,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   List<dynamic> orderItems = [];
   bool isLoading = true;
   String? errorMessage;
+  
+  // Dynamic delivery fee
+  double _deliveryFee = 250.0;
+  double _subtotalAmount = 0.0;
+  double _totalAmount = 0.0;
+  
+  // Availability tracking for each order item
+  Map<String, String> _itemAvailability = {};
+  
+  // Add a refresh key to force UI rebuild
+  final GlobalKey<_OrderDetailScreenState> _refreshKey = GlobalKey<_OrderDetailScreenState>();
 
   @override
   void initState() {
@@ -57,9 +70,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         if (responseData['success']) {
+          print('=== FETCH ORDER DETAILS DEBUG ===');
+          print('Silent mode: $silent');
+          print('Order from server: ${responseData['order']}');
+          print('Delivery fee from server: ${responseData['order']['delivery_fee']}');
+          
           setState(() {
             order = responseData['order'];
             orderItems = responseData['items'] ?? [];
+            
+            // Calculate amounts
+            _subtotalAmount = double.tryParse(order!['total_amount'].toString()) ?? 0.0;
+            
+            // Fetch delivery fee from database
+            _deliveryFee = double.tryParse(order!['delivery_fee'].toString()) ?? 250.0;
+            _totalAmount = _subtotalAmount + _deliveryFee;
+            
+            print('=== DELIVERY FEE FETCH DEBUG ===');
+            print('Order delivery_fee from DB: ${order!['delivery_fee']}');
+            print('Parsed _deliveryFee: $_deliveryFee');
+            print('Subtotal: $_subtotalAmount');
+            print('Total: $_totalAmount');
 
             // Get customer name from order data (server now includes customer_name)
             String userName = responseData['order']['customer_name'] ??
@@ -117,6 +148,108 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         isLoading = false;
       });
     }
+  }
+
+  // Send WhatsApp message for unavailable item
+  Future<void> _sendUnavailableMessage(dynamic item) async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      if (customerPhone == null || customerPhone == 'N/A' || customerPhone.toString().trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Customer phone number not available'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Create the unavailable message
+      String message = '*Order ID:* #${widget.orderId}\n\n We’re sorry, this product is currently unavailable. Kindly choose another product or variant. Thank you for visiting BangkokMart.';
+      
+      // Send via WhatsApp API using wa.me link
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending unavailable message to phone: $formattedPhone');
+      print('📱 WhatsApp URL: $whatsappUrl');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      } else {
+        throw 'Could not launch $whatsappUrl';
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('WhatsApp message sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending unavailable message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending message: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Log WhatsApp message
+  Future<void> _logWhatsAppMessage(int orderId, String phoneNumber, String message) async {
+    try {
+      await http.post(
+        Uri.parse('${Config.baseNodeApiUrl}/whatsapp/log-message'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'order_id': orderId,
+          'phone_number': phoneNumber,
+          'message': message,
+          'sent_at': DateTime.now().toIso8601String(),
+        }),
+      );
+    } catch (e) {
+      print('Failed to log WhatsApp message: $e');
+    }
+  }
+
+  // Recalculate totals based on available items
+  void _recalculateTotals() {
+    double availableSubtotal = 0.0;
+    
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
+      
+      if (!isUnavailable) {
+        final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+        final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+        availableSubtotal += itemPrice * quantity;
+      }
+    }
+    
+    setState(() {
+      _subtotalAmount = availableSubtotal;
+      _totalAmount = _subtotalAmount + _deliveryFee;
+    });
   }
 
   @override
@@ -502,6 +635,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       itemsByProduct[productName]!.add(item);
     }
 
+    // Check if all items are unavailable
+    bool allItemsUnavailable = orderItems.every((item) => 
+      _itemAvailability[item['id'].toString()] == 'Not Available'
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -518,14 +656,70 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Order Items',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+          // Header with master checkbox
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
               ),
+            ),
+            child: Row(
+              children: [
+                const Text(
+                  'Order Items',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                // Master availability checkbox
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.white,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Mark All',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Transform.scale(
+                        scale: 0.7,
+                        child: Checkbox(
+                          value: allItemsUnavailable,
+                          onChanged: (bool? value) {
+                            setState(() {
+                              // Toggle all items
+                              for (var item in orderItems) {
+                                final itemId = item['id'].toString();
+                                _itemAvailability[itemId] = value == true ? 'Not Available' : 'Available';
+                              }
+                            });
+                            // Recalculate totals
+                            _recalculateTotals();
+                          },
+                          activeColor: Colors.red,
+                          checkColor: Colors.white,
+                          shape: const CircleBorder(),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           // Group items by product
@@ -606,17 +800,56 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     // Get the individual item price (not the total)
     final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
     final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+    final itemId = item['id'].toString();
+    final isUnavailable = _itemAvailability[itemId] == 'Not Available';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isUnavailable ? Colors.red[50] : Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isUnavailable ? Colors.red[200]! : Colors.grey[200]!,
+          width: isUnavailable ? 2 : 1,
+        ),
       ),
       child: Row(
         children: [
+          // Availability Checkbox
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            child: Column(
+              children: [
+                Transform.scale(
+                  scale: 0.5,
+                  child: Checkbox(
+                    value: isUnavailable,
+                    onChanged: (bool? value) {
+                      setState(() {
+                        _itemAvailability[itemId] = value == true ? 'Not Available' : 'Available';
+                      });
+                      // Recalculate totals
+                      _recalculateTotals();
+                    },
+                    activeColor: Colors.red,
+                    checkColor: Colors.white,
+                    shape: const CircleBorder(),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                Text(
+                  isUnavailable ? 'No' : 'Yes',
+                  style: TextStyle(
+                    fontSize: 7,
+                    color: isUnavailable ? Colors.red : Colors.green,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
           // Product Image
           GestureDetector(
             onTap: () => _showFullScreenImage(context, item),
@@ -685,23 +918,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
 
                 // Price and Quantity - Show actual quantity and individual price
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Qty: $quantity x ₹${itemPrice.toStringAsFixed(2)}',
                       style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
+                        fontSize: 12,
+                        color: isUnavailable ? Colors.grey[500] : Colors.grey[600],
+                        decoration: isUnavailable ? TextDecoration.lineThrough : null,
                       ),
                     ),
-                    const Spacer(),
-                    // Item Total - Show total for this item (quantity x price)
+                    const SizedBox(height: 2),
                     Text(
-                      '₹${(itemPrice * quantity).toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 14,
+                      'Total: ₹${(itemPrice * quantity).toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue,
+                        color: isUnavailable ? Colors.grey[500] : Colors.blue,
+                        decoration: isUnavailable ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ],
@@ -955,7 +1190,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Widget _buildOrderSummary() {
     // Parse total_amount as double since it comes as string from database
-    final totalAmount = double.tryParse(order!['total_amount'].toString()) ?? 0.0;
+    final subtotalAmount = _subtotalAmount;
+    final deliveryFee = _deliveryFee; 
+    final totalAmount = _totalAmount;
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -1005,6 +1242,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      print('Manual refresh triggered');
+                      _fetchOrderDetails(silent: false);
+                    },
+                    child: Icon(
+                      Icons.refresh,
+                      size: 18,
+                      color: Colors.grey[600],
                     ),
                   ),
                 ],
@@ -1076,27 +1325,56 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Summary Items
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey[200]!),
-            ),
-            child: Column(
-              children: [
-                _buildCompactSummaryRow('Subtotal', '₹${totalAmount.toStringAsFixed(2)}'),
-                const SizedBox(height: 8),
-                _buildCompactSummaryRow('Delivery Fee', 'FREE', isFree: true),
-                const Divider(height: 16),
-                _buildCompactSummaryRow(
-                  'Total Amount',
-                  '₹${totalAmount.toStringAsFixed(2)}',
-                  isTotal: true,
+          // Summary Items with refresh button
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildCompactSummaryRow('Subtotal', '₹${_subtotalAmount.toStringAsFixed(2)}'),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: _buildCompactSummaryRow('Delivery Fee', '₹${_deliveryFee.toStringAsFixed(2)}'),
+                          ),
+                          GestureDetector(
+                            onTap: _editDeliveryFee,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.blue[200]!, width: 1),
+                              ),
+                              child: Icon(
+                                Icons.edit_outlined,
+                                size: 16,
+                                color: Colors.blue[600],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 16),
+                      _buildCompactSummaryRow(
+                        'Total Amount',
+                        '₹${_totalAmount.toStringAsFixed(2)}',
+                        isTotal: true,
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1148,6 +1426,81 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  // Edit delivery fee
+  Future<void> _editDeliveryFee() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditDeliveryFeeScreen(
+          orderId: widget.orderId,
+          currentSubtotal: _subtotalAmount,
+          currentDeliveryFee: _deliveryFee,
+          currentTotal: _totalAmount,
+        ),
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      print('=== DELIVERY FEE UPDATE DEBUG ===');
+      print('Result received: $result');
+      print('New delivery fee: ${result['delivery_fee']}');
+      print('New total: ${result['total']}');
+      
+      // Update state immediately
+      if (mounted) {
+        print('=== BEFORE setState ===');
+        print('Current _deliveryFee: $_deliveryFee');
+        print('New delivery fee: ${result['delivery_fee']}');
+        
+        setState(() {
+          _deliveryFee = result['delivery_fee'];
+          _totalAmount = result['total'];
+          
+          // Update order object with new delivery fee
+          if (order != null) {
+            order!['delivery_fee'] = result['delivery_fee'];
+            print('Updated order delivery_fee: ${order!['delivery_fee']}');
+          }
+        });
+        
+        print('=== AFTER setState ===');
+        print('Updated _deliveryFee: $_deliveryFee');
+        print('Updated _totalAmount: $_totalAmount');
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delivery fee updated to ₹${_deliveryFee.toStringAsFixed(2)}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      
+      // Force multiple UI updates with mounted check
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() {}); // Additional UI trigger
+      
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() {}); // Another UI trigger
+      
+      // Test setState with a visible change
+      if (mounted) {
+        setState(() {
+          // Force a visible change to test if setState works
+          print('setState called with _deliveryFee: $_deliveryFee');
+        });
+      }
+      
+      // Also refresh from server after a delay to ensure database sync
+      await Future.delayed(const Duration(seconds: 1));
+      if (mounted) _fetchOrderDetails(silent: true);
+      
+      print('Multiple UI updates triggered');
+    } else {
+      print('=== DELIVERY FEE UPDATE FAILED ===');
+      print('Result: $result');
+    }
+  }
+
   void _shareOrderDetails() async {
     if (order == null) return;
 
@@ -1163,6 +1516,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return;
     }
 
+    // Check if all items are unavailable
+    bool allItemsUnavailable = orderItems.every((item) => 
+      _itemAvailability[item['id'].toString()] == 'Not Available'
+    );
+
     // Create structured order details message
     String shareMessage = _createStructuredShareMessage();
 
@@ -1170,12 +1528,64 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       // Copy message to clipboard first
       await Clipboard.setData(ClipboardData(text: shareMessage));
 
-      // Share with QR code image
-      _shareWithQRCode(shareMessage, customerPhone);
+      if (allItemsUnavailable) {
+        // For all unavailable items, send simple WhatsApp message
+        await _sendUnavailableWhatsAppMessage(customerPhone, shareMessage);
+      } else {
+        // For available items, share with QR code image
+        _shareWithQRCode(shareMessage, customerPhone);
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error preparing share: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Send WhatsApp message for unavailable items
+  Future<void> _sendUnavailableWhatsAppMessage(String customerPhone, String message) async {
+    try {
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Send via WhatsApp API using wa.me link
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending unavailable message to phone: $formattedPhone');
+      print('📱 WhatsApp URL: $whatsappUrl');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      } else {
+        throw 'Could not launch $whatsappUrl';
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('WhatsApp message sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending unavailable message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending message: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1398,6 +1808,75 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String _createStructuredShareMessage() {
     if (order == null) return '';
 
+    // Check if all items are unavailable
+    bool allItemsUnavailable = orderItems.every((item) => 
+      _itemAvailability[item['id'].toString()] == 'Not Available'
+    );
+
+    // If all items are unavailable, show simplified message
+    if (allItemsUnavailable) {
+      String message = '''
+*Order ID:* #${widget.orderId}
+
+
+We're sorry, this product is currently unavailable. Kindly choose another product or variant. Thank you for visiting BangkokMart.
+
+📦 *Product Details:*
+''';
+
+      // Track unique products to avoid duplicates
+      final Set<String> addedProducts = {};
+
+      // Add each product with unavailable status
+      for (var item in orderItems) {
+        final productName = item['product_name'] ?? 'Product';
+        final color = item['color']?.toString() ?? '';
+        final size = item['size']?.toString() ?? '';
+        final itemId = item['id'].toString();
+
+        // Create unique key for product (name + color + size)
+        final productKey = '${productName.trim()}_${color.trim()}_${size.trim()}';
+
+        // Skip if already added
+        if (addedProducts.contains(productKey)) {
+          continue;
+        }
+        addedProducts.add(productKey);
+
+        final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+
+        // Get image URL
+        String? imageUrl;
+        if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+          String tempImageUrl = item['image_url'].toString();
+          if (tempImageUrl.startsWith('http')) {
+            imageUrl = tempImageUrl;
+          } else {
+            imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+          }
+        }
+
+        // Build variant details - only include size if it's meaningful
+        String variantDetails = '';
+        if (color.isNotEmpty) {
+          variantDetails += '   • Color: $color\n';
+        }
+        if (size.isNotEmpty && size.toLowerCase() != 'no size') {
+          variantDetails += '   • Size: $size\n';
+        }
+
+        message += '''
+🔸 *$productName*
+$variantDetails   • Quantity: $quantity
+   • Status: ❌ *UNAVAILABLE*
+   • Image: ${imageUrl ?? 'N/A'}
+''';
+      }
+
+      return message;
+    }
+
+    // Normal receipt format for available items
     String message = '''
 🛒 *ORDER DETAILS* 🛒
 📋 *Order Information:*
@@ -1411,11 +1890,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     // Track unique products to avoid duplicates
     final Set<String> addedProducts = {};
 
-    // Add each product with image, name, and price (only unique products)
+    // Add each product with availability status
     for (var item in orderItems) {
       final productName = item['product_name'] ?? 'Product';
       final color = item['color']?.toString() ?? '';
       final size = item['size']?.toString() ?? '';
+      final itemId = item['id'].toString();
+      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
 
       // Create unique key for product (name + color + size)
       final productKey = '${productName.trim()}_${color.trim()}_${size.trim()}';
@@ -1449,20 +1930,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         variantDetails += '   • Size: $size\n';
       }
 
+      // Add availability status
+      String availabilityStatus = isUnavailable ? '❌ *UNAVAILABLE*' : '✅ *Available*';
+      
+      // Show price only for available items
+      String priceInfo = '';
+      if (!isUnavailable) {
+        priceInfo = '   • Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+      }
+
       message += '''
 🔸 *$productName*
 $variantDetails   • Quantity: $quantity
-   • Price: ₹${itemPrice.toStringAsFixed(2)}
+$priceInfo   • Status: $availabilityStatus
    • Image: ${imageUrl ?? 'N/A'}
 ''';
     }
 
+    // Calculate totals with delivery fee
+    final subtotalAmount = _subtotalAmount;
+    final deliveryFee = _deliveryFee;
+    final totalAmount = _totalAmount;
+
     message += '''━━━━━━━━━━━━━━━━━━━━━
 
 💰 *Payment Summary:*
-• Subtotal: ₹${order!['total_amount'] ?? '0'}
-• Delivery: FREE
-• *Total Amount: ₹${order!['total_amount'] ?? '0'}*
+• Subtotal: ₹${subtotalAmount.toStringAsFixed(2)}
+• Delivery: ₹${deliveryFee.toStringAsFixed(2)}
+• *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
 ━━━━━━━━━━━━━━━━━━━━━
 
 🏠 Delivery Address:
@@ -1475,7 +1970,7 @@ Thank you for your order! 🙏
 💳 PAYMENT INFORMATION:
 
 📱 Scan the QR code below to pay
-🔗 https://node-api.bangkokmart.in/api/whatsapp/payment-qr/${widget.orderId}
+🔗 ${PaymentUrlObfuscator.generateObfuscatedUrl(widget.orderId)}
 
 📲 *Click link above → See Timer & Scan QR*
 ⚡ *Fast & Secure Payment*
@@ -2193,6 +2688,11 @@ Thank you for your order! 🙏
 ''';
     }
 
+    // Calculate totals with delivery fee
+    final subtotalAmount = _subtotalAmount;
+    final deliveryFee = _deliveryFee;
+    final totalAmount = _totalAmount;
+
     orderDetails += '''
 🏠 *Shipping Address:*
 ${order!['shipping_street'] ?? 'N/A'}
@@ -2200,9 +2700,9 @@ ${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${or
 📞 ${order!['shipping_phone'] ?? 'N/A'}
 
 💰 *Order Summary:*
-Subtotal: ₹${order!['total_amount'] ?? '0'}
-Delivery Fee: FREE
-*Total Amount: ₹${order!['total_amount'] ?? '0'}*
+Subtotal: ₹${subtotalAmount.toStringAsFixed(2)}
+Delivery Fee: ₹${deliveryFee.toStringAsFixed(2)}
+*Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
 
 Thank you for your order! 🙏
 ''';
@@ -2241,6 +2741,11 @@ Thank you for your order! 🙏
 ''';
     }
 
+    // Calculate totals with delivery fee
+    final subtotalAmount = _subtotalAmount;
+    final deliveryFee = _deliveryFee;
+    final totalAmount = _totalAmount;
+
     orderDetails += '''
 🏠 *Shipping Address:*
 ${order!['shipping_street'] ?? 'N/A'}
@@ -2248,9 +2753,9 @@ ${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${or
 📞 ${order!['shipping_phone'] ?? 'N/A'}
 
 💰 *Order Summary:*
-Subtotal: ₹${order!['total_amount'] ?? '0'}
-Delivery Fee: FREE
-*Total Amount: ₹${order!['total_amount'] ?? '0'}*
+Subtotal: ₹${subtotalAmount.toStringAsFixed(2)}
+Delivery Fee: ₹${deliveryFee.toStringAsFixed(2)}
+*Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
 
 Thank you for your order! 🙏
 ''';

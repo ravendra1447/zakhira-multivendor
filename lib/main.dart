@@ -24,9 +24,9 @@ import 'package:whatsappchat/screens/phone_otp_login.dart';
 import 'package:whatsappchat/screens/verify_mpin_page.dart';
 import 'package:whatsappchat/utils/sound_utils.dart';
 import 'package:whatsappchat/theme/app_theme.dart';
-import 'package:whatsappchat/services/theme_service.dart';
 import 'package:whatsappchat/services/cache_initializer.dart';
 import 'package:whatsappchat/services/http_overrides.dart';
+import 'package:whatsappchat/services/theme_service.dart';
 
 // ----------------- Hive Models -----------------
 @HiveType(typeId: 3)
@@ -279,6 +279,9 @@ Future<void> main() async {
   await SoundUtils.init();
   ChatService.ensureConnected();
 
+  // Initialize Theme Service
+  await ThemeService().init();
+
   // FCM Service Init (for chat and order notifications)
   await MyFirebaseMessagingService.initialize();
 
@@ -299,25 +302,32 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _themeService.init();
+    _themeService.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    _themeService.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: _themeService,
-      builder: (context, child) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          navigatorKey: navigatorKey,
-          title: 'Chatting App',
-          themeMode: _themeService.themeMode,
-          theme: AppTheme.lightTheme(),
-          darkTheme: AppTheme.darkTheme(),
-          home: const SplashGate(),
-          //home: const ChatListScreen(),
-        );
-      },
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      title: 'Chatting App',
+      themeMode: _themeService.themeMode,
+      theme: AppTheme.lightTheme(),
+      darkTheme: AppTheme.darkTheme(),
+      home: const SplashGate(),
+      //home: const ChatListScreen(),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config.dart';
+import 'payment_url_obfuscator.dart';
 
 class WhatsAppPaymentService {
   static Future<void> sendWhatsAppMessage({
@@ -85,7 +86,7 @@ ${orderData['shipping_street'] ?? 'N/A'}
 ${orderData['shipping_city'] ?? 'N/A'}, ${orderData['shipping_state'] ?? 'N/A'} - ${orderData['shipping_pincode'] ?? 'N/A'}
 
 💳 *Payment & Timer Link:*
-🔗 https://node-api.bangkokmart.in/api/whatsapp/payment-qr/$orderId
+🔗 ${PaymentUrlObfuscator.generateObfuscatedUrl(orderId)}
 
 📲 *Click link above → See Timer & Scan QR*
 ⏰ *Please complete payment within 5 minutes to confirm your order.*

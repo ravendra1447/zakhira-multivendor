@@ -27,11 +27,14 @@ class _ThemeToggleSwitchState extends State<ThemeToggleSwitch>
     );
 
     // Initialize animation based on current theme
-    if (_themeService.isDarkMode) {
-      _animationController.value = 1.0;
-    }
-
-    _themeService.addListener(_onThemeChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        if (_themeService.isDarkMode) {
+          _animationController.value = 1.0;
+        }
+        _themeService.addListener(_onThemeChanged);
+      }
+    });
   }
 
   @override

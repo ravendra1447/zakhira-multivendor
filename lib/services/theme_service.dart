@@ -17,7 +17,7 @@ class ThemeService extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     final savedTheme = prefs.getString(_themeKey);
-    
+
     if (savedTheme != null) {
       _themeMode = savedTheme == 'dark' ? ThemeMode.dark : ThemeMode.light;
     } else {
@@ -28,19 +28,19 @@ class ThemeService extends ChangeNotifier {
 
   Future<void> toggleTheme() async {
     _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themeKey, _themeMode == ThemeMode.dark ? 'dark' : 'light');
-    
+
     notifyListeners();
   }
 
   Future<void> setTheme(ThemeMode themeMode) async {
     _themeMode = themeMode;
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themeKey, _themeMode == ThemeMode.dark ? 'dark' : 'light');
-    
+
     notifyListeners();
   }
 

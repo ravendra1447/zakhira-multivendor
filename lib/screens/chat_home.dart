@@ -402,13 +402,13 @@ class ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<ChatsTab> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   static final _cryptoManager = CryptoManager();
-  
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -1328,7 +1328,7 @@ class _ChatsTabState extends State<ChatsTab> with SingleTickerProviderStateMixin
       if (userId == null) return [];
 
       final chatRooms = await MarketplaceChatService().getUserChatRooms(userId);
-      
+
       // Sort by last message time (most recent first)
       chatRooms.sort((a, b) {
         if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
@@ -1336,7 +1336,7 @@ class _ChatsTabState extends State<ChatsTab> with SingleTickerProviderStateMixin
         if (b.lastMessageTime == null) return -1;
         return b.lastMessageTime!.compareTo(a.lastMessageTime!);
       });
-      
+
       return chatRooms;
     } catch (e) {
       print('Error loading marketplace chats: $e');
@@ -1409,7 +1409,7 @@ class _ProfileTabState extends State<ProfileTab> {
     super.initState();
     _loadProfile();
     _loadPublishedProductsFromServer(); // SERVER SE LOAD
-    
+
     // Initialize cart service for UI persistence
     final userId = LocalAuthService.getUserId();
     if (userId != null) {
@@ -1517,7 +1517,7 @@ class _ProfileTabState extends State<ProfileTab> {
     if (!silent && _profile == null) {
       setState(() => _loading = true);
     }
-    
+
     final profile = await ApiService.getProfile();
     setState(() {
       _profile = profile;

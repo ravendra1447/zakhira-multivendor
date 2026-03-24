@@ -608,9 +608,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 setState(() {});
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(value 
-                      ? "MPIN enabled. You can set MPIN now." 
-                      : "MPIN disabled. MPIN will not work on app restart."),
+                    content: Text(value
+                        ? "MPIN enabled. You can set MPIN now."
+                        : "MPIN disabled. MPIN will not work on app restart."),
                   ),
                 );
               },
@@ -660,7 +660,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     CircleAvatar(
                       radius: 50,
                       backgroundImage: _imageFile != null ? FileImage(_imageFile!) : null,
-                      child: _imageFile == null 
+                      child: _imageFile == null
                           ? const Icon(Icons.person, size: 50)
                           : null,
                     ),

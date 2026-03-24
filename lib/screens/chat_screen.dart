@@ -1109,7 +1109,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ ADDITIONAL FIX: Remove temporary messages with same content from same sender
     if (message.isFromCurrentUser(_currentUserId)) {
       final tempMessagesToRemove = _marketplaceMessages.where((msg) =>
-          msg.tempId != null && // It's a temporary message
+      msg.tempId != null && // It's a temporary message
           msg.senderId == message.senderId &&
           msg.messageContent.trim() == message.messageContent.trim()
       ).toList();
@@ -1127,7 +1127,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ✅ EXTRA SAFETY: Check for duplicate messages with same content from same sender within 5 seconds
     final now = DateTime.now();
     final duplicateMessages = _marketplaceMessages.where((msg) =>
-        msg.senderId == message.senderId &&
+    msg.senderId == message.senderId &&
         msg.messageContent.trim() == message.messageContent.trim() &&
         msg.id != message.id && // Not the same message object
         now.difference(msg.createdAt).inSeconds <= 5 // Within 5 seconds
@@ -1256,7 +1256,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Create temporary message for immediate display with unique temporary ID
       final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
       print('🔍 DEBUG: Creating temp message with tempId: $tempId'); // Debug log
-      
+
       final tempMessage = MarketplaceChatMessage(
         id: DateTime.now().millisecondsSinceEpoch, // Temporary ID
         chatRoomId: widget.marketplaceChatRoom!.id,

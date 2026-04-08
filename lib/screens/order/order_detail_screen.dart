@@ -13,11 +13,18 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'edit_delivery_fee_screen.dart';
+import 'order_status_tracking_screen.dart';
+import 'pending_orders_screen.dart';
+import 'waiting_payment_orders_screen.dart';
+import 'ready_shipment_orders_screen.dart';
+import 'shipped_orders_screen.dart';
+import 'delivered_orders_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
+  final Function(String, String)? onOrderStatusChanged;
 
-  const OrderDetailScreen({super.key, required this.orderId});
+  const OrderDetailScreen({super.key, required this.orderId, this.onOrderStatusChanged});
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -29,13 +36,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool isLoading = true;
   String? errorMessage;
   
+  // Admin role check
+  bool isAdmin = false;
+  
   // Dynamic delivery fee
   double _deliveryFee = 250.0;
   double _subtotalAmount = 0.0;
   double _totalAmount = 0.0;
   
-  // Availability tracking for each order item
+  // State for item availability tracking
   Map<String, String> _itemAvailability = {};
+  Map<String, int> _manualStockQuantities = {};
+  Map<String, bool> _useManualStock = {};
+  bool _showManualStockMode = false;
+  
+  // Auto-refresh variables
+  Timer? _refreshTimer;
+  bool _isAutoRefreshEnabled = true;
+  int _refreshInterval = 15; // seconds
+  DateTime? _lastRefreshTime;
+  bool _isRefreshing = false;
   
   // Add a refresh key to force UI rebuild
   final GlobalKey<_OrderDetailScreenState> _refreshKey = GlobalKey<_OrderDetailScreenState>();
@@ -43,7 +63,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _checkAdminRole();
     _fetchOrderDetails();
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // Check if current user is admin
+  Future<void> _checkAdminRole() async {
+    final adminStatus = await LocalAuthService.isAdmin();
+    print('🔍 OrderDetailScreen - Admin Status Check Result: $adminStatus');
+    setState(() {
+      isAdmin = adminStatus;
+      print('🔍 OrderDetailScreen - Set isAdmin state to: $isAdmin');
+    });
   }
 
   Future<void> _fetchOrderDetails({bool silent = false}) async {
@@ -55,99 +93,167 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
 
     try {
-      print('Fetching order details for order ID: ${widget.orderId}');
+      print('=== FETCHING ORDER DETAILS ===');
+      print('Order ID: ${widget.orderId}');
+      print('API URL: ${Config.baseNodeApiUrl}/orders/${widget.orderId}');
 
       final response = await http.get(
         Uri.parse('${Config.baseNodeApiUrl}/orders/${widget.orderId}'),
         headers: {
           'Content-Type': 'application/json',
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
-      print('Order detail response status: ${response.statusCode}');
-      print('Order detail response body: ${response.body}');
+      print('Response Status: ${response.statusCode}');
+      print('Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        if (responseData['success']) {
-          print('=== FETCH ORDER DETAILS DEBUG ===');
-          print('Silent mode: $silent');
-          print('Order from server: ${responseData['order']}');
-          print('Delivery fee from server: ${responseData['order']['delivery_fee']}');
-          
+        print('Response Data: $responseData');
+        
+        if (responseData['success'] == true) {
           setState(() {
             order = responseData['order'];
             orderItems = responseData['items'] ?? [];
             
+            // Initialize item availability from database
+            _itemAvailability.clear();
+            _manualStockQuantities.clear();
+            _useManualStock.clear();
+            
+            // Check if any item has manual stock enabled
+            bool hasManualStockEnabled = false;
+            
+            for (var item in orderItems) {
+              final itemId = item['id'].toString();
+              
+              // Check stock status first
+              final stockStatus = item['stock_status']?.toString() ?? 'full';
+              final availableQuantity = int.tryParse(item['available_quantity']?.toString() ?? item['quantity'].toString()) ?? 1;
+              final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+              final rawUseManualStock = item['use_manual_stock'];
+              final useManualStock = rawUseManualStock == true || rawUseManualStock?.toString() == '1' || rawUseManualStock?.toString().toLowerCase() == 'true';
+              final manualStockQuantity = int.tryParse(item['manual_stock_quantity']?.toString() ?? '0') ?? 0;
+              final availabilityStatus = item['availability_status']?.toString();
+              
+              print('   Item $itemId: rawUseManualStock=$rawUseManualStock (${rawUseManualStock.runtimeType}), useManualStock=$useManualStock, manualStockQuantity=$manualStockQuantity, availabilityStatus=$availabilityStatus');
+              
+              // Track if any manual stock is enabled
+              if (useManualStock) {
+                hasManualStockEnabled = true;
+              }
+              
+              // Initialize manual stock data
+              _useManualStock[itemId] = useManualStock;
+              _manualStockQuantities[itemId] = manualStockQuantity;
+              
+              // Use availability status from database if manual stock is enabled
+              if (useManualStock) {
+                if (manualStockQuantity == 0) {
+                  _itemAvailability[itemId] = 'Not Available';
+                } else if (manualStockQuantity < requestedQuantity) {
+                  _itemAvailability[itemId] = 'Partial Available';
+                } else {
+                  _itemAvailability[itemId] = 'Available';
+                }
+              } else {
+                // When manual stock is not enabled, use database availability_status
+                if (availabilityStatus == '1') {
+                  _itemAvailability[itemId] = 'Not Available';
+                } else {
+                  _itemAvailability[itemId] = 'Available';
+                }
+              }
+              
+              print('📊 Final availability for $itemId: ${_itemAvailability[itemId]}');
+            }
+            
+            // Stop auto-refresh if manual stock is enabled
+            if (hasManualStockEnabled) {
+              print('🛑 Stopping auto-refresh because manual stock is enabled');
+              _stopAutoRefresh();
+            } else {
+              print('▶️ Starting auto-refresh because no manual stock is enabled');
+              _startAutoRefresh();
+            }
+            
             // Calculate amounts
             _subtotalAmount = double.tryParse(order!['total_amount'].toString()) ?? 0.0;
-            
-            // Fetch delivery fee from database
             _deliveryFee = double.tryParse(order!['delivery_fee'].toString()) ?? 250.0;
             _totalAmount = _subtotalAmount + _deliveryFee;
             
-            print('=== DELIVERY FEE FETCH DEBUG ===');
-            print('Order delivery_fee from DB: ${order!['delivery_fee']}');
-            print('Parsed _deliveryFee: $_deliveryFee');
-            print('Subtotal: $_subtotalAmount');
-            print('Total: $_totalAmount');
-
-            // Get customer name from order data (server now includes customer_name)
-            String userName = responseData['order']['customer_name'] ??
-                responseData['order']['user_name'] ??
-                responseData['order']['name'] ??
-                responseData['order']['full_name'] ??
-                responseData['order']['first_name'] ??
-                'Customer';
-
-            // If still no customer name, fetch from users table
-            if (userName == 'Customer' && responseData['order']?['user_id'] != null) {
-              _fetchCustomerName(responseData['order']['user_id']);
-            }
-
-            // Also check if there's a separate user object in response
-            if (responseData['user'] != null) {
-              userName = responseData['user']['name'] ??
-                  responseData['user']['user_name'] ??
-                  responseData['user']['full_name'] ??
-                  responseData['user']['first_name'] ??
-                  userName;
-            }
-
-            // If customer name still not found, fetch from users table using user_id
-            if (userName == null || userName == 'N/A') {
-              final userId = responseData['order']?['user_id'];
-              if (userId != null) {
-                _fetchCustomerName(userId);
-              }
-            }
-
-            // Store user name in order object for display
-            if (order != null) {
-              order!['display_name'] = userName;
-            }
-
+            // Recalculate totals based on actual availability
+            _recalculateTotals();
+            
+            // Get customer name
+            String userName = responseData['order']['customer_name'] ?? 'Customer';
+            order!['display_name'] = userName;
+            
             isLoading = false;
           });
         } else {
           setState(() {
-            errorMessage = responseData['message'] ?? 'Failed to fetch order details';
+            errorMessage = responseData['message'] ?? 'API returned success: false';
             isLoading = false;
           });
         }
       } else {
         setState(() {
-          errorMessage = 'Failed to fetch order details (Status: ${response.statusCode})';
+          errorMessage = 'HTTP Error: ${response.statusCode} - ${response.body}';
           isLoading = false;
         });
       }
     } catch (e) {
-      print('Error fetching order details: $e');
+      print('=== ERROR FETCHING ORDER DETAILS ===');
+      print('Error: $e');
+      print('Stack Trace: ${StackTrace.current}');
+      
       setState(() {
-        errorMessage = 'Error: ${e.toString()}';
+        errorMessage = 'Connection Error: ${e.toString()}';
         isLoading = false;
       });
     }
+  }
+
+  // Helper function to consolidate order items by product name and variant
+  Map<String, Map<String, dynamic>> _consolidateOrderItems({bool includeUnavailable = false}) {
+    final Map<String, Map<String, dynamic>> consolidatedItems = {};
+    
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
+      
+      // Skip unavailable items unless explicitly requested
+      if (!includeUnavailable && isUnavailable) continue;
+      
+      final productName = item['product_name'] ?? 'Product';
+      final color = (item['color']?.toString() ?? '').trim();
+      final size = (item['size']?.toString() ?? '').trim();
+      final key = '${productName.trim()}-${color}-${size}';
+      
+      // Use available_quantity for sharing, fallback to requested quantity if not available
+      final displayQuantity = isUnavailable ? 0 : 
+          (int.tryParse(item['available_quantity']?.toString() ?? item['quantity'].toString()) ?? 1);
+      
+      if (consolidatedItems.containsKey(key)) {
+        // Sum quantities for identical variants
+        final existingItem = consolidatedItems[key]!;
+        final existingQty = int.tryParse(existingItem['displayQuantity'].toString()) ?? 0;
+        existingItem['displayQuantity'] = (existingQty + displayQuantity);
+        // Keep the unavailable status if any variant is unavailable
+        if (isUnavailable) {
+          existingItem['isUnavailable'] = true;
+        }
+      } else {
+        // Add new consolidated item
+        final newItem = Map<String, dynamic>.from(item);
+        newItem['isUnavailable'] = isUnavailable;
+        newItem['displayQuantity'] = displayQuantity;
+        consolidatedItems[key] = newItem;
+      }
+    }
+    
+    return consolidatedItems;
   }
 
   // Send WhatsApp message for unavailable item
@@ -231,18 +337,120 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  // Recalculate totals based on available items
+  // Function to update manual stock quantity on server
+  Future<void> _updateManualStockOnServer(String itemId, int manualStockQuantity, bool useManualStock) async {
+    try {
+      print('📤 Sending manual stock update: itemId=$itemId, manualStockQuantity=$manualStockQuantity, useManualStock=$useManualStock');
+      final response = await http.post(
+        Uri.parse('${Config.baseNodeApiUrl}/orders/update-manual-stock'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'orderId': widget.orderId,
+          'itemId': itemId,
+          'manualStockQuantity': manualStockQuantity,
+          'useManualStock': useManualStock,
+        }),
+      ).timeout(const Duration(seconds: 10));
+      
+      print('📤 Sent manual stock update: itemId=$itemId, manualStockQuantity=$manualStockQuantity, useManualStock=$useManualStock');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        print('📥 Server response: $responseData');
+        if (responseData['success'] == true) {
+          print('✅ Updated manual stock for item $itemId to $manualStockQuantity');
+        } else {
+          print('❌ Failed to update manual stock: ${responseData['message']}');
+        }
+      } else {
+        print('❌ HTTP error updating manual stock: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      print('❌ Error updating manual stock: $e');
+    }
+  }
+
+  // Update availability status on server
+  Future<void> _updateItemAvailabilityOnServer(String itemId, int availabilityStatus) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${Config.baseNodeApiUrl}/orders/update-availability'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'orderId': widget.orderId,
+          'itemId': itemId,
+          'availabilityStatus': availabilityStatus,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true) {
+          print('✅ Updated availability status for item $itemId to $availabilityStatus');
+        } else {
+          print('❌ Failed to update availability status: ${responseData['message']}');
+        }
+      } else {
+        print('❌ HTTP error updating availability status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error updating availability status: $e');
+    }
+  }
+
+  // Recalculate totals based on available items and quantities
   void _recalculateTotals() {
     double availableSubtotal = 0.0;
     
+    print('🧮 === RECALCULATING TOTALS ===');
+    print('📦 Total items: ${orderItems.length}');
+    
+    // Use a Set to track unique item IDs to avoid duplicate calculations
+    Set<String> processedItemIds = {};
+    
     for (var item in orderItems) {
       final itemId = item['id'].toString();
-      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
       
-      if (!isUnavailable) {
-        final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
-        final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
-        availableSubtotal += itemPrice * quantity;
+      // Skip if we've already processed this item
+      if (processedItemIds.contains(itemId)) {
+        print('⏭️ Skipping duplicate item $itemId');
+        continue;
+      }
+      processedItemIds.add(itemId);
+      
+      final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+      final useManualStock = _useManualStock[itemId] ?? false;
+      final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+      final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+      
+      print('🔍 Item $itemId:');
+      print('   - Availability: $availabilityStatus');
+      print('   - Use Manual Stock: $useManualStock');
+      print('   - Requested Quantity: $requestedQuantity');
+      print('   - Manual Stock Quantity: ${_manualStockQuantities[itemId]}');
+      print('   - Item Price: ₹$itemPrice');
+      
+      if (availabilityStatus != 'Not Available') {
+        // Use manual stock quantity if enabled, otherwise use requested quantity
+        int availableQuantity;
+        if (useManualStock) {
+          availableQuantity = _manualStockQuantities[itemId] ?? 0;
+        } else {
+          // When manual stock is not enabled, use requested quantity
+          availableQuantity = requestedQuantity;
+        }
+        
+        final itemTotal = itemPrice * availableQuantity;
+        availableSubtotal += itemTotal;
+        
+        print('   - Available Quantity: $availableQuantity');
+        print('   - Item Total: ₹$itemTotal');
+      } else {
+        print('   - Item is NOT AVAILABLE - skipping');
       }
     }
     
@@ -250,10 +458,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       _subtotalAmount = availableSubtotal;
       _totalAmount = _subtotalAmount + _deliveryFee;
     });
+    
+    print('💰 FINAL CALCULATION:');
+    print('   - Subtotal: ₹$_subtotalAmount');
+    print('   - Delivery Fee: ₹$_deliveryFee');
+    print('   - Total: ₹$_totalAmount');
+    print('🧮 === END RECALCULATION ===');
   }
 
   @override
   Widget build(BuildContext context) {
+    print('🔍 OrderDetailScreen Build - isAdmin: $isAdmin');
+    
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -315,6 +531,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ),
         elevation: 0,
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Go Back',
+        ),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),
@@ -329,19 +550,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               tooltip: 'Copy Order Details',
             ),
           ),
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+          // Share button - only for admin users
+          if (isAdmin)
+            Container(
+              margin: const EdgeInsets.only(right: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+              ),
+              child: IconButton(
+                onPressed: _shareOnWhatsApp,
+                icon: const Icon(Icons.share_outlined, size: 20),
+                tooltip: 'Share on WhatsApp',
+              ),
             ),
-            child: IconButton(
-              onPressed: _shareOnWhatsApp,
-              icon: const Icon(Icons.share_outlined, size: 20),
-              tooltip: 'Share on WhatsApp',
-            ),
-          ),
         ],
       ),
       body: isLoading
@@ -366,7 +589,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            errorMessage ?? 'Something went wrong',
+            'Failed to Load Order Details',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -374,10 +597,57 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red[200]!),
+            ),
+            child: Text(
+              errorMessage ?? 'Unknown error occurred',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.red[700],
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _fetchOrderDetails,
-            child: const Text('Retry'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _fetchOrderDetails,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue[600],
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Go Back'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey[600],
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Order ID: #${widget.orderId}',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[500],
+            ),
           ),
         ],
       ),
@@ -408,6 +678,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               children: [
                 // Order Status Card
                 _buildStatusCard(),
+
+                const SizedBox(height: 16),
+
+                // Manual Stock Management - only for admin users and Pending orders
+                if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending')) _buildManualStockManagement(),
 
                 const SizedBox(height: 16),
 
@@ -570,12 +845,501 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                // Track Order Button
+                if (order!['order_status'] != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => OrderStatusTrackingScreen(
+                              orderId: widget.orderId,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.track_changes, size: 16),
+                      label: const Text('Track Order'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildManualStockManagement() {
+    print('🔍 _buildManualStockManagement - isAdmin: $isAdmin');
+    
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.orange[50]!, Colors.yellow[50]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withOpacity(0.15),
+            spreadRadius: 1,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: Colors.orange[200]!, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.inventory_2,
+                      color: Colors.orange[700],
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Manual Stock Management',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              // Toggle manual stock mode
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _showManualStockMode = !_showManualStockMode;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _showManualStockMode ? Colors.orange[600] : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _showManualStockMode ? 'ON' : 'OFF',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_showManualStockMode) ...[
+            Text(
+              'Set available quantities manually for each item:',
+              style: TextStyle(
+                fontSize: 13,
+                color: Color(0xFF616161), // Colors.grey[700]
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Manual stock controls for unique items only
+            Container(
+              constraints: BoxConstraints(maxHeight: 300),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: _getUniqueItems().map((item) => _buildManualStockItem(item)).toList(),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Helper method to get unique items (avoid duplicates)
+  List<dynamic> _getUniqueItems() {
+    final Set<String> addedProducts = {};
+    final List<dynamic> uniqueItems = [];
+    
+    for (var item in orderItems) {
+      final productName = item['product_name'] ?? 'Product';
+      final color = item['color']?.toString() ?? '';
+      final size = item['size']?.toString() ?? '';
+      
+      // Create unique key for product (name + color + size)
+      final productKey = '${productName.trim()}_${color.trim()}_${size.trim()}';
+      
+      // Skip if already added
+      if (!addedProducts.contains(productKey)) {
+        addedProducts.add(productKey);
+        uniqueItems.add(item);
+      }
+    }
+    
+    return uniqueItems;
+  }
+
+  Widget _buildManualStockItem(dynamic item) {
+    // Only show manual stock controls to admin users
+    print('🔍 _buildManualStockItem - isAdmin: $isAdmin');
+    if (!isAdmin) {
+      // For regular users, show item info without controls
+      final itemId = item['id'].toString();
+      final productName = item['product_name'] ?? 'Product';
+      final color = item['color']?.toString() ?? '';
+      final size = item['size']?.toString() ?? '';
+      final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+      
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$productName${color.isNotEmpty ? ' ($color)' : ''}${size.isNotEmpty ? ' - $size' : ''}',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Status: $availabilityStatus',
+              style: TextStyle(
+                fontSize: 11,
+                color: availabilityStatus == 'Available' ? Colors.green : Colors.red,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    final itemId = item['id'].toString();
+    final productName = item['product_name'] ?? 'Product';
+    final color = item['color']?.toString() ?? '';
+    final size = item['size']?.toString() ?? '';
+    final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+    final currentManualStock = _manualStockQuantities[itemId] ?? 0;
+    final useManualStock = _useManualStock[itemId] ?? false;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$productName${color.isNotEmpty ? ' ($color)' : ''}${size.isNotEmpty ? ' - $size' : ''}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              // Enable manual stock checkbox
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Use Manual Stock',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF757575), // Colors.grey[600]
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () {
+                        final newUseManualStock = !useManualStock;
+                        print('🔄 Toggle manual stock: itemId=$itemId, currentUseManualStock=$useManualStock, newUseManualStock=$newUseManualStock, currentManualStock=$currentManualStock, requestedQuantity=$requestedQuantity');
+                        setState(() {
+                          _useManualStock[itemId] = newUseManualStock;
+                          // Update availability status based on manual stock
+                          if (newUseManualStock) {
+                            // Enabling manual stock
+                            if (currentManualStock == 0) {
+                              _itemAvailability[itemId] = 'Not Available';
+                            } else if (currentManualStock < requestedQuantity) {
+                              _itemAvailability[itemId] = 'Partial Available';
+                            } else {
+                              _itemAvailability[itemId] = 'Available';
+                            }
+                          } else {
+                            // Disabling manual stock - reset to automatic
+                            _updateAvailabilityFromServer(item);
+                          }
+                        });
+                        // When enabling manual stock, ensure we have a valid quantity
+                        final stockQuantity = newUseManualStock ? (currentManualStock > 0 ? currentManualStock : requestedQuantity) : currentManualStock;
+                        _updateManualStockOnServer(itemId, stockQuantity, newUseManualStock);
+                        _recalculateTotals();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: useManualStock ? Colors.orange[100] : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: useManualStock ? Colors.orange[300]! : Colors.grey[300]!,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              useManualStock ? Icons.check_box : Icons.check_box_outline_blank,
+                              size: 16,
+                              color: useManualStock ? Colors.orange[700] : Colors.grey[600],
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              useManualStock ? 'Enabled' : 'Disabled',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: useManualStock ? Colors.orange[700] : Colors.grey[600],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Manual stock quantity input
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Available Qty',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF757575), // Colors.grey[600]
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      height: 40,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          // Decrease button
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                if (currentManualStock > 0) {
+                                  final newQuantity = currentManualStock - 1;
+                                  setState(() {
+                                    _manualStockQuantities[itemId] = newQuantity;
+                                    // Update availability status
+                                    if (useManualStock) {
+                                      if (newQuantity == 0) {
+                                        _itemAvailability[itemId] = 'Not Available';
+                                      } else if (newQuantity < requestedQuantity) {
+                                        _itemAvailability[itemId] = 'Partial Available';
+                                      } else {
+                                        _itemAvailability[itemId] = 'Available';
+                                      }
+                                    }
+                                  });
+                                  // Auto-enable manual stock if quantity is changed
+                                  final shouldEnableManualStock = !useManualStock && newQuantity != requestedQuantity;
+                                  final finalUseManualStock = shouldEnableManualStock ? true : useManualStock;
+                                  _updateManualStockOnServer(itemId, newQuantity, finalUseManualStock);
+                                  
+                                  // Update local state if auto-enabling
+                                  if (shouldEnableManualStock) {
+                                    setState(() {
+                                      _useManualStock[itemId] = true;
+                                    });
+                                  }
+                                  _recalculateTotals();
+                                }
+                              },
+                              child: Container(
+                                height: 40,
+                                child: Icon(
+                                  Icons.remove,
+                                  size: 16,
+                                  color: Colors.red[600],
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Quantity display
+                          Expanded(
+                            child: Container(
+                              height: 40,
+                              child: Center(
+                                child: Text(
+                                  currentManualStock.toString(),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Increase button
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                final newQuantity = currentManualStock + 1;
+                                setState(() {
+                                  _manualStockQuantities[itemId] = newQuantity;
+                                  // Update availability status
+                                  if (useManualStock) {
+                                    if (newQuantity == 0) {
+                                      _itemAvailability[itemId] = 'Not Available';
+                                    } else if (newQuantity < requestedQuantity) {
+                                      _itemAvailability[itemId] = 'Partial Available';
+                                    } else {
+                                      _itemAvailability[itemId] = 'Available';
+                                    }
+                                  }
+                                });
+                                // Auto-enable manual stock if quantity is changed
+                                final shouldEnableManualStock = !useManualStock && newQuantity != requestedQuantity;
+                                final finalUseManualStock = shouldEnableManualStock ? true : useManualStock;
+                                _updateManualStockOnServer(itemId, newQuantity, finalUseManualStock);
+                                
+                                // Update local state if auto-enabling
+                                if (shouldEnableManualStock) {
+                                  setState(() {
+                                    _useManualStock[itemId] = true;
+                                  });
+                                }
+                                _recalculateTotals();
+                              },
+                              child: Container(
+                                height: 40,
+                                child: Icon(
+                                  Icons.add,
+                                  size: 16,
+                                  color: Colors.green[600],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Stock info
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Req: $requestedQuantity',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF757575), // Colors.grey[600]
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      useManualStock 
+                          ? 'Manual: $currentManualStock'
+                          : 'Auto Stock',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: useManualStock ? Colors.orange[700] : Colors.blue[700],
+                      ),
+                    ),
+                    if (useManualStock)
+                      Text(
+                        _itemAvailability[itemId] ?? 'Available',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: _getAvailabilityStatusColor(_itemAvailability[itemId] ?? 'Available'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper method to update availability from server data
+  void _updateAvailabilityFromServer(dynamic item) {
+    final itemId = item['id'].toString();
+    final stockStatus = item['stock_status']?.toString() ?? 'full';
+    final availableQuantity = int.tryParse(item['available_quantity']?.toString() ?? item['quantity'].toString()) ?? 1;
+    final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+    
+    if (stockStatus == 'out_of_stock' || availableQuantity == 0) {
+      _itemAvailability[itemId] = 'Not Available';
+    } else if (stockStatus == 'partial') {
+      _itemAvailability[itemId] = 'Partial Available';
+    } else {
+      _itemAvailability[itemId] = 'Available';
+    }
   }
 
   Widget _buildCompactInfoRow(IconData icon, String label, String value) {
@@ -636,13 +1400,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
 
     // Check if all items are unavailable
-    bool allItemsUnavailable = orderItems.every((item) => 
-      _itemAvailability[item['id'].toString()] == 'Not Available'
-    );
+    bool allItemsUnavailable = orderItems.every((item) {
+      final itemId = item['id'].toString();
+      final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+      final useManualStock = _useManualStock[itemId] ?? false;
+      final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+      
+      // If manual stock is enabled and quantity > 0, it's available
+      if (useManualStock && manualStockQuantity > 0) {
+        return false;
+      }
+      
+      // Otherwise check availability status
+      return availabilityStatus == 'Not Available';
+    });
+
+    // Check if any item has manual stock enabled
+    bool hasManualStockEnabled = orderItems.any((item) {
+      final itemId = item['id'].toString();
+      return _useManualStock[itemId] ?? false;
+    });
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: hasManualStockEnabled ? Colors.grey[100] : Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -656,11 +1437,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with master checkbox
-          Container(
+          // Header with master checkbox - only for admin users and Pending orders
+          if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+            Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: hasManualStockEnabled ? Colors.grey[200] : Colors.grey[50],
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
@@ -675,53 +1457,131 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const Spacer(),
-                // Master availability checkbox
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.white,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Mark All',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                if (hasManualStockEnabled) ...[
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[100],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange[300]!),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: Colors.orange[700],
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Transform.scale(
-                        scale: 0.7,
-                        child: Checkbox(
-                          value: allItemsUnavailable,
-                          onChanged: (bool? value) {
-                            setState(() {
-                              // Toggle all items
-                              for (var item in orderItems) {
-                                final itemId = item['id'].toString();
-                                _itemAvailability[itemId] = value == true ? 'Not Available' : 'Available';
-                              }
-                            });
-                            // Recalculate totals
-                            _recalculateTotals();
-                          },
-                          activeColor: Colors.red,
-                          checkColor: Colors.white,
-                          shape: const CircleBorder(),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        const SizedBox(width: 4),
+                        Text(
+                          'Manual Stock Enabled',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[700],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ] else ...[
+                  const Spacer(),
+                  // Master availability dropdown
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: allItemsUnavailable 
+                          ? [Colors.red[400]!, Colors.red[300]!]
+                          : [Colors.green[400]!, Colors.green[300]!],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: allItemsUnavailable ? Colors.red[500]! : Colors.green[500]!,
+                        width: 1.0,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: allItemsUnavailable 
+                            ? Colors.red.withOpacity(0.2)
+                            : Colors.green.withOpacity(0.2),
+                          blurRadius: 3,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: DropdownButton<String>(
+                      value: allItemsUnavailable ? 'All Unavailable' : 'All Available',
+                      icon: const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
+                      underline: const SizedBox(),
+                      isDense: true,
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black26,
+                            offset: Offset(0, 0.5),
+                            blurRadius: 1,
+                          ),
+                        ],
+                      ),
+                      dropdownColor: allItemsUnavailable ? Colors.red[400] : Colors.green[400],
+                      items: [
+                        DropdownMenuItem(
+                          value: 'All Available',
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.check, size: 12, color: Colors.white),
+                              const SizedBox(width: 4),
+                              const Text('All Available'),
+                            ],
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 'All Unavailable',
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.close, size: 12, color: Colors.white),
+                              const SizedBox(width: 4),
+                              const Text('All Unavailable'),
+                            ],
+                          ),
+                        ),
+                      ],
+                      onChanged: (String? newValue) {
+                        if (newValue != null) {
+                          final makeAllUnavailable = newValue == 'All Unavailable';
+                          setState(() {
+                            // Toggle all items
+                            for (var item in orderItems) {
+                              final itemId = item['id'].toString();
+                              _itemAvailability[itemId] = makeAllUnavailable ? 'Not Available' : 'Available';
+                            }
+                          });
+                          // Update all items availability status on server
+                          int availabilityStatus = makeAllUnavailable ? 1 : 0;
+                          for (var item in orderItems) {
+                            final itemId = item['id'].toString();
+                            _updateItemAvailabilityOnServer(itemId, availabilityStatus);
+                          }
+                          // Recalculate totals
+                          _recalculateTotals();
+                        }
+                      },
+                    ),
+                  ),
+                ],
               ],
             ),
-          ),
+            ),
           // Group items by product
           ...itemsByProduct.entries.map((entry) {
             final productName = entry.key;
@@ -765,7 +1625,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Product Name Header
+          // Product Name Header with exact UI as shown in image
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -773,13 +1633,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               color: Colors.blue[50],
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              productName,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Colors.black87,
-              ),
+            child: Row(
+              children: [
+                // Product Name
+                Expanded(
+                  child: Text(
+                    productName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -797,152 +1665,307 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Widget _buildVariantItem(dynamic item, bool isLast) {
+    print('🔍 _buildVariantItem - isAdmin: $isAdmin');
+    
     // Get the individual item price (not the total)
     final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
-    final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+    final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
     final itemId = item['id'].toString();
-    final isUnavailable = _itemAvailability[itemId] == 'Not Available';
+    final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+    final useManualStock = _useManualStock[itemId] ?? false;
+    final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+    
+    // Calculate available quantity based on manual stock or automatic stock
+    int availableQuantity;
+    if (useManualStock) {
+      availableQuantity = manualStockQuantity;
+    } else {
+      // When manual stock is not enabled, use requested quantity (not server available_quantity)
+      availableQuantity = requestedQuantity;
+    }
+    
+    // Determine UI state based on availability status
+    bool isUnavailable = availabilityStatus == 'Not Available';
+    bool isPartial = availabilityStatus == 'Partial Available';
+    
+    // Only show stock status colors when manual stock is enabled
+    Color statusColor = Colors.white;
+    Color borderColor = Colors.grey[200]!;
+    double borderWidth = 1;
+    
+    if (useManualStock) {
+      statusColor = isUnavailable ? Colors.red[50]! : (isPartial ? Colors.orange[50]! : Colors.white);
+      borderColor = isUnavailable ? Colors.red[200]! : (isPartial ? Colors.orange[300]! : Colors.grey[200]!);
+      borderWidth = isUnavailable ? 2 : (isPartial ? 1.5 : 1);
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isUnavailable ? Colors.red[50] : Colors.white,
+        color: statusColor,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isUnavailable ? Colors.red[200]! : Colors.grey[200]!,
-          width: isUnavailable ? 2 : 1,
+          color: borderColor,
+          width: borderWidth,
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Availability Checkbox
-          Container(
-            margin: const EdgeInsets.only(right: 6),
-            child: Column(
-              children: [
-                Transform.scale(
-                  scale: 0.5,
-                  child: Checkbox(
-                    value: isUnavailable,
-                    onChanged: (bool? value) {
-                      setState(() {
-                        _itemAvailability[itemId] = value == true ? 'Not Available' : 'Available';
-                      });
-                      // Recalculate totals
-                      _recalculateTotals();
-                    },
-                    activeColor: Colors.red,
-                    checkColor: Colors.white,
-                    shape: const CircleBorder(),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          // Dropdown with Color and Size Info - positioned at top
+          if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  // Small availability icon
+                  Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: isUnavailable ? Colors.red : Colors.green,
+                      shape: BoxShape.circle,
+                    ),
+                    child: isUnavailable 
+                      ? const Icon(Icons.close, size: 10, color: Colors.white)
+                      : const Icon(Icons.check, size: 10, color: Colors.white),
                   ),
-                ),
-                Text(
-                  isUnavailable ? 'No' : 'Yes',
-                  style: TextStyle(
-                    fontSize: 7,
-                    color: isUnavailable ? Colors.red : Colors.green,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  
+                  // Color Badge
+                  if (item['color'] != null && item['color'].toString().isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _getColorFromString(item['color']),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[300]!, width: 1),
+                      ),
+                      child: Text(
+                        item['color'],
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  
+                  // Size Badge
+                  if (item['size'] != null && item['size'].toString().isNotEmpty && item['size'].toString().toLowerCase() != 'no size')
+                    Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[300]!, width: 1),
+                      ),
+                      child: Text(
+                        'Size: ${item['size']}',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  
+                  // Availability Dropdown or Disabled Indicator
+                  if (_showManualStockMode && useManualStock)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.orange[300]!,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.lock_outline,
+                            size: 10,
+                            color: Colors.orange[700],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Manual Stock',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isUnavailable ? Colors.red[50] : Colors.green[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isUnavailable ? Colors.red[300]! : Colors.green[300]!,
+                          width: 1,
+                        ),
+                      ),
+                      child: DropdownButton<String>(
+                        value: isUnavailable ? 'Unavailable' : 'Available',
+                        icon: const Icon(Icons.arrow_drop_down, size: 14),
+                        underline: const SizedBox(),
+                        isDense: true,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: isUnavailable ? Colors.red[700] : Colors.green[700],
+                        ),
+                        items: [
+                          DropdownMenuItem(
+                            value: 'Available',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.check, size: 10, color: Colors.green),
+                                const SizedBox(width: 2),
+                                const Text('Available'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Unavailable',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.close, size: 10, color: Colors.red),
+                                const SizedBox(width: 2),
+                                const Text('Unavailable'),
+                              ],
+                            ),
+                          ),
+                        ],
+                        onChanged: (String? newValue) {
+                          if (newValue != null && !(_showManualStockMode && useManualStock)) {
+                            setState(() {
+                              _itemAvailability[itemId] = newValue == 'Unavailable' ? 'Not Available' : 'Available';
+                            });
+                            // Update server
+                            int availabilityStatus = newValue == 'Unavailable' ? 1 : 0;
+                            _updateItemAvailabilityOnServer(itemId, availabilityStatus);
+                            // Recalculate totals
+                            _recalculateTotals();
+                          }
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
           
-          // Product Image
-          GestureDetector(
-            onTap: () => _showFullScreenImage(context, item),
-            child: Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: _buildProductImage(item),
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // Variant Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Variant badges
-                Row(
-                  children: [
-                    if (item['color'] != null && item['color'].toString().isNotEmpty)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _getColorFromString(item['color']),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey[300]!, width: 1),
-                        ),
-                        child: Text(
-                          item['color'],
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    if (item['size'] != null && item['size'].toString().isNotEmpty && item['size'].toString().toLowerCase() != 'no size')
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey[300]!, width: 1),
-                        ),
-                        child: Text(
-                          'Size: ${item['size']}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ),
-                  ],
+          // Product details row
+          Row(
+            children: [
+              // Product Image
+              GestureDetector(
+                onTap: () => _showFullScreenImage(context, item),
+                child: Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: _buildProductImage(item),
+                  ),
                 ),
-                const SizedBox(height: 8),
+              ),
 
-                // Price and Quantity - Show actual quantity and individual price
-                Column(
+              const SizedBox(width: 12),
+
+              // Variant Details
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Qty: $quantity x ₹${itemPrice.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isUnavailable ? Colors.grey[500] : Colors.grey[600],
-                        decoration: isUnavailable ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Total: ₹${(itemPrice * quantity).toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isUnavailable ? Colors.grey[500] : Colors.blue,
-                        decoration: isUnavailable ? TextDecoration.lineThrough : null,
-                      ),
+                    // Price and Quantity
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Show requested quantity
+                        Text(
+                          'Requested: $requestedQuantity x ₹${itemPrice.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                        // Show available quantity and calculated total - only when global toggle is ON
+                        if (_showManualStockMode && useManualStock && isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+                          Text(
+                            'Available: $availableQuantity x ₹${itemPrice.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue[700],
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        const SizedBox(height: 2),
+                        // Show total based on available quantity
+                        Text(
+                          (_showManualStockMode && useManualStock)
+                              ? 'Available Total: ₹${(itemPrice * availableQuantity).toStringAsFixed(2)}'
+                              : 'Total: ₹${(itemPrice * (isUnavailable ? 0 : requestedQuantity)).toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isUnavailable ? Colors.grey[500] : ((_showManualStockMode && useManualStock) ? Colors.blue[700] : Colors.blue),
+                            decoration: isUnavailable ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
+                        if (_showManualStockMode && useManualStock && isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+                          Text(
+                            'Requested Total: ₹${(itemPrice * requestedQuantity).toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[500],
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                        // Show manual stock indicator - only when global toggle is ON
+                        if (_showManualStockMode && useManualStock && isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[100],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue[300]!),
+                            ),
+                            child: Text(
+                              'Manual Stock: $availableQuantity',
+                              style: TextStyle(
+                                fontSize: 9,
+                                color: Colors.blue[700],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1171,7 +2194,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      order!['shipping_phone'] ?? 'N/A',
+                      order!['customer_phone'] ?? order!['shipping_phone'] ?? 'N/A',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -1244,30 +2267,44 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () {
-                      print('Manual refresh triggered');
-                      _fetchOrderDetails(silent: false);
-                    },
-                    child: Icon(
-                      Icons.refresh,
-                      size: 18,
-                      color: Colors.grey[600],
-                    ),
-                  ),
                 ],
               ),
               IntrinsicHeight(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Manual Payment Confirmation Button (show if payment is pending)
-                    if (order!['payment_status'] != 'paid')
+                    // Manual Payment Confirmation Button - only for admin users
+                    if (order!['order_status'] == 'Waiting for Payment' && isAdmin)
                       Container(
                         height: 32,
                         child: GestureDetector(
-                          onTap: _showManualPaymentConfirmation,
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Confirm Payment',
+                              'Are you sure you want to confirm payment and move this order to "Ready for Shipment"?',
+                              Icons.payment,
+                              Colors.orange,
+                            );
+                            
+                            if (confirmed == true) {
+                              // Process payment and update status to "Ready for Shipment"
+                              await _processPaymentAndUpdateStatus();
+                              
+                              // Send WhatsApp payment confirmation receipt to customer
+                              await _sendPaymentConfirmationReceipt();
+                              
+                              // Navigate to ready shipment screen
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const ReadyShipmentOrdersScreen(),
+                                  ),
+                                );
+                              }
+                            }
+                          },
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                             margin: const EdgeInsets.only(right: 8),
@@ -1298,26 +2335,233 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
-                    // Share Order Details Button
-                    Container(
-                      height: 32,
-                      child: GestureDetector(
-                        onTap: _shareOrderDetails,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.green[100],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[300]!, width: 1),
-                          ),
-                          child: Icon(
-                            Icons.arrow_forward_ios,
-                            color: Colors.green[700],
-                            size: 16,
+                    // Ship Button for Ready for Shipment
+                    if (order!['order_status'] == 'Ready for Shipment')
+                      Container(
+                        height: 32,
+                        child: GestureDetector(
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Ship Order',
+                              'Are you sure you want to ship this order?',
+                              Icons.local_shipping,
+                              Colors.blue,
+                            );
+                            
+                            if (confirmed == true) {
+                              // Update order status to "Shipped"
+                              await _updateOrderStatus('Shipped');
+                              
+                              // Navigate to shipped screen
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const ShippedOrdersScreen(),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[100],
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.blue[300]!, width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.local_shipping,
+                                  color: Colors.blue[700],
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Ship',
+                                  style: TextStyle(
+                                    color: Colors.blue[700],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    // Deliver Button for Shipped
+                    if (order!['order_status'] == 'Shipped')
+                      Container(
+                        height: 32,
+                        child: GestureDetector(
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Deliver Order',
+                              'Are you sure you want to mark this order as delivered?',
+                              Icons.check_circle,
+                              Colors.purple,
+                            );
+                            
+                            if (confirmed == true) {
+                              // Update order status to "Delivered"
+                              await _updateOrderStatus('Delivered');
+                              
+                              // Navigate to delivered screen
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const DeliveredOrdersScreen(),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.purple[100],
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.purple[300]!, width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  color: Colors.purple[700],
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Deliver',
+                                  style: TextStyle(
+                                    color: Colors.purple[700],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Cancel Button for cancellable orders
+                    if (order!['order_status'] == 'Pending' || 
+                        order!['order_status'] == 'Waiting for Payment' || 
+                        order!['order_status'] == 'Ready for Shipment')
+                      Container(
+                        height: 32,
+                        child: GestureDetector(
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Cancel Order',
+                              'Are you sure you want to cancel this order? This action cannot be undone.',
+                              Icons.cancel,
+                              Colors.red,
+                            );
+                            
+                            if (confirmed == true) {
+                              // Update order status to "Cancelled"
+                              await _updateOrderStatus('Cancelled');
+                              
+                              // Navigate back to appropriate screen based on previous status
+                              if (mounted) {
+                                Navigator.pushAndRemoveUntil(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const PendingOrdersScreen(),
+                                  ),
+                                  (route) => false,
+                                );
+                              }
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red[100],
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.red[300]!, width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.cancel,
+                                  color: Colors.red[700],
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Cancel',
+                                  style: TextStyle(
+                                    color: Colors.red[700],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Share Order Details Button - Green Arrow - only for admin users
+                    if (order!['order_status'] == 'Pending' && isAdmin)
+                      Container(
+                        height: 32,
+                        margin: const EdgeInsets.only(left: 8), // Add gap between buttons
+                        child: GestureDetector(
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Move to Waiting for Payment',
+                              'Are you sure you want to move this order to "Waiting for Payment"?',
+                              Icons.arrow_forward,
+                              Colors.green,
+                            );
+                            
+                            if (confirmed == true) {
+                              // Update order status to "Waiting for Payment"
+                              await _updateOrderStatus('Waiting for Payment');
+                              
+                              // Send WhatsApp order receipt to customer
+                              await _sendOrderReceiptToCustomer();
+                              
+                              // Navigate to waiting payment screen
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const WaitingPaymentOrdersScreen(),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.green[100],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green[300]!, width: 1),
+                            ),
+                            child: Icon(
+                              Icons.arrow_forward_ios,
+                              color: Colors.green[700],
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1808,6 +3052,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String _createStructuredShareMessage() {
     if (order == null) return '';
 
+    print('=== CREATING WHATSAPP MESSAGE ===');
+    print('TEST: This function is being called!');
+    print('Order items count: ${orderItems.length}');
+    print('📊 Manual Stock States:');
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      print('   Item $itemId: useManualStock=${_useManualStock[itemId]}, manualStockQuantity=${_manualStockQuantities[itemId]}');
+    }
+
     // Check if all items are unavailable
     bool allItemsUnavailable = orderItems.every((item) => 
       _itemAvailability[item['id'].toString()] == 'Not Available'
@@ -1881,39 +3134,80 @@ $variantDetails   • Quantity: $quantity
 🛒 *ORDER DETAILS* 🛒
 📋 *Order Information:*
 • Order ID: #${widget.orderId}
+• Customer: ${order!['customer_name'] ?? 'N/A'}
 • Date: ${_formatDateWithAmPm(order!['order_date'])}
 ━━━━━━━━━━━━━━━━━━━━━
 
 📦 *Product Details:*
 ''';
 
-    // Track unique products to avoid duplicates
-    final Set<String> addedProducts = {};
+    // Track unique products and sum their quantities
+    final Map<String, Map<String, dynamic>> consolidatedProducts = {};
 
-    // Add each product with availability status
+    // First, consolidate all items by product variant
     for (var item in orderItems) {
       final productName = item['product_name'] ?? 'Product';
       final color = item['color']?.toString() ?? '';
       final size = item['size']?.toString() ?? '';
       final itemId = item['id'].toString();
-      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
-
+      final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+      final isUnavailable = availabilityStatus == 'Not Available';
+      final isPartial = availabilityStatus == 'Partial Available';
+      
       // Create unique key for product (name + color + size)
       final productKey = '${productName.trim()}_${color.trim()}_${size.trim()}';
 
-      // Skip if already added
-      if (addedProducts.contains(productKey)) {
-        continue;
+      if (!consolidatedProducts.containsKey(productKey)) {
+        // Initialize product entry
+        consolidatedProducts[productKey] = {
+          'productName': productName,
+          'color': color,
+          'size': size,
+          'price': double.tryParse(item['price'].toString()) ?? 0.0,
+          'imageUrl': item['image_url'],
+          'totalRequestedQuantity': 0,
+          'totalManualQuantity': 0,
+          'totalAvailableQuantity': 0,
+          'hasManualStock': false,
+          'hasUnavailable': false,
+          'itemIds': [],
+        };
       }
-      addedProducts.add(productKey);
 
-      final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
-      final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+      final product = consolidatedProducts[productKey]!;
+      final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+      final useManualStock = _useManualStock[itemId] ?? false;
+      final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+      final availableQuantity = useManualStock ? manualStockQuantity : 
+          int.tryParse(item['available_quantity']?.toString() ?? requestedQuantity.toString()) ?? requestedQuantity;
+
+      // Sum quantities
+      product['totalRequestedQuantity'] += requestedQuantity;
+      product['totalManualQuantity'] += manualStockQuantity;
+      product['totalAvailableQuantity'] += availableQuantity;
+      product['hasManualStock'] = product['hasManualStock'] || useManualStock;
+      product['hasUnavailable'] = product['hasUnavailable'] || isUnavailable;
+      product['itemIds'].add(itemId);
+      
+      print('   Consolidating item $itemId: requested=$requestedQuantity, manual=$manualStockQuantity, available=$availableQuantity, useManual=$useManualStock');
+    }
+
+    // Now create message for consolidated products
+    for (var productEntry in consolidatedProducts.values) {
+      final productName = productEntry['productName'] ?? 'Product';
+      final color = productEntry['color']?.toString() ?? '';
+      final size = productEntry['size']?.toString() ?? '';
+      final itemPrice = productEntry['price'] ?? 0.0;
+      final totalRequestedQuantity = productEntry['totalRequestedQuantity'] ?? 0;
+      final totalManualQuantity = productEntry['totalManualQuantity'] ?? 0;
+      final totalAvailableQuantity = productEntry['totalAvailableQuantity'] ?? 0;
+      final hasManualStock = productEntry['hasManualStock'] ?? false;
+      final hasUnavailable = productEntry['hasUnavailable'] ?? false;
 
       // Get image URL
       String? imageUrl;
-      if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
-        String tempImageUrl = item['image_url'].toString();
+      if (productEntry['imageUrl'] != null && productEntry['imageUrl'].toString().isNotEmpty) {
+        String tempImageUrl = productEntry['imageUrl'].toString();
         if (tempImageUrl.startsWith('http')) {
           imageUrl = tempImageUrl;
         } else {
@@ -1930,27 +3224,55 @@ $variantDetails   • Quantity: $quantity
         variantDetails += '   • Size: $size\n';
       }
 
-      // Add availability status
-      String availabilityStatus = isUnavailable ? '❌ *UNAVAILABLE*' : '✅ *Available*';
-      
-      // Show price only for available items
+      // Add availability status with quantity information
+      String statusText = '';
+      String quantityInfo = '';
       String priceInfo = '';
-      if (!isUnavailable) {
-        priceInfo = '   • Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+      
+      if (hasUnavailable && totalAvailableQuantity == 0) {
+        statusText = '   *UNAVAILABLE*';
+        quantityInfo = '   Quantity: $totalRequestedQuantity (Requested)\n';
+      } else if (hasUnavailable && totalAvailableQuantity < totalRequestedQuantity) {
+        statusText = '   *PARTIALLY AVAILABLE*';
+        quantityInfo = '   Available: $totalAvailableQuantity of $totalRequestedQuantity\n';
+        priceInfo = '   Price: ${itemPrice.toStringAsFixed(2)} (each)\n';
+        priceInfo += '   Available Total: ${(itemPrice * totalAvailableQuantity).toStringAsFixed(2)}\n';
+      } else {
+        statusText = '   *Available*';
+        // Show the actual quantity that will be charged/shipped
+        final actualQuantity = hasManualStock ? totalManualQuantity : totalAvailableQuantity;
+        quantityInfo = '   Quantity: $actualQuantity\n';
+        priceInfo = '   Price: ${itemPrice.toStringAsFixed(2)}\n';
+        if (hasManualStock) {
+          quantityInfo = '   Manual Stock: $totalManualQuantity\n';
+          quantityInfo += '   Requested Quantity: $totalRequestedQuantity\n';
+        }
       }
 
       message += '''
 🔸 *$productName*
-$variantDetails   • Quantity: $quantity
-$priceInfo   • Status: $availabilityStatus
+$variantDetails$quantityInfo$priceInfo   • Status: $statusText
    • Image: ${imageUrl ?? 'N/A'}
 ''';
     }
 
-    // Calculate totals with delivery fee
-    final subtotalAmount = _subtotalAmount;
+    // Calculate totals based on consolidated products
+    double sharedSubtotal = 0.0;
+    
+    // Calculate subtotal from consolidated products
+    for (var productEntry in consolidatedProducts.values) {
+      final itemPrice = productEntry['price'] ?? 0.0;
+      final totalAvailableQuantity = productEntry['totalAvailableQuantity'] ?? 0;
+      final hasUnavailable = productEntry['hasUnavailable'] ?? false;
+      
+      if (!hasUnavailable || totalAvailableQuantity > 0) {
+        sharedSubtotal += itemPrice * totalAvailableQuantity;
+      }
+    }
+    
+    final subtotalAmount = sharedSubtotal;
     final deliveryFee = _deliveryFee;
-    final totalAmount = _totalAmount;
+    final totalAmount = sharedSubtotal + _deliveryFee;
 
     message += '''━━━━━━━━━━━━━━━━━━━━━
 
@@ -2667,10 +3989,14 @@ Thank you for your order! 🙏
   void _copyOrderDetails() {
     if (order == null) return;
 
+    // Group and consolidate items (include both available and unavailable)
+    final consolidatedItems = _consolidateOrderItems(includeUnavailable: true);
+
     String orderDetails = '''
 🛒 *Order Details* 🛒
 
 📋 *Order ID:* #${widget.orderId}
+👤 *Customer Name:* ${order!['customer_name'] ?? 'N/A'}
 📅 *Order Date:* ${_formatDate(order!['order_date'])}
 💳 *Payment Method:* ${order!['payment_method'] ?? 'COD'}
 🚚 *Order Status:* ${order!['order_status'] ?? 'Pending'}
@@ -2678,20 +4004,32 @@ Thank you for your order! 🙏
 📦 *Order Items:*
 ''';
 
-    // Add order items
-    for (var item in orderItems) {
-      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) *
-          (double.tryParse(item['price'].toString()) ?? 0.0);
+    // Calculate subtotal for available items only
+    double availableSubtotal = 0.0;
+    
+    // Add consolidated order items with proper status
+    for (var item in consolidatedItems.values) {
+      final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+      final quantity = int.tryParse(item['displayQuantity'].toString()) ?? 1;
+      final isUnavailable = item['isUnavailable'] == true;
+      final itemTotal = itemPrice * quantity;
+      
+      // Only add to subtotal if item is available
+      if (!isUnavailable) {
+        availableSubtotal += itemTotal;
+      }
+      
       orderDetails += '''
 • ${item['product_name'] ?? 'Product'}
-  Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
+  Color: ${item['color'] ?? 'N/A'}, Size: ${item['size'] ?? 'N/A'}
+  Qty: $quantity × ₹${itemPrice.toStringAsFixed(2)} = ₹${itemTotal.toStringAsFixed(2)}
+  Status: ${isUnavailable ? '❌ UNAVAILABLE' : '✅ Available'}
 ''';
     }
 
-    // Calculate totals with delivery fee
-    final subtotalAmount = _subtotalAmount;
+    // Calculate totals with delivery fee (only for available items)
     final deliveryFee = _deliveryFee;
-    final totalAmount = _totalAmount;
+    final totalAmount = availableSubtotal + deliveryFee;
 
     orderDetails += '''
 🏠 *Shipping Address:*
@@ -2700,7 +4038,7 @@ ${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${or
 📞 ${order!['shipping_phone'] ?? 'N/A'}
 
 💰 *Order Summary:*
-Subtotal: ₹${subtotalAmount.toStringAsFixed(2)}
+Subtotal: ₹${availableSubtotal.toStringAsFixed(2)}
 Delivery Fee: ₹${deliveryFee.toStringAsFixed(2)}
 *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
 
@@ -2720,45 +4058,160 @@ Thank you for your order! 🙏
   void _shareOnWhatsApp() async {
     if (order == null) return;
 
+    print('🔥 === WHATSAPP SHARE STARTED ===');
+    print('📊 Manual Stock States in _shareOnWhatsApp:');
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      print('   Item $itemId: useManualStock=${_useManualStock[itemId]}, manualStockQuantity=${_manualStockQuantities[itemId]}');
+    }
+
+    // Check if all items are unavailable
+    bool allItemsUnavailable = orderItems.every((item) => 
+      _itemAvailability[item['id'].toString()] == 'Not Available'
+    );
+
+    // If all items are unavailable, send unavailable message
+    if (allItemsUnavailable) {
+      await _sendUnavailableMessage(null);
+      return;
+    }
+
+    // Group and consolidate items with manual stock support
+    final Map<String, Map<String, dynamic>> consolidatedItems = {};
+    
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      final productName = item['product_name'] ?? 'Product';
+      final color = item['color']?.toString() ?? '';
+      final size = item['size']?.toString() ?? '';
+      final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
+      final isUnavailable = availabilityStatus == 'Not Available';
+      final useManualStock = _useManualStock[itemId] ?? false;
+      final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+      final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+      final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+      
+      print('🔍 Processing item $itemId:');
+      print('   - useManualStock: $useManualStock');
+      print('   - manualStockQuantity: $manualStockQuantity');
+      print('   - requestedQuantity: $requestedQuantity');
+      
+      // Create unique key for product (name + color + size)
+      final productKey = '${productName.trim()}_${color.trim()}_${size.trim()}';
+      
+      if (!consolidatedItems.containsKey(productKey)) {
+        consolidatedItems[productKey] = {
+          'product_name': productName,
+          'color': color,
+          'size': size,
+          'price': itemPrice,
+          'image_url': item['image_url'],
+          'isUnavailable': isUnavailable,
+          'displayQuantity': 0,
+          'manualQuantity': 0,
+          'requestedQuantity': 0,
+          'hasManualStock': false,
+        };
+      }
+      
+      final consolidatedItem = consolidatedItems[productKey]!;
+      
+      // Use manual quantity if enabled, otherwise use requested quantity
+      int actualQuantity;
+      if (useManualStock) {
+        actualQuantity = manualStockQuantity;
+        consolidatedItem['hasManualStock'] = true;
+        consolidatedItem['manualQuantity'] += manualStockQuantity;
+      } else {
+        actualQuantity = requestedQuantity;
+      }
+      
+      consolidatedItem['displayQuantity'] += actualQuantity;
+      consolidatedItem['requestedQuantity'] += requestedQuantity;
+      consolidatedItem['isUnavailable'] = consolidatedItem['isUnavailable'] && isUnavailable;
+    }
+
+    print('📋 FINAL CONSOLIDATED ITEMS:');
+    for (var key in consolidatedItems.keys) {
+      final item = consolidatedItems[key]!;
+      print('   $key: hasManualStock=${item['hasManualStock']}, displayQuantity=${item['displayQuantity']}, manualQuantity=${item['manualQuantity']}');
+    }
+
+    // Calculate totals for available items only
+    double availableSubtotal = 0.0;
+    for (var item in consolidatedItems.values) {
+      if (!(item['isUnavailable'] == true)) {
+        final itemPrice = item['price'] ?? 0.0;
+        final quantity = int.tryParse(item['displayQuantity'].toString()) ?? 1;
+        availableSubtotal += itemPrice * quantity;
+      }
+    }
+
     String orderDetails = '''
-🛒 *Order Details* 🛒
+🛒 *ORDER DETAILS* 🛒
+📋 *Order Information:*
+• Order ID: #${widget.orderId}
+• Customer: ${order!['customer_name'] ?? 'N/A'}
+• Date: ${_formatDateWithAmPm(order!['order_date'])}
+━━━━━━━━━━━━━━━━━━━━━
 
-📋 *Order ID:* #${widget.orderId}
-📅 *Order Date:* ${_formatDate(order!['order_date'])}
-💳 *Payment Method:* ${order!['payment_method'] ?? 'COD'}
-🚚 *Order Status:* ${order!['order_status'] ?? 'Pending'}
-
-📦 *Order Items:*
+📦 *Product Details:*
 ''';
 
-    // Add order items
-    for (var item in orderItems) {
-      final itemTotal = (double.tryParse(item['quantity'].toString()) ?? 0.0) *
-          (double.tryParse(item['price'].toString()) ?? 0.0);
+    // Add consolidated order items with proper status
+    for (var item in consolidatedItems.values) {
+      final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+      final quantity = int.tryParse(item['displayQuantity'].toString()) ?? 1;
+      final isUnavailable = item['isUnavailable'] == true;
+      final hasManualStock = item['hasManualStock'] == true;
+      final manualQuantity = int.tryParse(item['manualQuantity'].toString()) ?? 0;
+      final requestedQuantity = int.tryParse(item['requestedQuantity'].toString()) ?? 0;
+      
+      // Build quantity information
+      String quantityInfo = '';
+      if (hasManualStock) {
+        quantityInfo = '   Manual Stock: $manualQuantity\n   Requested Quantity: $requestedQuantity\n';
+      } else {
+        quantityInfo = '   Quantity: $quantity\n';
+      }
+      
       orderDetails += '''
-• ${item['product_name'] ?? 'Product'}
-  Qty: ${item['quantity']} × ₹${item['price']} = ₹${itemTotal.toStringAsFixed(2)}
+🔸 *${item['product_name'] ?? 'Product'}*
+   • Color: ${item['color'] ?? 'N/A'}
+   • Size: ${item['size'] ?? 'N/A'}
+$quantityInfo   Price: ₹${itemPrice.toStringAsFixed(2)}
+   ${isUnavailable ? 'Status:  *UNAVAILABLE*' : 'Status:  *Available*'}
+   Image: ${item['image_url'] ?? 'N/A'}
+
 ''';
     }
 
-    // Calculate totals with delivery fee
-    final subtotalAmount = _subtotalAmount;
+    // Calculate totals with delivery fee (only for available items)
     final deliveryFee = _deliveryFee;
-    final totalAmount = _totalAmount;
+    final totalAmount = availableSubtotal + deliveryFee;
 
-    orderDetails += '''
-🏠 *Shipping Address:*
+    orderDetails += '''━━━━━━━━━━━━━━━━━━━━━
+
+💰 *Payment Summary:*
+• Subtotal: ₹${availableSubtotal.toStringAsFixed(2)}
+• Delivery: ₹${deliveryFee.toStringAsFixed(2)}
+• *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
+━━━━━━━━━━━━━━━━━━━━━
+
+🏠 Delivery Address:
 ${order!['shipping_street'] ?? 'N/A'}
 ${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${order!['shipping_pincode'] ?? 'N/A'}
 📞 ${order!['shipping_phone'] ?? 'N/A'}
 
-💰 *Order Summary:*
-Subtotal: ₹${subtotalAmount.toStringAsFixed(2)}
-Delivery Fee: ₹${deliveryFee.toStringAsFixed(2)}
-*Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
-
 Thank you for your order! 🙏
-''';
+━━━━━━━━━━━━━━━━━━━━━
+💳 PAYMENT INFORMATION:
+
+📱 Scan the QR code below to pay
+🔗 ${_generatePaymentUrlWithAmount()}
+
+📲 *Click link above → See Timer & Scan QR*
+⚡ *Fast & Secure Payment*''';
 
     // Encode for URL
     String encodedText = Uri.encodeComponent(orderDetails);
@@ -2896,16 +4349,616 @@ Thank you for your order! 🙏
     }
   }
 
+  // Show confirmation dialog for status changes
+  Future<bool?> _showStatusChangeDialog(String title, String message, IconData icon, Color color) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  icon,
+                  color: color,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            message,
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[700],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Confirm'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Update order status function
+  Future<void> _updateOrderStatus(String newStatus) async {
+    try {
+      // Store old status before updating
+      final oldStatus = order?['order_status'] ?? '';
+      
+      final response = await http.put(
+        Uri.parse('${Config.baseNodeApiUrl}/orders/${widget.orderId}/status'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'order_status': newStatus,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success']) {
+          // Call callback to notify dashboard of status change
+          if (widget.onOrderStatusChanged != null && oldStatus != newStatus) {
+            widget.onOrderStatusChanged!(oldStatus, newStatus);
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Order status updated to $newStatus'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // Refresh order details
+          _fetchOrderDetails(silent: false);
+        } else {
+          setState(() {
+            errorMessage = responseData['message'] ?? 'Failed to update order status';
+            isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = 'Failed to update order status (Status: ${response.statusCode})';
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error updating order status: $e');
+      setState(() {
+        errorMessage = 'Error: ${e.toString()}';
+        isLoading = false;
+      });
+    }
+  }
+
+  // Send WhatsApp payment confirmation receipt to customer
+  Future<void> _sendPaymentConfirmationReceipt() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      
+      if (customerPhone != null && customerPhone != 'N/A') {
+        // Format phone number
+        String formattedPhone = customerPhone.replaceAll(RegExp(r'\D'), '');
+        if (formattedPhone.length == 10) {
+          formattedPhone = '91$formattedPhone';
+        } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+          formattedPhone = '91${formattedPhone.substring(1)}';
+        }
+
+        // Format order date
+        DateTime orderDate;
+        try {
+          orderDate = order!['order_date'] != null 
+              ? DateTime.parse(order!['order_date'])
+              : DateTime.now();
+        } catch (e) {
+          orderDate = DateTime.now();
+        }
+        final formattedDate = '${orderDate.day}/${orderDate.month}/${orderDate.year} at ${orderDate.hour}:${orderDate.minute.toString().padLeft(2, '0')} ${orderDate.hour >= 12 ? 'PM' : 'AM'}';
+
+        // Build product details string with consolidation
+        String productDetails = '';
+        double availableSubtotal = 0.0;
+        
+        try {
+          // Group and consolidate items (include both available and unavailable)
+          final consolidatedItems = _consolidateOrderItems(includeUnavailable: true);
+
+          // Calculate totals for available items only
+          for (var item in consolidatedItems.values) {
+            if (!(item['isUnavailable'] == true)) {
+              final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+              final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+              availableSubtotal += itemPrice * quantity;
+            }
+          }
+
+          // Build product details from consolidated items
+          for (var item in consolidatedItems.values) {
+            if (item != null) {
+              final isUnavailable = item['isUnavailable'] == true;
+              final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+              
+              productDetails += '🔸 *${item['product_name'] ?? 'Product'}*\n';
+              productDetails += '   • Color: ${item['color'] ?? 'N/A'}\n';
+              productDetails += '   • Size: ${item['size'] ?? 'N/A'}\n';
+              productDetails += '   • Quantity: ${item['quantity'] ?? 1}\n';
+              if (isUnavailable) {
+                productDetails += '   • Status: ❌ *UNAVAILABLE*\n';
+              } else {
+                productDetails += '   • Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+                productDetails += '   • Status: ✅ *Available*\n';
+              }
+              if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+                productDetails += '   • Image: ${item['image_url']}\n';
+              }
+              productDetails += '\n';
+            }
+          }
+          
+          // If no available items, add message
+          bool hasAvailableItems = consolidatedItems.values.any((item) => !(item['isUnavailable'] == true));
+          if (!hasAvailableItems) {
+            productDetails = 'No available items in this order.\n';
+          }
+        } catch (e) {
+          print('Error building product details: $e');
+          productDetails = '• Product details unavailable\n';
+        }
+
+        // Calculate totals (use available items subtotal)
+        final subtotal = availableSubtotal;
+        final deliveryFee = _deliveryFee;
+        final totalAmount = subtotal + deliveryFee;
+
+        // Create complete payment confirmation message with order details
+        final message = '''✅ *PAYMENT CONFIRMED* ✅
+
+🎉 Thank you for your payment!
+
+📋 *Order Information:*
+• Order ID: #${widget.orderId}
+• Date: ${formattedDate}
+• Status: Ready for Shipment
+━━━━━━━━━━━━━━━━━━━━━
+
+📦 *Product Details:*
+${productDetails}
+━━━━━━━━━━━━━━━━━━━━━
+
+💰 *Payment Summary:*
+• Subtotal: ₹${subtotal.toStringAsFixed(2)}
+• Delivery: ₹${deliveryFee.toStringAsFixed(2)}
+• *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
+━━━━━━━━━━━━━━━━━━━━━
+
+🏠 Delivery Address:
+${order!['shipping_street'] ?? 'N/A'}
+${(order!['shipping_city'] ?? '') + ', ' + (order!['shipping_state'] ?? '') + ' - ' + (order!['shipping_pincode'] ?? 'N/A')}
+📞 ${customerPhone}
+
+Thank you for your order! 🙏
+━━━━━━━━━━━━━━━━━━━━━
+💳 PAYMENT CONFIRMED:
+
+✅ *Payment Successfully Received*
+• Amount: ₹${totalAmount.toStringAsFixed(2)}
+• Date: ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}
+• Status: ✅ CONFIRMED
+
+🚚 *Shipping Information:*
+Your order is now being prepared for shipment.
+You will receive tracking details once shipped.
+
+📞 *Need Help?*
+Contact us for any order-related queries.
+
+Thank you for choosing BangkokMart! 🙏
+━━━━━━━━━━━━━━━━━━━━━''';
+
+        // Log WhatsApp message
+        await http.post(
+          Uri.parse('https://node-api.bangkokmart.in/api/whatsapp/log-message'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({
+            'order_id': widget.orderId,
+            'phone_number': customerPhone,
+            'message': message,
+            'sent_at': DateTime.now().toIso8601String(),
+            'message_type': 'payment_confirmation_with_details'
+          }),
+        );
+
+        print('WhatsApp payment confirmation with order details sent to $formattedPhone for order ${widget.orderId}');
+      }
+    } catch (error) {
+      print('Error sending WhatsApp payment confirmation: $error');
+      // Don't fail the process if WhatsApp fails
+    }
+  }
+
+  // Process payment and update status
+  Future<void> _processPaymentAndUpdateStatus() async {
+    try {
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text('Processing payment...'),
+            ],
+          ),
+        ),
+      );
+
+      // Update order status to "Ready for Shipment"
+      final response = await http.put(
+        Uri.parse('${Config.baseNodeApiUrl}/orders/${widget.orderId}/status'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'order_status': 'Ready for Shipment',
+          'payment_status': 'Paid',
+        }),
+      );
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success']) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Payment confirmed! Order is ready for shipment.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // Refresh order details
+          _fetchOrderDetails(silent: false);
+        }
+      }
+    } catch (e) {
+      // Close loading dialog if open
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error processing payment: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Send WhatsApp order receipt to customer
+  Future<void> _sendOrderReceiptToCustomer() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      
+      if (customerPhone != null && customerPhone != 'N/A') {
+        // Format phone number
+        String formattedPhone = customerPhone.replaceAll(RegExp(r'\D'), '');
+        if (formattedPhone.length == 10) {
+          formattedPhone = '91$formattedPhone';
+        } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+          formattedPhone = '91${formattedPhone.substring(1)}';
+        }
+
+        // Format order date
+        DateTime orderDate;
+        try {
+          orderDate = order!['order_date'] != null 
+              ? DateTime.parse(order!['order_date'])
+              : DateTime.now();
+        } catch (e) {
+          orderDate = DateTime.now();
+        }
+        final formattedDate = '${orderDate.day}/${orderDate.month}/${orderDate.year} at ${orderDate.hour}:${orderDate.minute.toString().padLeft(2, '0')} ${orderDate.hour >= 12 ? 'PM' : 'AM'}';
+
+        // Check if all items are unavailable
+        bool allItemsUnavailable = orderItems.every((item) => 
+          _itemAvailability[item['id'].toString()] == 'Not Available'
+        );
+
+        // If all items are unavailable, send unavailable message
+        if (allItemsUnavailable) {
+          await _sendUnavailableMessage(null);
+          return;
+        }
+
+        // Build product details string with consolidation
+        String productDetails = '';
+        double availableSubtotal = 0.0;
+        
+        try {
+          // Group and consolidate items (include both available and unavailable)
+          final consolidatedItems = _consolidateOrderItems(includeUnavailable: true);
+
+          // Calculate totals for available items only
+          for (var item in consolidatedItems.values) {
+            if (!(item['isUnavailable'] == true)) {
+              final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+              final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+              availableSubtotal += itemPrice * quantity;
+            }
+          }
+
+          // Build product details from consolidated items
+          for (var item in consolidatedItems.values) {
+            if (item != null) {
+              final isUnavailable = item['isUnavailable'] == true;
+              final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+              
+              productDetails += '🔸 *${item['product_name'] ?? 'Product'}*\n';
+              productDetails += '   • Color: ${item['color'] ?? 'N/A'}\n';
+              productDetails += '   • Size: ${item['size'] ?? 'N/A'}\n';
+              productDetails += '   • Quantity: ${item['quantity'] ?? 1}\n';
+              if (isUnavailable) {
+                productDetails += '   • Status: ❌ *UNAVAILABLE*\n';
+              } else {
+                productDetails += '   • Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+                productDetails += '   • Status: ✅ *Available*\n';
+              }
+              if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+                productDetails += '   • Image: ${item['image_url']}\n';
+              }
+              productDetails += '\n';
+            }
+          }
+          
+          // If no available items, add message
+          bool hasAvailableItems = consolidatedItems.values.any((item) => !(item['isUnavailable'] == true));
+          if (!hasAvailableItems) {
+            productDetails = 'No available items in this order.\n';
+          }
+        } catch (e) {
+          print('Error building product details: $e');
+          productDetails = '• Product details unavailable\n';
+        }
+
+        // Calculate totals (use available items subtotal)
+        final subtotal = availableSubtotal;
+        final deliveryFee = _deliveryFee;
+        final totalAmount = subtotal + deliveryFee;
+
+        // Create complete order receipt message
+        final message = '''🛒 *ORDER DETAILS* 🛒
+📋 *Order Information:*
+• Order ID: #${widget.orderId}
+• Customer: ${order!['customer_name'] ?? 'N/A'}
+• Date: $formattedDate
+━━━━━━━━━━━━━━━━━━━━━
+
+📦 *Product Details:*
+$productDetails
+━━━━━━━━━━━━━━━━━━━━━
+
+💰 *Payment Summary:*
+• Subtotal: ₹${subtotal.toStringAsFixed(2)}
+• Delivery: ₹${deliveryFee.toStringAsFixed(2)}
+• *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
+━━━━━━━━━━━━━━━━━━━━━
+
+🏠 Delivery Address:
+${order!['shipping_street'] ?? 'N/A'}
+${(order!['shipping_city'] ?? '') + ', ' + (order!['shipping_state'] ?? '') + ' - ' + (order!['shipping_pincode'] ?? 'N/A')}
+📞 $customerPhone
+
+Thank you for your order! 🙏
+━━━━━━━━━━━━━━━━━━━━━
+💳 PAYMENT INFORMATION:
+
+📱 Scan the QR code below to pay
+🔗 ${_generatePaymentUrlWithAmount()}
+
+📲 *Click link above → See Timer & Scan QR*
+⚡ *Fast & Secure Payment*''';
+
+        // Send WhatsApp message directly
+        await _sendWhatsAppMessage(formattedPhone, message);
+        
+        print('WhatsApp order receipt sent to $formattedPhone for order ${widget.orderId}');
+      }
+    } catch (error) {
+      print('Error sending WhatsApp order receipt: $error');
+      // Don't fail the process if WhatsApp fails
+    }
+  }
+
+  // Send WhatsApp message
+  Future<void> _sendWhatsAppMessage(String phoneNumber, String message) async {
+    try {
+      // Create WhatsApp deep link
+      final whatsappUrl = 'https://wa.me/$phoneNumber?text=${Uri.encodeComponent(message)}';
+      
+      // Try to open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(
+          Uri.parse(whatsappUrl),
+          mode: LaunchMode.externalApplication,
+        );
+        print('WhatsApp opened successfully for $phoneNumber');
+      } else {
+        // Fallback: copy message to clipboard and show instructions
+        await Clipboard.setData(ClipboardData(text: message));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Message copied to clipboard. Please send it to $phoneNumber manually.'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Open WhatsApp',
+              onPressed: () async {
+                final fallbackUrl = 'https://wa.me/$phoneNumber';
+                if (await canLaunchUrl(Uri.parse(fallbackUrl))) {
+                  await launchUrl(
+                    Uri.parse(fallbackUrl),
+                    mode: LaunchMode.externalApplication,
+                  );
+                }
+              },
+            ),
+          ),
+        );
+        print('Could not open WhatsApp, message copied to clipboard');
+      }
+    } catch (e) {
+      print('Error sending WhatsApp message: $e');
+      // Show manual send option
+      await Clipboard.setData(ClipboardData(text: message));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please send this message to $phoneNumber manually (copied to clipboard)'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  // Generate payment URL with amount for available items only
+  String _generatePaymentUrlWithAmount() {
+    // Calculate available items total
+    double availableSubtotal = 0.0;
+    for (var item in orderItems) {
+      final itemId = item['id'].toString();
+      final isUnavailable = _itemAvailability[itemId] == 'Not Available';
+      
+      if (!isUnavailable) {
+        final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
+        final quantity = int.tryParse(item['quantity'].toString()) ?? 1;
+        availableSubtotal += itemPrice * quantity;
+      }
+    }
+    
+    final totalAmount = availableSubtotal + _deliveryFee;
+    
+    // Generate obfuscated URL without amount parameter
+    // Amount will be shown when user clicks the link
+    String obfuscatedToken = _generateObfuscatedOrderId(widget.orderId);
+    return 'https://node-api.bangkokmart.in/api/whatsapp/payment-qr/$obfuscatedToken';
+  }
+
+  // Generate obfuscated order ID for payment QR link
+  String _generateObfuscatedOrderId(int orderId) {
+    // Create a base string with order ID, timestamp, and random elements
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    String baseString = '${orderId}_$timestamp';
+    
+    // Add random characters for obfuscation
+    for (int i = 0; i < 8; i++) {
+      baseString += '_${(1000 + (orderId * 7) + i * 13) % 10000}';
+    }
+    
+    // Encode to base64 to make it non-obvious
+    List<int> bytes = baseString.codeUnits;
+    String encoded = base64.encode(bytes);
+    
+    // Make it URL-safe and remove padding
+    encoded = encoded.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    
+    // Take only first 12 characters to keep it short but still unique
+    String obfuscatedId = encoded.substring(0, 12);
+    
+    print('🔐 Order ID $orderId obfuscated to: $obfuscatedId');
+    return obfuscatedId;
+  }
+
+  // Auto-refresh methods
+  void _startAutoRefresh() {
+    if (_isAutoRefreshEnabled) {
+      _refreshTimer = Timer.periodic(Duration(seconds: _refreshInterval), (timer) {
+        if (mounted && !_isRefreshing) {
+          _refreshDataSilently();
+        }
+      });
+    }
+  }
+
+  void _stopAutoRefresh() {
+    _refreshTimer?.cancel();
+  }
+
+  void _toggleAutoRefresh() {
+    setState(() {
+      _isAutoRefreshEnabled = !_isAutoRefreshEnabled;
+    });
+    
+    if (_isAutoRefreshEnabled) {
+      _startAutoRefresh();
+    } else {
+      _stopAutoRefresh();
+    }
+  }
+
+  Future<void> _refreshDataSilently() async {
+    setState(() {
+      _isRefreshing = true;
+      _lastRefreshTime = DateTime.now();
+    });
+
+    try {
+      await _fetchOrderDetails(silent: true);
+    } catch (e) {
+      print('Silent refresh error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
+  }
+
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'pending':
+        return Colors.grey;
+      case 'waiting for payment':
         return Colors.orange;
-      case 'confirmed':
+      case 'ready for shipment':
         return Colors.blue;
-      case 'processing':
-        return Colors.purple;
       case 'shipped':
-        return Colors.indigo;
+        return Colors.purple;
       case 'delivered':
         return Colors.green;
       case 'cancelled':
@@ -2914,6 +4967,19 @@ Thank you for your order! 🙏
         return Colors.grey;
       default:
         return Colors.grey;
+    }
+  }
+
+  // Helper method to get availability status color
+  Color _getAvailabilityStatusColor(String status) {
+    switch (status) {
+      case 'Not Available':
+        return Colors.red[700]!;
+      case 'Partial Available':
+        return Colors.orange[700]!;
+      case 'Available':
+      default:
+        return Colors.green[700]!;
     }
   }
 }

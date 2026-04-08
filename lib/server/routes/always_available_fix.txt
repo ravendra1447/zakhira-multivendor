@@ -1,0 +1,29 @@
+// Handle different stock modes
+    if (stockMode === 'always_available') {
+      // Always available products don't use variant management
+      // Just update the main product status
+      const [updateResult] = await pool.execute(`
+        UPDATE products 
+        SET is_active = ?
+        WHERE id = ?
+      `, [
+        is_active ? 1 : 0,
+        productId
+      ]);
+
+      return res.json({
+        success: true,
+        message: 'Always available product status updated successfully',
+        stock_mode: 'always_available',
+        product_updated: {
+          product_id: productId,
+          is_active: is_active ? 1 : 0,
+          stock: 'unlimited'
+        },
+        product_status_updated: {
+          is_active: is_active ? 1 : 0,
+          marketplace_enabled: is_active ? currentProduct.marketplace_enabled : 0
+        },
+        note: 'Always available products do not use variant management'
+      });
+    }

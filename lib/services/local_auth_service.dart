@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
+import '../config.dart';
 
 class LocalAuthService {
   static final _authBox = Hive.box('authBox');
@@ -190,6 +191,33 @@ class LocalAuthService {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {"success": false, "message": "Error: ${e.toString()}"};
+    }
+  }
+
+  /// 8️⃣ Check if current user is admin
+  static Future<bool> isAdmin() async {
+    try {
+      final userId = getUserId();
+      if (userId == null) return false;
+
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/websites/user/$userId'),
+        headers: {"Content-Type": "application/json"},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final websites = data['data'] as List? ?? [];
+        
+        // Check if any website has admin role
+        return websites.any((website) => 
+          website['role']?.toString().toLowerCase() == 'admin'
+        );
+      }
+      return false;
+    } catch (e) {
+      print('Error checking admin status: $e');
+      return false;
     }
   }
 

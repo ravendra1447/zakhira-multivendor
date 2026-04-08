@@ -1,0 +1,500 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:async';
+import '../../config.dart';
+import 'order_detail_screen.dart';
+
+class DeliveredOrdersScreen extends StatefulWidget {
+  final Function(String, String)? onOrderStatusChanged;
+
+  const DeliveredOrdersScreen({super.key, this.onOrderStatusChanged});
+
+  @override
+  State<DeliveredOrdersScreen> createState() => _DeliveredOrdersScreenState();
+}
+
+class _DeliveredOrdersScreenState extends State<DeliveredOrdersScreen> {
+  List<dynamic> orders = [];
+  bool isLoading = true;
+  String? errorMessage;
+  
+  // Auto-refresh variables
+  Timer? _refreshTimer;
+  bool _isAutoRefreshEnabled = true;
+  int _refreshInterval = 10; // seconds
+  DateTime? _lastRefreshTime;
+  bool _isRefreshing = false;
+  
+  // Change detection variables
+  String? _lastOrderHash;
+  int _lastOrderCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDeliveredOrders();
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchDeliveredOrders() async {
+    try {
+      setState(() {
+        isLoading = true;
+        errorMessage = null;
+      });
+
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/orders?status=Delivered'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success']) {
+          final newOrders = responseData['orders'] ?? [];
+          final newOrderCount = newOrders.length;
+          final newOrderHash = _generateOrderHash(newOrders);
+          
+          setState(() {
+            orders = newOrders;
+            isLoading = false;
+            _lastOrderCount = newOrderCount;
+            _lastOrderHash = newOrderHash;
+          });
+        } else {
+          setState(() {
+            errorMessage = responseData['message'] ?? 'Failed to fetch orders';
+            isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = 'Failed to fetch orders (Status: ${response.statusCode})';
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Error: ${e.toString()}';
+        isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.green[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.check_circle_outline,
+                color: Colors.green[700],
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Delivered Orders',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  'Successfully delivered orders',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        backgroundColor: Colors.green[600],
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Go Back',
+        ),
+        actions: [
+          // Auto-refresh toggle
+          IconButton(
+            icon: Icon(
+              _isAutoRefreshEnabled ? Icons.autorenew : Icons.autorenew_outlined,
+              color: _isAutoRefreshEnabled ? Colors.white : Colors.white70,
+            ),
+            onPressed: _toggleAutoRefresh,
+            tooltip: _isAutoRefreshEnabled ? 'Disable Auto-refresh' : 'Enable Auto-refresh',
+          ),
+          // Manual refresh indicator
+          if (_isRefreshing)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : errorMessage != null
+          ? _buildErrorView()
+          : orders.isEmpty
+          ? _buildEmptyView()
+          : _buildOrdersList(),
+    );
+  }
+
+  Widget _buildErrorView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: Colors.red[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            errorMessage ?? 'Something went wrong',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _fetchDeliveredOrders,
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.task_alt_outlined,
+            size: 64,
+            color: Colors.green[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No delivered orders yet',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Orders will appear here after delivery',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrdersList() {
+    return RefreshIndicator(
+      onRefresh: _fetchDeliveredOrders,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: orders.length,
+        itemBuilder: (context, index) {
+          final order = orders[index];
+          return _buildOrderCard(order);
+        },
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(dynamic order) {
+    final orderId = order['id'];
+    final customerName = order['customer_name'] ?? order['display_name'] ?? 'Unknown Customer';
+    final customerPhone = order['customer_phone'] ?? order['shipping_phone'] ?? 'N/A';
+    final totalAmount = double.tryParse(order['total_amount'].toString()) ?? 0.0;
+    final orderDate = order['order_date'] ?? 'N/A';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: Colors.green[200]!),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => OrderDetailScreen(
+                  orderId: orderId,
+                  onOrderStatusChanged: widget.onOrderStatusChanged,
+                ),
+              ),
+            ).then((_) => _fetchDeliveredOrders()); // Refresh when coming back
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Order #$orderId',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            customerName,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.green[100],
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.green[300]!),
+                      ),
+                      child: Text(
+                        'DELIVERED',
+                        style: TextStyle(
+                          color: Colors.green[700],
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.phone_outlined,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      customerPhone,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_today_outlined,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _formatDate(orderDate),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Total Amount',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      '₹${totalAmount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(String dateString) {
+    try {
+      final dateTime = DateTime.parse(dateString);
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    } catch (e) {
+      return dateString;
+    }
+  }
+
+  // Auto-refresh methods
+  void _startAutoRefresh() {
+    if (_isAutoRefreshEnabled) {
+      _refreshTimer = Timer.periodic(Duration(seconds: _refreshInterval), (timer) {
+        if (mounted && !_isRefreshing) {
+          _checkForChangesAndRefresh();
+        }
+      });
+    }
+  }
+
+  void _stopAutoRefresh() {
+    _refreshTimer?.cancel();
+  }
+
+  void _toggleAutoRefresh() {
+    setState(() {
+      _isAutoRefreshEnabled = !_isAutoRefreshEnabled;
+    });
+    
+    if (_isAutoRefreshEnabled) {
+      _startAutoRefresh();
+    } else {
+      _stopAutoRefresh();
+    }
+  }
+
+  Future<void> _checkForChangesAndRefresh() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/orders?status=Delivered'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success']) {
+          final newOrders = responseData['orders'] ?? [];
+          final newOrderCount = newOrders.length;
+          final newOrderHash = _generateOrderHash(newOrders);
+          
+          // Only refresh if there are actual changes
+          if (newOrderCount != _lastOrderCount || newOrderHash != _lastOrderHash) {
+            print('🔄 Changes detected! Refreshing delivered orders...');
+            await _refreshDataSilently();
+          }
+        }
+      }
+    } catch (e) {
+      print('Change check error: $e');
+    }
+  }
+
+  Future<void> _refreshDataSilently() async {
+    setState(() {
+      _isRefreshing = true;
+      _lastRefreshTime = DateTime.now();
+    });
+
+    try {
+      await _fetchDeliveredOrders();
+    } catch (e) {
+      print('Silent refresh error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
+  }
+
+  // Generate hash for orders to detect changes
+  String _generateOrderHash(List<dynamic> orders) {
+    if (orders.isEmpty) return 'empty';
+    
+    final String orderData = orders.map((order) => 
+      '${order['id']}_${order['order_status']}_${order['updated_at']}'
+    ).join('|');
+    
+    return orderData.hashCode.toString();
+  }
+}

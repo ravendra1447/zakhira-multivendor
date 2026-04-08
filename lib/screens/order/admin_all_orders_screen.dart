@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'order_detail_screen.dart';
+import 'admin_shipment_management_screen.dart';
 
 class AdminAllOrdersScreen extends StatefulWidget {
   final List<dynamic> orders;
   final String? initialFilter;
+  final String? websiteFilter;
 
   const AdminAllOrdersScreen({
     super.key,
     required this.orders,
     this.initialFilter,
+    this.websiteFilter,
   });
 
   @override
@@ -26,6 +29,7 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
     super.initState();
     _populateWebsiteFilters();
     _setInitialFilter();
+    _selectedWebsite = widget.websiteFilter; // Set initial website filter
   }
 
   void _setInitialFilter() {
@@ -48,8 +52,8 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
   }
 
   void _populateWebsiteFilters() {
-    // Hardcode only BangkokMart and zakhira websites
-    _websiteFilters = ['All', 'BangkokMart', 'zakhira'];
+    // Hardcode only BangkokMart and Zakhira websites
+    _websiteFilters = ['All', 'BangkokMart', 'Zakhira'];
     _selectedWebsite = 'All'; // Initialize with 'All' selected
   }
 
@@ -101,12 +105,14 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
   }
 
   final List<String> _statusOptions = [
-    'All',
+    'Pending',
     'Today',
     'Yesterday',
-    'Pending',
-    'Processing',
-    'Completed',
+    'All',
+    'Waiting for Payment',
+    'Ready for Shipment',
+    'Shipped',
+    'Delivered',
     'Cancelled'
   ];
 
@@ -128,6 +134,20 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
         iconTheme: const IconThemeData(
           color: Colors.black,
         ),
+        actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AdminShipmentManagementScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.local_shipping),
+            tooltip: 'Shipment Management',
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Container(
@@ -137,38 +157,7 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  // Website Filters
-                  ..._websiteFilters.map((website) {
-                    final isSelected = website == _selectedWebsite;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        label: Text(
-                          website,
-                          style: TextStyle(
-                            fontSize: 12,
-                          ),
-                        ),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          setState(() {
-                            _selectedWebsite = website;
-                          });
-                        },
-                        backgroundColor: Colors.white,
-                        selectedColor: Colors.blue.shade100,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.blue.shade700 : Colors.black87,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                        ),
-                        side: BorderSide(
-                          color: isSelected ? Colors.blue : Colors.grey[300]!,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                  
-                  // Status Filters
+                  // Status Filters (First)
                   ..._statusOptions.map((status) {
                     final isSelected = status == _selectedStatus;
                     return Padding(
@@ -194,6 +183,37 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
                         ),
                         side: BorderSide(
                           color: isSelected ? Colors.purple : Colors.grey[300]!,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  
+                  // Website Filters (Second)
+                  ..._websiteFilters.map((website) {
+                    final isSelected = website == _selectedWebsite;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: FilterChip(
+                        label: Text(
+                          website,
+                          style: TextStyle(
+                            fontSize: 12,
+                          ),
+                        ),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setState(() {
+                            _selectedWebsite = website;
+                          });
+                        },
+                        backgroundColor: Colors.white,
+                        selectedColor: Colors.blue.shade100,
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.blue.shade700 : Colors.black87,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        side: BorderSide(
+                          color: isSelected ? Colors.blue : Colors.grey[300]!,
                         ),
                       ),
                     );
@@ -445,14 +465,18 @@ class _AdminAllOrdersScreenState extends State<AdminAllOrdersScreen> {
 
   Color _getStatusColor(String? status) {
     switch (status?.toLowerCase()) {
-      case 'completed':
+      case 'delivered':
         return Colors.green;
       case 'cancelled':
         return Colors.red;
       case 'pending':
+        return Colors.grey;
+      case 'waiting for payment':
         return Colors.orange;
-      case 'processing':
+      case 'ready for shipment':
         return Colors.blue;
+      case 'shipped':
+        return Colors.purple;
       default:
         return Colors.grey;
     }

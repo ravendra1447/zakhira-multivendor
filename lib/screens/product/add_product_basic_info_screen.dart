@@ -60,7 +60,7 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
   List<Map<String, dynamic>> _websites = []; // List of available websites
   List<int> _selectedWebsiteIds = []; // Selected website IDs
   // Stock management
-  String _stockMode = 'simple'; // 'simple', 'color_size', or 'always_available'
+  String _stockMode = 'always_available'; // 'simple', 'color_size', or 'always_available'
   String? _selectedColorForStock;
   final Map<String, Map<String, int>> _stockByColorSize = {}; // {color: {size: qty}}
   final TextEditingController _quickStockController = TextEditingController();

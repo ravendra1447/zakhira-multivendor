@@ -111,9 +111,9 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending':
+      case 'waiting for payment':
         return Colors.orange;
-      case 'confirmed':
+      case 'ready for shipment':
         return Colors.blue;
       case 'shipped':
         return Colors.purple;

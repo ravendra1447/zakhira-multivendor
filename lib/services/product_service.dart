@@ -126,6 +126,7 @@ class ProductService {
         marketplaceEnabled: productData['marketplaceEnabled'] == true,
         stockMode: stockMode,
         stockByColorSize: stockByColorSizeTyped,
+        price: double.tryParse(productData['price']?.toString() ?? '0') ?? 0.0,
       );
 
       // Save to local database IMMEDIATELY (INSTANT)
@@ -545,7 +546,7 @@ class ProductService {
     }
   }
 
-  /// Get single product by ID
+  /// Get single product by ID (for editing - uses profile endpoint with attributes)
   static Future<Map<String, dynamic>> getProduct(int productId) async {
     try {
       final userId = LocalAuthService.getUserId();
@@ -553,10 +554,9 @@ class ProductService {
         return {"success": false, "message": "User not logged in"};
       }
 
-      final response = await http.post(
-        Uri.parse("$baseUrl/products/get"),
+      final response = await http.get(
+        Uri.parse("$baseUrl/profile/products/$productId/edit-data?userId=$userId"),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({'user_id': userId, 'product_id': productId}),
       );
 
       return jsonDecode(response.body) as Map<String, dynamic>;

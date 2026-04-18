@@ -332,6 +332,7 @@ class MyFirebaseMessagingService {
                   sizes: [],
                   attributes: {},
                   selectedAttributeValues: {},
+                  price: 0.0,
                   marketplaceEnabled: true,
                   stockMode: 'simple',
                   stockByColorSize: null,
@@ -449,6 +450,7 @@ class MyFirebaseMessagingService {
               sizes: productData['sizes'] is List
                   ? (productData['sizes'] as List).map((item) => item.toString()).toList()
                   : [],
+              price: double.tryParse(productData['price']?.toString() ?? '0') ?? 0.0,
               marketplaceEnabled: (productData['marketplaceEnabled'] is bool
                   ? productData['marketplaceEnabled']
                   : (productData['marketplaceEnabled'] is int

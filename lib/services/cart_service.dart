@@ -70,6 +70,7 @@ class CartService {
               variations: [], // Empty variations
               sizes: [item['size']], // Use item size
               images: item['image_url'] != null ? [item['image_url']] : [],
+              price: double.tryParse(item['price'].toString()) ?? 0.0,
             );
             
             _cartItems.add(CartItem(

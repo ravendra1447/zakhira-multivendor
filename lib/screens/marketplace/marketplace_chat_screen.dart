@@ -831,6 +831,7 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
           priceSlabs: [],
           attributes: {},
           selectedAttributeValues: {},
+          price: productInfo?.price ?? 0.0,
           variations: [
             {
               'name': productInfo?.productName ?? 'Product $productId',
@@ -878,6 +879,7 @@ class _MarketplaceChatScreenState extends State<MarketplaceChatScreen> {
           priceSlabs: [],
           attributes: {},
           selectedAttributeValues: {},
+          price: productInfo.price,
           variations: [
             {
               'name': productInfo.productName,

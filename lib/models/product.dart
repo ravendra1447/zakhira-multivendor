@@ -22,6 +22,10 @@ class Product {
   final String? sellerName; // Seller name for cart grouping
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final double price; // Product price
+  final bool alwaysAvailable; // Always available or not
+  final String? dispatchTime; // Dispatch time for made to order
+  final bool showMadeOnOrderBadge; // Show made on order badge
 
   Product({
     this.id,
@@ -45,6 +49,10 @@ class Product {
     this.sellerName,
     this.createdAt,
     this.updatedAt,
+    required this.price,
+    this.alwaysAvailable = false,
+    this.dispatchTime,
+    this.showMadeOnOrderBadge = false,
   });
 
   // Convert to Map for database
@@ -70,6 +78,10 @@ class Product {
       'product_insta_url': instagramUrl,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
+      'price': price,
+      'always_available': alwaysAvailable ? 1 : 0,
+      'dispatch_time': dispatchTime,
+      'show_made_on_order_badge': showMadeOnOrderBadge ? 1 : 0,
     };
   }
 
@@ -117,15 +129,24 @@ class Product {
                     return MapEntry(k.toString(), <String>[]);
                   }))
               : {},
-      selectedAttributeValues: (map['selected_attribute_values'] is String)
-          ? (map['selected_attribute_values'] as String).isNotEmpty
+      selectedAttributeValues: (map['selectedAttributeValues'] != null)
+          ? (map['selectedAttributeValues'] is Map)
               ? Map<String, String>.from(
-                  jsonDecode(map['selected_attribute_values'] as String))
-              : {}
-          : (map['selected_attribute_values'] != null && map['selected_attribute_values'] is Map)
-              ? Map<String, String>.from(
-                  (map['selected_attribute_values'] as Map).map((k, v) => MapEntry(k.toString(), v.toString())))
-              : {},
+                  (map['selectedAttributeValues'] as Map).map((k, v) => MapEntry(k.toString(), v.toString())))
+              : (map['selectedAttributeValues'] is String)
+                  ? (map['selectedAttributeValues'] as String).isNotEmpty
+                      ? Map<String, String>.from(jsonDecode(map['selectedAttributeValues'] as String))
+                      : {}
+                  : {}
+          : (map['selected_attribute_values'] is String)
+              ? (map['selected_attribute_values'] as String).isNotEmpty
+                  ? Map<String, String>.from(
+                      jsonDecode(map['selected_attribute_values'] as String))
+                  : {}
+              : (map['selected_attribute_values'] != null && map['selected_attribute_values'] is Map)
+                  ? Map<String, String>.from(
+                      (map['selected_attribute_values'] as Map).map((k, v) => MapEntry(k.toString(), v.toString())))
+                  : {},
       variations: (map['variations'] is String)
           ? (map['variations'] as String).isNotEmpty
               ? List<Map<String, dynamic>>.from(
@@ -189,6 +210,16 @@ class Product {
       updatedAt: map['updated_at'] != null
           ? DateTime.parse(map['updated_at'] as String)
           : null,
+      price: (map['price'] is String) 
+          ? double.tryParse(map['price'] as String) ?? 0.0
+          : (map['price'] as num?)?.toDouble() ?? 0.0,
+      alwaysAvailable: map['always_available'] != null
+          ? (map['always_available'] == 1 || map['always_available'] == true)
+          : false,
+      dispatchTime: map['dispatch_time'] as String?,
+      showMadeOnOrderBadge: map['show_made_on_order_badge'] != null
+          ? (map['show_made_on_order_badge'] == 1 || map['show_made_on_order_badge'] == true)
+          : false,
     );
   }
 
@@ -240,6 +271,10 @@ class Product {
     String? instagramUrl,
     DateTime? createdAt,
     DateTime? updatedAt,
+    double? price,
+    bool? alwaysAvailable,
+    String? dispatchTime,
+    bool? showMadeOnOrderBadge,
   }) {
     return Product(
       id: id ?? this.id,
@@ -262,25 +297,29 @@ class Product {
       instagramUrl: instagramUrl ?? this.instagramUrl,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      price: price ?? this.price,
+      alwaysAvailable: alwaysAvailable ?? this.alwaysAvailable,
+      dispatchTime: dispatchTime ?? this.dispatchTime,
+      showMadeOnOrderBadge: showMadeOnOrderBadge ?? this.showMadeOnOrderBadge,
     );
   }
 
   // Get the lowest price from price slabs
-  double? get price {
-    if (priceSlabs.isEmpty) return null;
+  double? get lowestPrice {
+    if (priceSlabs.isEmpty) return price;
     
-    double? lowestPrice;
+    double? lowestSlabPrice;
     for (final slab in priceSlabs) {
       if (slab['price'] != null) {
-        final price = double.tryParse(slab['price'].toString());
-        if (price != null) {
-          if (lowestPrice == null || price < lowestPrice) {
-            lowestPrice = price;
+        final slabPrice = double.tryParse(slab['price'].toString());
+        if (slabPrice != null) {
+          if (lowestSlabPrice == null || slabPrice < lowestSlabPrice) {
+            lowestSlabPrice = slabPrice;
           }
         }
       }
     }
-    return lowestPrice;
+    return lowestSlabPrice ?? price;
   }
 
   // Get minimum order quantity from price slabs
@@ -297,6 +336,11 @@ class Product {
       }
     }
     return minMoq;
+  }
+
+  @override
+  String toString() {
+    return 'Product{id: $id, name: $name, selectedAttributeValues: $selectedAttributeValues, attributes: $attributes}';
   }
 }
 

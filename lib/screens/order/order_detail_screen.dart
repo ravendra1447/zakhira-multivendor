@@ -939,7 +939,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               GestureDetector(
                 onTap: () {
                   setState(() {
+                    final wasTurningOn = !_showManualStockMode;
                     _showManualStockMode = !_showManualStockMode;
+                    
+                    // Auto-enable manual stock for items when turning ON
+                    if (wasTurningOn) {
+                      for (var item in orderItems) {
+                        final itemId = item['id'].toString();
+                        final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+                        final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
+                        
+                        // Enable manual stock if quantity is different from requested
+                        if (manualStockQuantity != requestedQuantity && manualStockQuantity > 0) {
+                          _useManualStock[itemId] = true;
+                          print('Auto-enabled manual stock for item $itemId: $manualStockQuantity vs $requestedQuantity');
+                        }
+                      }
+                    }
                   });
                 },
                 child: Container(
@@ -962,14 +978,54 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
           const SizedBox(height: 12),
           if (_showManualStockMode) ...[
-            Text(
-              'Set available quantities manually for each item:',
-              style: TextStyle(
-                fontSize: 13,
-                color: Color(0xFF616161), // Colors.grey[700]
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Set available quantities manually for each item:',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF616161), // Colors.grey[700]
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      // Enable manual stock for all items
+                      for (var item in orderItems) {
+                        final itemId = item['id'].toString();
+                        _useManualStock[itemId] = true;
+                        print('Manually enabled manual stock for item $itemId');
+                      }
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Manual stock enabled for all items'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green[600],
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Text(
+                      'Enable All',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             // Manual stock controls for unique items only
             Container(
               constraints: BoxConstraints(maxHeight: 300),
@@ -1195,8 +1251,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                       }
                                     }
                                   });
-                                  // Auto-enable manual stock if quantity is changed
-                                  final shouldEnableManualStock = !useManualStock && newQuantity != requestedQuantity;
+                                  // Auto-enable manual stock if quantity is changed OR if global toggle is ON
+                                  final shouldEnableManualStock = (!useManualStock && newQuantity != requestedQuantity) || (_showManualStockMode && !useManualStock);
                                   final finalUseManualStock = shouldEnableManualStock ? true : useManualStock;
                                   _updateManualStockOnServer(itemId, newQuantity, finalUseManualStock);
                                   
@@ -1204,6 +1260,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   if (shouldEnableManualStock) {
                                     setState(() {
                                       _useManualStock[itemId] = true;
+                                      print('Auto-enabled manual stock for item $itemId (decrease): newQuantity=$newQuantity, requested=$requestedQuantity, globalToggle=$_showManualStockMode');
                                     });
                                   }
                                   _recalculateTotals();
@@ -1253,8 +1310,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     }
                                   }
                                 });
-                                // Auto-enable manual stock if quantity is changed
-                                final shouldEnableManualStock = !useManualStock && newQuantity != requestedQuantity;
+                                // Auto-enable manual stock if quantity is changed OR if global toggle is ON
+                                final shouldEnableManualStock = (!useManualStock && newQuantity != requestedQuantity) || (_showManualStockMode && !useManualStock);
                                 final finalUseManualStock = shouldEnableManualStock ? true : useManualStock;
                                 _updateManualStockOnServer(itemId, newQuantity, finalUseManualStock);
                                 
@@ -1262,6 +1319,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 if (shouldEnableManualStock) {
                                   setState(() {
                                     _useManualStock[itemId] = true;
+                                    print('Auto-enabled manual stock for item $itemId (increase): newQuantity=$newQuantity, requested=$requestedQuantity, globalToggle=$_showManualStockMode');
                                   });
                                 }
                                 _recalculateTotals();
@@ -4086,12 +4144,14 @@ Thank you for your order! 🙏
       final size = item['size']?.toString() ?? '';
       final availabilityStatus = _itemAvailability[itemId] ?? 'Available';
       final isUnavailable = availabilityStatus == 'Not Available';
-      final useManualStock = _useManualStock[itemId] ?? false;
+      final useManualStock = (_useManualStock[itemId] ?? false) && _showManualStockMode;
       final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
       final requestedQuantity = int.tryParse(item['quantity'].toString()) ?? 1;
       final itemPrice = double.tryParse(item['price'].toString()) ?? 0.0;
       
       print('🔍 Processing item $itemId:');
+      print('   - _showManualStockMode: $_showManualStockMode');
+      print('   - _useManualStock[$itemId]: ${_useManualStock[itemId]}');
       print('   - useManualStock: $useManualStock');
       print('   - manualStockQuantity: $manualStockQuantity');
       print('   - requestedQuantity: $requestedQuantity');
@@ -4118,7 +4178,7 @@ Thank you for your order! 🙏
       
       // Use manual quantity if enabled, otherwise use requested quantity
       int actualQuantity;
-      if (useManualStock) {
+      if ((_useManualStock[itemId] ?? false) && _showManualStockMode) {
         actualQuantity = manualStockQuantity;
         consolidatedItem['hasManualStock'] = true;
         consolidatedItem['manualQuantity'] += manualStockQuantity;
@@ -4136,6 +4196,12 @@ Thank you for your order! 🙏
       final item = consolidatedItems[key]!;
       print('   $key: hasManualStock=${item['hasManualStock']}, displayQuantity=${item['displayQuantity']}, manualQuantity=${item['manualQuantity']}');
     }
+    
+    // Check if any items have manual stock enabled
+    bool hasAnyManualStock = consolidatedItems.values.any((item) => item['hasManualStock'] == true);
+    
+    print('🔔 GLOBAL MANUAL STOCK MODE: $_showManualStockMode');
+    print('🔔 HAS ANY MANUAL STOCK: $hasAnyManualStock');
 
     // Calculate totals for available items only
     double availableSubtotal = 0.0;
@@ -4153,6 +4219,7 @@ Thank you for your order! 🙏
 • Order ID: #${widget.orderId}
 • Customer: ${order!['customer_name'] ?? 'N/A'}
 • Date: ${_formatDateWithAmPm(order!['order_date'])}
+${hasAnyManualStock ? '🔔 *Status: Manual Stock Applied*' : ''}
 ━━━━━━━━━━━━━━━━━━━━━
 
 📦 *Product Details:*
@@ -4167,21 +4234,40 @@ Thank you for your order! 🙏
       final manualQuantity = int.tryParse(item['manualQuantity'].toString()) ?? 0;
       final requestedQuantity = int.tryParse(item['requestedQuantity'].toString()) ?? 0;
       
-      // Build quantity information
+      // Build quantity information with manual stock details
       String quantityInfo = '';
+      String priceInfo = '';
+      String statusInfo = '';
+      
       if (hasManualStock) {
-        quantityInfo = '   Manual Stock: $manualQuantity\n   Requested Quantity: $requestedQuantity\n';
+        // Manual stock is enabled - show detailed breakdown
+        quantityInfo = '   📦 *Available Quantity: $manualQuantity*\n   📝 Requested Quantity: $requestedQuantity\n';
+        
+        // Calculate price based on available quantity
+        final availableTotal = itemPrice * manualQuantity;
+        final requestedTotal = itemPrice * requestedQuantity;
+        priceInfo = '   💰 Available Total: ₹${availableTotal.toStringAsFixed(2)}\n   📋 Requested Total: ₹${requestedTotal.toStringAsFixed(2)}\n   💵 Unit Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+        
+        // Status based on manual stock
+        if (manualQuantity == 0) {
+          statusInfo = '   ⚠️ Status: *OUT OF STOCK*\n';
+        } else if (manualQuantity < requestedQuantity) {
+          statusInfo = '   ⚡ Status: *PARTIALLY AVAILABLE*\n';
+        } else {
+          statusInfo = '   ✅ Status: *FULLY AVAILABLE*\n';
+        }
       } else {
-        quantityInfo = '   Quantity: $quantity\n';
+        // Normal stock - show regular quantity
+        quantityInfo = '   📦 Quantity: $quantity\n';
+        priceInfo = '   💰 Total: ₹${(itemPrice * quantity).toStringAsFixed(2)}\n   💵 Unit Price: ₹${itemPrice.toStringAsFixed(2)}\n';
+        statusInfo = '   ${isUnavailable ? '⚠️ Status: *UNAVAILABLE*' : '✅ Status: *Available*'}\n';
       }
       
       orderDetails += '''
 🔸 *${item['product_name'] ?? 'Product'}*
-   • Color: ${item['color'] ?? 'N/A'}
-   • Size: ${item['size'] ?? 'N/A'}
-$quantityInfo   Price: ₹${itemPrice.toStringAsFixed(2)}
-   ${isUnavailable ? 'Status:  *UNAVAILABLE*' : 'Status:  *Available*'}
-   Image: ${item['image_url'] ?? 'N/A'}
+   • 🎨 Color: ${item['color'] ?? 'N/A'}
+   • 📏 Size: ${item['size'] ?? 'N/A'}
+$quantityInfo$priceInfo$statusInfo   🖼️ Image: ${item['image_url'] ?? 'N/A'}
 
 ''';
     }
@@ -4189,23 +4275,39 @@ $quantityInfo   Price: ₹${itemPrice.toStringAsFixed(2)}
     // Calculate totals with delivery fee (only for available items)
     final deliveryFee = _deliveryFee;
     final totalAmount = availableSubtotal + deliveryFee;
+    
+    String paymentSummary = '''━━━━━━━━━━━━━━━━━━━━━
 
-    orderDetails += '''━━━━━━━━━━━━━━━━━━━━━
+💰 *Payment Summary:*''';
+    
+    if (hasAnyManualStock) {
+      paymentSummary += '''
+📋 *Based on Available Quantities:*
+• Available Subtotal: ₹${availableSubtotal.toStringAsFixed(2)}
+• Delivery Fee: ₹${deliveryFee.toStringAsFixed(2)}
+• 💳 *Total Payable: ₹${totalAmount.toStringAsFixed(2)}*
 
-💰 *Payment Summary:*
+🔔 *Note: Some items have manual stock adjustments*''';
+    } else {
+      paymentSummary += '''
 • Subtotal: ₹${availableSubtotal.toStringAsFixed(2)}
 • Delivery: ₹${deliveryFee.toStringAsFixed(2)}
-• *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*
-━━━━━━━━━━━━━━━━━━━━━
+• 💳 *Total Amount: ₹${totalAmount.toStringAsFixed(2)}*''';
+    }
+    
+    paymentSummary += '''
+━━━━━━━━━━━━━━━━━━━━━''';
+    
+    orderDetails += paymentSummary + '''
 
-🏠 Delivery Address:
+🏠 *Delivery Address:*
 ${order!['shipping_street'] ?? 'N/A'}
 ${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${order!['shipping_pincode'] ?? 'N/A'}
 📞 ${order!['shipping_phone'] ?? 'N/A'}
 
 Thank you for your order! 🙏
 ━━━━━━━━━━━━━━━━━━━━━
-💳 PAYMENT INFORMATION:
+💳 *PAYMENT INFORMATION:*
 
 📱 Scan the QR code below to pay
 🔗 ${_generatePaymentUrlWithAmount()}
@@ -4787,7 +4889,7 @@ ${(order!['shipping_city'] ?? '') + ', ' + (order!['shipping_state'] ?? '') + ' 
 
 Thank you for your order! 🙏
 ━━━━━━━━━━━━━━━━━━━━━
-💳 PAYMENT INFORMATION:
+💳 *PAYMENT INFORMATION:*
 
 📱 Scan the QR code below to pay
 🔗 ${_generatePaymentUrlWithAmount()}

@@ -205,6 +205,7 @@ class _WebsiteProductsScreenState extends State<WebsiteProductsScreen> {
                         : [],
                     marketplaceEnabled: product['marketplace_enabled'] == 1 || product['marketplace_enabled'] == true,
                     stockMode: product['stock_mode'] ?? 'simple',
+                    price: double.tryParse(product['price']?.toString() ?? '0') ?? 0.0,
                     stockByColorSize: product['stock_by_color_size'] is Map
                         ? Map<String, Map<String, int>>.from(product['stock_by_color_size'])
                         : null,

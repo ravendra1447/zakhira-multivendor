@@ -42,6 +42,7 @@ import '../models/product.dart';
 import 'order/my_orders_screen.dart';
 import 'order/dashboard_screen.dart';
 import 'product/detail/product_detail_screen.dart';
+import 'product/edit_product_screen.dart';
 import 'marketplace/marketplace_tab.dart';
 import 'seller/seller_dashboard_screen.dart'; // Update path to seller folder
 import 'insta_pages_screen.dart';
@@ -1403,6 +1404,9 @@ class _ProfileTabState extends State<ProfileTab> {
   String _selectedTab = 'Grid'; // Grid, Reels, or Profile
   List<Product> _publishedProducts = []; // Changed to List<Product>
   bool _loadingProducts = false;
+  bool _isSelectionMode = false;
+  Set<String> _selectedProductIds = <String>{}; // Changed from Set<int> to Set<String>
+  bool _isProcessingSelection = false; // Add debouncing flag
 
   @override
   void initState() {
@@ -2121,6 +2125,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 'imageUrl': lastImage,
                 'imageIndex': imageIndex,
                 'allImages': allImages,
+                'uniqueId': '${product.id}_${variation['name']}_${imageIndex}',
               });
 
               print("   ✅ Added to grid: ${variation['name']}, Images: ${allImages.length}");
@@ -2166,94 +2171,175 @@ class _ProfileTabState extends State<ProfileTab> {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.all(2.0),
-      child: GridView.builder(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 2,
-          mainAxisSpacing: 2,
-        ),
-        itemCount: gridItems.length,
-        itemBuilder: (context, index) {
-          final item = gridItems[index];
-          final product = item['product'] as Product;
-          final variation = item['variation'] as Map<String, dynamic>;
-          final imageUrl = item['imageUrl'] as String;
-          final imageIndex = item['imageIndex'] as int;
-
-          final allImages = item['allImages'] as List<String>;
-          final totalImages = allImages.length;
-
-          return GestureDetector(
-            onTap: () {
-              // Debug: Print variation data before navigation
-              print('🔍 Navigating to product detail:');
-              print('  Product: ${product.name}');
-              print('  Variation name: ${variation['name']}');
-              print('  Total images in grid: $totalImages');
-              print('  Image index: $imageIndex');
-
-              // Navigate to product detail page
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ProductDetailScreen(
-                    product: product,
-                    variation: variation,
-                    initialImageIndex: imageIndex,
+    return Column(
+      children: [
+        // Selection mode header
+        if (_isSelectionMode)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.blue.shade50,
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: _disableSelectionMode,
+                  icon: const Icon(Icons.close),
+                ),
+                Expanded(
+                  child: Text(
+                    '${_selectedProductIds.length} selected',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-              );
-            },
-            child: ClipRect(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.grey.shade200,
-                      child: _buildImageWidget(imageUrl),
-                    ),
+                if (_selectedProductIds.isNotEmpty)
+                  IconButton(
+                    onPressed: _deleteSelectedProducts,
+                    icon: const Icon(Icons.delete, color: Colors.red),
                   ),
-                  // Image count badge on bottom right
-                  if (totalImages > 1)
-                    Positioned(
-                      bottom: 4,
-                      right: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.75),
-                          borderRadius: BorderRadius.circular(6),
+              ],
+            ),
+          ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(2.0),
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 2,
+                mainAxisSpacing: 2,
+              ),
+              itemCount: gridItems.length,
+              itemBuilder: (context, index) {
+                final item = gridItems[index];
+                final product = item['product'] as Product;
+                final variation = item['variation'] as Map<String, dynamic>;
+                final imageUrl = item['imageUrl'] as String;
+                final imageIndex = item['imageIndex'] as int;
+                final uniqueId = item['uniqueId'] as String;
+
+                final allImages = item['allImages'] as List<String>;
+                final totalImages = allImages.length;
+
+                return GestureDetector(
+                  onLongPress: () {
+                    _showProductOptions(context, product, variation);
+                  },
+                  onTap: () {
+                    if (_isSelectionMode) {
+                      // Prevent multiple rapid taps
+                      if (mounted) {
+                        _toggleProductSelection(uniqueId);
+                      }
+                    } else {
+                      // Debug: Print variation data before navigation
+                      print('???? Navigating to product detail:');
+                      print('  Product: ${product.name}');
+                      print('  Variation name: ${variation['name']}');
+                      print('  Total images in grid: $totalImages');
+                      print('  Image index: $imageIndex');
+
+                      // Navigate to product detail page
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ProductDetailScreen(
+                            product: product,
+                            variation: variation,
+                            initialImageIndex: imageIndex,
+                          ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.photo_library,
-                              color: Colors.white,
-                              size: 14,
+                      );
+                    }
+                  },
+                  child: ClipRect(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.grey.shade200,
+                            child: _buildImageWidget(imageUrl),
+                          ),
+                        ),
+                        // Selection mode overlay
+                        if (_isSelectionMode)
+                          Positioned.fill(
+                            child: Container(
+                              color: _selectedProductIds.contains(uniqueId)
+                                  ? Colors.blue.withOpacity(0.3)
+                                  : Colors.black.withOpacity(0.2),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '$totalImages',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                          ),
+                        // Selection checkbox
+                        if (_isSelectionMode)
+                          Positioned(
+                            top: 4,
+                            left: 4,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: _selectedProductIds.contains(uniqueId)
+                                    ? Colors.blue
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: Colors.blue,
+                                  width: 2,
+                                ),
+                              ),
+                              child: _selectedProductIds.contains(uniqueId)
+                                  ? const Icon(
+                                      Icons.check,
+                                      color: Colors.white,
+                                      size: 16,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        // Image count badge on bottom right
+                        if (totalImages > 1)
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.75),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.photo_library,
+                                    color: Colors.white,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$totalImages',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                      ],
                     ),
-                ],
-              ),
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2269,5 +2355,387 @@ class _ProfileTabState extends State<ProfileTab> {
       fadeInDuration: const Duration(milliseconds: 150),
       placeholder: '...',
     );
+  }
+
+  // Toggle product selection
+  void _toggleProductSelection(String uniqueId) {
+    // Add debouncing to prevent multiple rapid selections
+    if (!mounted || _isProcessingSelection) return;
+    
+    setState(() {
+      _isProcessingSelection = true;
+      if (_selectedProductIds.contains(uniqueId)) {
+        _selectedProductIds.remove(uniqueId);
+      } else {
+        _selectedProductIds.add(uniqueId);
+      }
+    });
+    
+    // Reset processing flag after delay to prevent rapid multiple selections
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _isProcessingSelection = false;
+        });
+      }
+    });
+  }
+
+  // Show product options (edit/delete)
+  void _showProductOptions(BuildContext context, Product product, Map<String, dynamic> variation) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Row(
+                  children: [
+                    // Product image
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 60,
+                        height: 60,
+                        color: Colors.grey[200],
+                        child: variation['image'] != null
+                            ? Image.network(
+                                variation['image'],
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return const Icon(Icons.image, color: Colors.grey);
+                                },
+                              )
+                            : const Icon(Icons.image, color: Colors.grey),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Product info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            product.name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Rs. ${product.price}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (variation['name'] != null && variation['name'] != product.name)
+                            Text(
+                              variation['name'],
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Options
+              ListTile(
+                leading: const Icon(Icons.edit, color: Colors.blue),
+                title: const Text('Edit Product'),
+                subtitle: const Text('Edit price and description'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _editProduct(product);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete Product'),
+                subtitle: const Text('Remove from profile'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteProduct(product, variation);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.select_all, color: Colors.orange),
+                title: const Text('Select Multiple'),
+                subtitle: const Text('Choose multiple products to delete'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _enableSelectionMode();
+                },
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Edit product
+  void _editProduct(Product product) async {
+    dynamic result;
+    
+    print('=== EDIT PRODUCT DEBUG ===');
+    print('DEBUG: Original product ID: ${product.id}');
+    print('DEBUG: Original product attributes: ${product.selectedAttributeValues}');
+    print('DEBUG: Original product attributes field: ${product.attributes}');
+    
+    // Fetch fresh product data with attributes before editing
+    try {
+      print('DEBUG: Fetching fresh product data from server...');
+      final productResult = await ProductService.getProduct(product.id!);
+      print('DEBUG: Product service result: $productResult');
+      
+      if (productResult['success'] == true && productResult['data'] != null) {
+        // Create updated Product object with fresh data
+        final freshProductData = productResult['data'];
+        print('DEBUG: Fresh product data: $freshProductData');
+        print('DEBUG: Fresh selectedAttributeValues: ${freshProductData['selectedAttributeValues']}');
+        print('DEBUG: Fresh attributes: ${freshProductData['attributes']}');
+        
+        final updatedProduct = Product.fromMap(freshProductData);
+        print('DEBUG: Updated product object: ${updatedProduct.selectedAttributeValues}');
+        
+        result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => EditProductScreen(
+              product: updatedProduct,
+            ),
+          ),
+        );
+      } else {
+        print('DEBUG: Failed to get fresh data, using original product');
+        print('DEBUG: Error: ${productResult['message']}');
+        // Fallback to original product if fetch fails
+        result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => EditProductScreen(
+              product: product,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('ERROR: Exception fetching fresh product data: $e');
+      // Fallback to original product on error
+      result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => EditProductScreen(
+            product: product,
+          ),
+        ),
+      );
+    }
+    
+    print('==========================');
+
+    if (result == true) {
+      // Product was updated successfully, refresh the list
+      _loadPublishedProductsFromServer(silent: true);
+    }
+  }
+
+  // Delete single product
+  void _deleteProduct(Product product, Map<String, dynamic> variation) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Product'),
+        content: Text('Are you sure you want to delete "${product.name}"? This will remove it from your profile.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performDeleteProduct(product.id!);
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Perform product deletion
+  void _performDeleteProduct(int productId) async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        throw Exception('User not logged in');
+      }
+
+      final response = await http.delete(
+        Uri.parse('${Config.baseNodeApiUrl}/profile/products/$productId/hard'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'userId': userId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['success'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Product deleted successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            // Refresh the products list
+            _loadPublishedProductsFromServer(silent: true);
+          }
+        } else {
+          throw Exception(result['message'] ?? 'Failed to delete product');
+        }
+      } else {
+        throw Exception('Server error: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Enable selection mode
+  void _enableSelectionMode() {
+    setState(() {
+      _isSelectionMode = true;
+      _selectedProductIds.clear();
+    });
+  }
+
+  // Disable selection mode
+  void _disableSelectionMode() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedProductIds.clear();
+    });
+  }
+
+  // Delete selected products
+  void _deleteSelectedProducts() {
+    if (_selectedProductIds.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete ${_selectedProductIds.length} Products'),
+        content: Text('Are you sure you want to delete ${_selectedProductIds.length} products? This will remove them from your profile.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performBulkDelete();
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete All'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Perform bulk deletion
+  void _performBulkDelete() async {
+    try {
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        throw Exception('User not logged in');
+      }
+
+      final response = await http.delete(
+        Uri.parse('${Config.baseNodeApiUrl}/profile/products/bulk/hard'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'userId': userId,
+          'productIds': _selectedProductIds.toList(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['success'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message'] ?? 'Products deleted successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            // Exit selection mode and refresh
+            _disableSelectionMode();
+            _loadPublishedProductsFromServer(silent: true);
+          }
+        } else {
+          throw Exception(result['message'] ?? 'Failed to delete products');
+        }
+      } else {
+        throw Exception('Server error: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

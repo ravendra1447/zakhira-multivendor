@@ -1369,6 +1369,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           priceSlabs: [],
           attributes: {},
           selectedAttributeValues: {},
+          price: productInfo?.price ?? 0.0,
           variations: [
             {
               'name': productInfo?.productName ?? 'Product $productId',
@@ -1414,6 +1415,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           priceSlabs: [],
           attributes: {},
           selectedAttributeValues: {},
+          price: productInfo.price,
           variations: [
             {
               'name': productInfo.productName,

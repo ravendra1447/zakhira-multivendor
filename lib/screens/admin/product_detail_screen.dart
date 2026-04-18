@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config.dart';
+import '../../services/unified_product_service.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -18,6 +19,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   bool isLoading = true;
   List<Map<String, dynamic>> productVariants = [];
   String? errorMessage;
+  
+  // Website and Marketplace visibility controls
+  bool showOnWebsite = true;
+  bool showOnMarketplace = true;
   
   @override
   void initState() {
@@ -48,17 +53,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         print('==========================================');
         
         if (data['success']) {
+          // Initialize website and marketplace visibility from product data
+          setState(() {
+            showOnWebsite = widget.product['is_active'] == 1;
+            showOnMarketplace = widget.product['marketplace_enabled'] == 1;
+          });
+          
           // Convert color groups to flat list for display
           final List<Map<String, dynamic>> variants = [];
           final colorGroups = data['stock_info']['color_groups'] as List?;
+          final stockType = data['stock_info']['type'] as String?;
           
+          print('Stock type: $stockType');
           print('Color groups: $colorGroups');
           
           if (colorGroups != null) {
             print('Processing ${colorGroups.length} color groups...');
             for (final colorGroup in colorGroups) {
               final colorVariants = colorGroup['variants'] as List?;
-              if (colorVariants != null) {
+              if (colorVariants != null && colorVariants.isNotEmpty) {
+                // Process variants (color_size mode)
                 print('Processing ${colorVariants.length} variants for color ${colorGroup['color']}');
                 for (final variant in colorVariants) {
                   variants.add({
@@ -69,6 +83,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     'stock': variant['stock'],
                     'price': variant['price'],
                     'is_active': variant['status'] == 1, // Use status field instead of stock
+                  });
+                }
+              } else {
+                // Handle colors_only mode - create mock variant for color
+                if (stockType == 'colors_only') {
+                  print('Creating color-only entry for ${colorGroup['color']}');
+                  variants.add({
+                    'id': 'color_${colorGroup['color']}', // Mock ID
+                    'color': colorGroup['color'],
+                    'color_code': colorGroup['color_code'] ?? '#000000',
+                    'size': 'N/A', // No size in colors_only mode
+                    'stock': 0, // No stock info for colors_only
+                    'price': 0, // No price info for colors_only
+                    'is_active': colorGroup['color_status'] == 1,
+                    'is_color_only': true, // Flag to identify color-only entries
                   });
                 }
               }
@@ -137,19 +166,62 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         }
       });
 
-      // Call API to update status
-      final response = await http.put(
-        Uri.parse('${Config.baseNodeApiUrl}/admin/products/${widget.product['id']}/variant/${variantId}'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'is_active': newStatus,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (!data['success']) {
-          // Revert change if API call failed
+      // Check if this is a colors_only entry
+      final variant = productVariants.firstWhere((v) => v['id'] == variantId);
+      final isColorOnly = variant['is_color_only'] == true;
+      
+      if (isColorOnly) {
+        // Handle colors_only mode - update color status in product_colors table
+        final colorName = variant['color'];
+        print('Updating color status for: $colorName');
+        
+        // URL encode the color name to handle spaces and special characters
+        final encodedColorName = Uri.encodeComponent(colorName.toString());
+        print('Encoded color name: $encodedColorName');
+        
+        final response = await http.put(
+          Uri.parse('${Config.baseNodeApiUrl}/admin/products/${widget.product['id']}/color/${encodedColorName}'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'is_active': newStatus ? 1 : 0, // Ensure boolean is converted to number
+          }),
+        );
+        
+        // Handle response for colors_only mode
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (!data['success']) {
+            // Revert change if API call failed
+            setState(() {
+              final index = productVariants.indexWhere((v) => v['id'] == variantId);
+              if (index != -1) {
+                productVariants[index]['is_active'] = currentStatus;
+              }
+            });
+            
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Failed to update color: ${data['message']}'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Color status updated successfully'),
+                  backgroundColor: Colors.green,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              // Refresh data to get updated status
+              _loadProductVariants();
+            }
+          }
+        } else {
+          // Revert change on HTTP error
           setState(() {
             final index = productVariants.indexWhere((v) => v['id'] == variantId);
             if (index != -1) {
@@ -160,24 +232,57 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Failed to update variant: ${data['message']}'),
+                content: Text('HTTP Error: ${response.statusCode}'),
                 backgroundColor: Colors.red,
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Variant status updated successfully'),
-                backgroundColor: Colors.green,
-                duration: const Duration(seconds: 2),
               ),
             );
           }
         }
       } else {
-        throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+        // Handle normal variant mode
+        final response = await http.put(
+          Uri.parse('${Config.baseNodeApiUrl}/admin/products/${widget.product['id']}/variant/${variantId}'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'is_active': newStatus,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (!data['success']) {
+            // Revert change if API call failed
+            setState(() {
+              final index = productVariants.indexWhere((v) => v['id'] == variantId);
+              if (index != -1) {
+                productVariants[index]['is_active'] = currentStatus;
+              }
+            });
+            
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Failed to update variant: ${data['message']}'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Variant status updated successfully'),
+                  backgroundColor: Colors.green,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              // Refresh data to get updated status
+              _loadProductVariants();
+            }
+          }
+        } else {
+          throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+        }
       }
     } catch (e) {
       // Revert change on error
@@ -192,6 +297,108 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleWebsiteVisibility(bool newValue) async {
+    try {
+      final oldValue = showOnWebsite;
+      setState(() {
+        showOnWebsite = newValue;
+      });
+
+      // Call API to update product status
+      final response = await http.put(
+        Uri.parse('${Config.baseNodeApiUrl}/admin/products/${widget.product['id']}/status'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'is_active': newValue ? 1 : 0,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success']) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Product ${newValue ? 'shown' : 'hidden'} on website successfully'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          throw Exception(data['message'] ?? 'Failed to update website visibility');
+        }
+      } else {
+        throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      // Revert change on error
+      setState(() {
+        showOnWebsite = !showOnWebsite;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating website visibility: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleMarketplaceVisibility(bool newValue) async {
+    try {
+      final oldValue = showOnMarketplace;
+      setState(() {
+        showOnMarketplace = newValue;
+      });
+
+      // Call API to update marketplace status
+      final response = await http.put(
+        Uri.parse('${Config.baseNodeApiUrl}/admin/products/${widget.product['id']}/marketplace-status'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'marketplace_enabled': newValue ? 1 : 0,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success']) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Product ${newValue ? 'shown' : 'hidden'} on marketplace successfully'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          throw Exception(data['message'] ?? 'Failed to update marketplace visibility');
+        }
+      } else {
+        throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      // Revert change on error
+      setState(() {
+        showOnMarketplace = !showOnMarketplace;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating marketplace visibility: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -369,6 +576,97 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             color: Colors.green[700],
                           ),
                         ),
+                      const SizedBox(height: 12),
+                      // Website and Marketplace Visibility Controls - COMMENTED OUT
+                      // Container(
+                      //   padding: const EdgeInsets.all(12),
+                      //   decoration: BoxDecoration(
+                      //     color: Colors.grey[50],
+                      //     borderRadius: BorderRadius.circular(8),
+                      //     border: Border.all(color: Colors.grey[200]!),
+                      //   ),
+                      //   child: Column(
+                      //     crossAxisAlignment: CrossAxisAlignment.start,
+                      //     children: [
+                      //       Text(
+                      //         'Platform Visibility',
+                      //         style: TextStyle(
+                      //           fontSize: 14,
+                      //           fontWeight: FontWeight.w600,
+                      //           color: Colors.grey[700],
+                      //         ),
+                      //       ),
+                      //       const SizedBox(height: 8),
+                      //       Row(
+                      //         children: [
+                      //           // Website Toggle
+                      //           Expanded(
+                      //             child: Row(
+                      //               children: [
+                      //                 Icon(
+                      //                   Icons.language,
+                      //                   size: 16,
+                      //                   color: Colors.blue[600],
+                      //                 ),
+                      //                 const SizedBox(width: 4),
+                      //                 Text(
+                      //                   'Website',
+                      //                   style: TextStyle(
+                      //                     fontSize: 12,
+                      //                     color: Colors.grey[700],
+                      //                   ),
+                      //                 ),
+                      //                 const Spacer(),
+                      //                 Switch(
+                      //                   value: showOnWebsite,
+                      //                   onChanged: _toggleWebsiteVisibility,
+                      //                   activeColor: Colors.blue,
+                      //                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      //                 ),
+                      //               ],
+                      //             ),
+                      //           ),
+                      //           const SizedBox(width: 16),
+                      //           // Marketplace Toggle
+                      //           Expanded(
+                      //             child: Row(
+                      //               children: [
+                      //                 Icon(
+                      //                   Icons.storefront,
+                      //                   size: 16,
+                      //                   color: Colors.orange[600],
+                      //                 ),
+                      //                 const SizedBox(width: 4),
+                      //                 Text(
+                      //                   'Marketplace',
+                      //                   style: TextStyle(
+                      //                     fontSize: 12,
+                      //                     color: Colors.grey[700],
+                      //                   ),
+                      //                 ),
+                      //                 const Spacer(),
+                      //                 Switch(
+                      //                   value: showOnMarketplace,
+                      //                   onChanged: _toggleMarketplaceVisibility,
+                      //                   activeColor: Colors.orange,
+                      //                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      //                 ),
+                      //               ],
+                      //             ),
+                      //           ),
+                      //         ],
+                      //       ),
+                      //       const SizedBox(height: 4),
+                      //       Text(
+                      //         'Control where this product appears',
+                      //         style: TextStyle(
+                      //           fontSize: 10,
+                      //           color: Colors.grey[500],
+                      //           fontStyle: FontStyle.italic,
+                      //         ),
+                      //       ],
+                      //     ),
+                      //   ),
                     ],
                   ),
                 ),
@@ -477,6 +775,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final allActive = variants.every((v) => v['is_active'] == true);
     final anyActive = variants.any((v) => v['is_active'] == true);
     final colorCode = variants.isNotEmpty ? variants[0]['color_code'] : null;
+    final isColorOnly = variants.isNotEmpty && variants.first['is_color_only'] == true;
+    
+    // Debug information
+    print('Building color group: $color');
+    print('Color code: $colorCode');
+    print('Number of variants: ${variants.length}');
+    print('First variant data: ${variants.isNotEmpty ? variants[0] : "No variants"}');
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -531,8 +836,19 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           color: anyActive ? Colors.green : Colors.red,
                         ),
                       ),
+                      if (colorCode != null && colorCode.isNotEmpty)
+                        Text(
+                          'Color: $colorCode',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey[500],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
                       Text(
-                        '${variants.length} size(s) - ${allActive ? "All Active" : anyActive ? "Partially Active" : "All Inactive"}',
+                        isColorOnly 
+                            ? 'Color only - ${allActive ? "Active" : "Inactive"}'
+                            : '${variants.length} size(s) - ${allActive ? "All Active" : anyActive ? "Partially Active" : "All Inactive"}',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[600],
@@ -567,8 +883,31 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ],
             ),
           ),
-          // Size variants
-          ...variants.map((variant) => _buildSizeVariant(variant)).toList(),
+          // Size variants - skip for colors_only entries
+          if (variants.isNotEmpty && variants.first['is_color_only'] != true)
+            ...variants.map((variant) => _buildSizeVariant(variant)).toList()
+          else
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.color_lens,
+                    color: Colors.grey[600],
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Color only option (no size variants)',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -672,16 +1011,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Color _getColorForName(String colorName, [String? colorCode]) {
+    print('Getting color for name: "$colorName", code: "$colorCode"');
+    
     // If color code is provided, use it
     if (colorCode != null && colorCode.isNotEmpty) {
       try {
         // Handle hex color codes
         if (colorCode.startsWith('#')) {
-          return Color(int.parse(colorCode.substring(1), radix: 16) + 0xFF000000);
+          final color = Color(int.parse(colorCode.substring(1), radix: 16) + 0xFF000000);
+          print('Parsed hex color: $colorCode -> $color');
+          return color;
         }
         // Handle RGB format if needed
         if (colorCode.startsWith('rgb')) {
           // Parse RGB format - simplified for now
+          print('RGB format detected, using blue as fallback');
           return Colors.blue;
         }
       } catch (e) {
@@ -689,8 +1033,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       }
     }
   
-    // Fallback to color name mapping
-    switch (colorName.toLowerCase()) {
+    // Fallback to color name mapping with better matching
+    final lowerCaseName = colorName.toLowerCase().trim();
+    print('Using color name fallback for: "$lowerCaseName"');
+    
+    switch (lowerCaseName) {
       case 'red':
         return Colors.red;
       case 'blue':
@@ -714,7 +1061,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       case 'gray':
       case 'grey':
         return Colors.grey;
+      case 'navy':
+        return Colors.blue.shade900;
+      case 'maroon':
+        return Colors.red.shade800;
+      case 'olive':
+        return Colors.yellow.shade800;
+      case 'lime':
+        return Colors.lime;
+      case 'aqua':
+      case 'cyan':
+        return Colors.cyan;
+      case 'teal':
+        return Colors.teal;
+      case 'silver':
+        return Colors.grey.shade300;
+      case 'gold':
+        return Colors.yellow.shade600;
       default:
+        print('Unknown color name: "$colorName", using grey fallback');
         return Colors.grey[400]!;
     }
   }

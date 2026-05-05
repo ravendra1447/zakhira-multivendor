@@ -26,7 +26,7 @@ class ProductDatabaseService {
 
     return await openDatabase(
       path,
-      version: 5, // Increment version for migration (added Instagram fields)
+      version: 6, // Increment version for migration (added price and related columns)
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -90,6 +90,31 @@ class ProductDatabaseService {
         print('⚠️ Migration note: $e');
       }
     }
+
+    if (oldVersion < 6) {
+      // Add missing price and related columns
+      try {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN price REAL DEFAULT 0.0
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN always_available INTEGER DEFAULT 0
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN dispatch_time TEXT
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN show_made_on_order_badge INTEGER DEFAULT 0
+        ''');
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN seller_name TEXT DEFAULT 'Default Seller'
+        ''');
+        print('✅ Database migrated: Added price and related columns');
+      } catch (e) {
+        // Column might already exist
+        print('⚠️ Migration note: $e');
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -114,6 +139,11 @@ class ProductDatabaseService {
         stock_by_color_size TEXT,
         product_insta_url TEXT,
         is_insta_product TEXT DEFAULT 'N',
+        price REAL DEFAULT 0.0,
+        always_available INTEGER DEFAULT 0,
+        dispatch_time TEXT,
+        show_made_on_order_badge INTEGER DEFAULT 0,
+        seller_name TEXT DEFAULT 'Default Seller',
         created_at TEXT,
         updated_at TEXT,
         server_id INTEGER,
@@ -378,3 +408,4 @@ class ProductDatabaseService {
   }
 }
 
+ 

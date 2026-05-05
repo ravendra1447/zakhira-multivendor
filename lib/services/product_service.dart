@@ -317,6 +317,16 @@ class ProductService {
             );
 
             final result = jsonDecode(response.body) as Map<String, dynamic>;
+            
+            // Check for company registration requirement
+            if (response.statusCode == 403 && 
+                result['needs_company_registration'] == true) {
+              return {
+                "success": false, 
+                "message": result['message'] ?? 'Please register your company first',
+                "needs_company_registration": true
+              };
+            }
             if (result['success'] == true && result['data'] != null) {
               final serverId = result['data']['product_id'] as int?;
               if (serverId != null) {

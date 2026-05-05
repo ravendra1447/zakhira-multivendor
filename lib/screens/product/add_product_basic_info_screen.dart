@@ -18,6 +18,7 @@ import 'package:whatsappchat/theme/app_spacing.dart';
 import 'package:whatsappchat/widgets/auto_focus_text_field.dart';
 import 'package:whatsappchat/widgets/gradient_button.dart';
 import 'package:whatsappchat/widgets/modern_card.dart';
+import '../profile_company/company_registration_screen.dart';
 
 class AddProductBasicInfoScreen extends StatefulWidget {
   final List<File> images;
@@ -2224,8 +2225,58 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
 
   Future<void> _saveProduct(String type) async {
     try {
+      print('🚀 _saveProduct called with type: $type');
+      
+      // DEBUG: Add test button check
+      if (type == 'publish') {
+        print('🧪 DEBUG: Testing company check before publish...');
+        
+        // Test company check with detailed logging
+        print('🔍 Checking user company for published product...');
+        final hasCompany = await _checkUserCompany();
+        print('📊 Has company: $hasCompany');
+        
+        // Force show registration dialog for testing (remove this line in production)
+        // final hasCompany = false; // Uncomment this line to force registration dialog
+        
+        print('🎯 Company check result: $hasCompany');
+        
+        if (!hasCompany) {
+          print('❌ No company found - showing registration dialog');
+          // Show company registration dialog
+          final registered = await _showCompanyRegistrationDialog();
+          print('📝 Registration result: $registered');
+          
+          if (!registered) {
+            print('❌ User cancelled registration');
+            return; // User cancelled registration
+          }
+          
+          // Check again after registration
+          print('🔍 Checking company after registration...');
+          final hasCompanyAfter = await _checkUserCompany();
+          print('📊 Has company after registration: $hasCompanyAfter');
+          
+          if (!hasCompanyAfter) {
+            print('❌ Still no company after registration');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Company registration required to publish products'),
+                backgroundColor: Colors.red,
+              ),
+            );
+            return;
+          }
+        }
+      } else {
+        print('📝 Saving draft product - company check skipped');
+      }
+
+      print('✅ Company check passed - proceeding to save product');
+      
       // Show loading
       if (mounted) {
+        print('📱 Showing loading dialog');
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -2357,12 +2408,23 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
             Navigator.pop(context); // Go back for draft
           }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message'] ?? 'Error saving product'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          // Check if company registration is required
+          if (result['needs_company_registration'] == true) {
+            // Show company registration dialog
+            await _showCompanyRegistrationDialog();
+            
+            // After registration, retry saving product
+            if (mounted) {
+              await _saveProduct(type);
+            }
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message'] ?? 'Error saving product'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -2375,6 +2437,382 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
           ),
         );
       }
+    }
+  }
+
+  // Check if user has company
+  Future<bool> _checkUserCompany() async {
+    try {
+      print('🔍 _checkUserCompany called');
+      final userId = LocalAuthService.getUserId();
+      print('👤 User ID: $userId');
+      
+      if (userId == null) {
+        print('❌ User ID is null');
+        return false;
+      }
+
+      // Method 1: Try API first with new endpoint
+      try {
+        final url = '${Config.baseNodeApiUrl}/users/user-info-by-id/${userId.toString()}';
+        print('🌐 Calling API: $url');
+        
+        final response = await http.get(
+          Uri.parse(url),
+        ).timeout(const Duration(seconds: 10));
+        
+        print('📡 Response status: ${response.statusCode}');
+        print('📡 Response body: ${response.body}');
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          print('📊 Parsed data: $data');
+          
+          if (data['success'] && data['data'] != null) {
+            final userInfo = data['data'];
+            print('👤 User info: $userInfo');
+            
+            // Check if user has company_id and branch_id
+            final hasCompany = userInfo['company_id'] != null && 
+                              userInfo['branch_id'] != null &&
+                              userInfo['company_id'].toString().isNotEmpty &&
+                              userInfo['branch_id'].toString().isNotEmpty;
+            print('🏢 Company ID: ${userInfo['company_id']}');
+            print('🏢 Branch ID: ${userInfo['branch_id']}');
+            print('👤 User Role: ${userInfo['role']}');
+            print('📊 Has company: $hasCompany');
+            
+            // Special handling for admin users without company
+            if (!hasCompany) {
+              print('🔑 User without company - checking role...');
+              print('👤 User role: ${userInfo['role']}');
+              
+              if (userInfo['role'] == 'admin') {
+                print('🔑 Admin user without company - attempting auto-registration...');
+                
+                // Try to auto-create company for admin
+                final autoRegistered = await _autoRegisterCompanyForAdmin(userInfo);
+                if (autoRegistered) {
+                  print('✅ Admin company auto-registered successfully');
+                  return true; // Now has company
+                } else {
+                  print('❌ Admin auto-registration failed - showing manual registration');
+                }
+              } else {
+                print('👤 Non-admin user - showing manual registration');
+              }
+            }
+            
+            return hasCompany;
+          } else {
+            print('❌ API returned success: false or no data');
+          }
+        } else {
+          print('❌ API failed with status: ${response.statusCode}');
+        }
+      } catch (e) {
+        print('❌ API call failed: $e');
+      }
+
+      // Method 1.5: Try with phone number as fallback
+      try {
+        print('🔄 Trying fallback with phone number...');
+        
+        // Get user phone from local storage or API
+        final phoneUrl = '${Config.baseNodeApiUrl}/flutter/users/profile/${userId.toString()}';
+        print('🌐 Getting user phone: $phoneUrl');
+        
+        final phoneResponse = await http.get(
+          Uri.parse(phoneUrl),
+        ).timeout(const Duration(seconds: 5));
+        
+        if (phoneResponse.statusCode == 200) {
+          final phoneData = json.decode(phoneResponse.body);
+          if (phoneData['success'] && phoneData['data']['phone'] != null) {
+            final userPhone = phoneData['data']['phone'];
+            print('📱 User phone: $userPhone');
+            
+            // Now try user-info with phone
+            final phoneInfoUrl = '${Config.baseNodeApiUrl}/users/user-info/$userPhone';
+            print('🌐 Calling phone info API: $phoneInfoUrl');
+            
+            final phoneInfoResponse = await http.get(
+              Uri.parse(phoneInfoUrl),
+            ).timeout(const Duration(seconds: 5));
+            
+            if (phoneInfoResponse.statusCode == 200) {
+              final phoneInfoData = json.decode(phoneInfoResponse.body);
+              if (phoneInfoData['success'] && phoneInfoData['data'] != null) {
+                final userInfo = phoneInfoData['data'];
+                print('👤 User info from phone: $userInfo');
+                
+                final hasCompany = userInfo['company_id'] != null && 
+                                  userInfo['branch_id'] != null &&
+                                  userInfo['company_id'].toString().isNotEmpty &&
+                                  userInfo['branch_id'].toString().isNotEmpty;
+                print('🏢 Company ID (phone): ${userInfo['company_id']}');
+                print('🏢 Branch ID (phone): ${userInfo['branch_id']}');
+                print('📊 Has company (phone): $hasCompany');
+                
+                return hasCompany;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        print('❌ Phone fallback failed: $e');
+      }
+
+      // Method 2: Fallback - Try direct product service check
+      print('🔄 Trying fallback method - direct database check...');
+      try {
+        final result = await ProductService.getProducts(status: 'publish', limit: 1);
+        print('📦 ProductService check result: $result');
+        
+        // If we can get published products, user might have company
+        // But this is not reliable, so we'll still return false
+        if (result['success'] == true) {
+          print('⚠️ User can access products but company status unclear');
+        }
+      } catch (e) {
+        print('❌ ProductService fallback failed: $e');
+      }
+      
+      // Method 3: Default to false for safety
+      print('🛡️ Defaulting to false - requiring company registration');
+      return false;
+      
+    } catch (e) {
+      print('❌ Error checking user company: $e');
+      return false;
+    }
+  }
+
+  // Auto-register company for admin users
+  Future<bool> _autoRegisterCompanyForAdmin(Map<String, dynamic> userInfo) async {
+    try {
+      print('🔧 Starting auto company registration for admin...');
+      
+      final userId = userInfo['user_id'];
+      final userName = userInfo['name'] ?? 'Admin';
+      final userPhone = userInfo['phone'] ?? '';
+      
+      if (userPhone.isEmpty) {
+        print('❌ User phone is empty - cannot register company');
+        return false;
+      }
+      
+      print('👤 Admin User: $userName ($userPhone)');
+      
+      // Method 1: Try exact database structure company creation
+      print('📝 Method 1: Creating company and branch (exact database structure)...');
+      try {
+        // Step 1: Create company with exact database fields
+        final companyData = {
+          'company_name': '${userName}\'s Company',
+        };
+        
+        print('📦 Company data: $companyData');
+        
+        final companyResponse = await http.post(
+          Uri.parse('${Config.baseNodeApiUrl}/companies/create'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(companyData),
+        ).timeout(const Duration(seconds: 15));
+        
+        print('📡 Company creation response: ${companyResponse.statusCode}');
+        print('📡 Company creation body: ${companyResponse.body}');
+        
+        if (companyResponse.statusCode == 200) {
+          final companyResult = json.decode(companyResponse.body);
+          if (companyResult['success']) {
+            final companyId = companyResult['data']['company_id'];
+            print('✅ Company created with ID: $companyId');
+            
+            // Step 2: Create branch with exact database fields
+            final branchData = {
+              'company_id': companyId,
+              'branch_name': 'Main Branch',
+              'city': userInfo['address_city'] ?? 'Noida',
+            };
+            
+            print('📦 Branch data: $branchData');
+            
+            final branchResponse = await http.post(
+              Uri.parse('${Config.baseNodeApiUrl}/companies/branches/create'),
+              headers: {'Content-Type': 'application/json'},
+              body: json.encode(branchData),
+            ).timeout(const Duration(seconds: 15));
+            
+            print('📡 Branch creation response: ${branchResponse.statusCode}');
+            print('📡 Branch creation body: ${branchResponse.body}');
+            
+            if (branchResponse.statusCode == 200) {
+              final branchResult = json.decode(branchResponse.body);
+              if (branchResult['success']) {
+                final branchId = branchResult['data']['branch_id'];
+                print('✅ Branch created with ID: $branchId');
+                
+                // Step 3: Assign user to company and branch
+                final assignData = {
+                  'phone': userPhone,
+                  'company_id': companyId,
+                  'branch_id': branchId,
+                };
+                
+                print('📦 Assignment data: $assignData');
+                
+                final assignResponse = await http.put(
+                  Uri.parse('${Config.baseNodeApiUrl}/users/assign-company-branch'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: json.encode(assignData),
+                ).timeout(const Duration(seconds: 15));
+                
+                print('📡 Assignment response: ${assignResponse.statusCode}');
+                print('📡 Assignment body: ${assignResponse.body}');
+                
+                if (assignResponse.statusCode == 200) {
+                  final assignResult = json.decode(assignResponse.body);
+                  if (assignResult['success']) {
+                    print('✅ Full auto-registration completed successfully!');
+                    return true;
+                  } else {
+                    print('❌ Assignment API returned failure: ${assignResult['message']}');
+                  }
+                } else {
+                  print('❌ Assignment failed with status: ${assignResponse.statusCode}');
+                }
+              } else {
+                print('❌ Branch creation API returned failure: ${branchResult['message']}');
+              }
+            } else {
+              print('❌ Branch creation failed with status: ${branchResponse.statusCode}');
+            }
+          } else {
+            print('❌ Company creation API returned failure: ${companyResult['message']}');
+          }
+        } else {
+          print('❌ Company creation failed with status: ${companyResponse.statusCode}');
+        }
+      } catch (e) {
+        print('❌ Method 1 failed: $e');
+      }
+      
+      // Method 2: Direct assignment with dummy IDs
+      print('🔄 Method 2: Direct assignment with dummy company/branch...');
+      try {
+        final assignResponse = await http.put(
+          Uri.parse('${Config.baseNodeApiUrl}/users/assign-company-branch'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'phone': userPhone,
+            'company_id': 1,  // Dummy company ID
+            'branch_id': 1,   // Dummy branch ID
+          }),
+        ).timeout(const Duration(seconds: 10));
+        
+        print('📡 Direct assignment response: ${assignResponse.statusCode}');
+        print('📡 Direct assignment body: ${assignResponse.body}');
+        
+        if (assignResponse.statusCode == 200) {
+          final assignResult = json.decode(assignResponse.body);
+          if (assignResult['success']) {
+            print('✅ Direct assignment completed successfully!');
+            return true;
+          }
+        }
+      } catch (e) {
+        print('❌ Method 2 failed: $e');
+      }
+      
+      // Method 3: Create custom endpoint call
+      print('🔄 Method 3: Custom admin assignment...');
+      try {
+        final customResponse = await http.post(
+          Uri.parse('${Config.baseNodeApiUrl}/users/admin-assign-company'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'user_id': userId,
+            'company_name': '${userName}\'s Company',
+            'branch_name': 'Main Branch',
+            'phone': userPhone,
+          }),
+        ).timeout(const Duration(seconds: 10));
+        
+        print('📡 Custom assignment response: ${customResponse.statusCode}');
+        print('📡 Custom assignment body: ${customResponse.body}');
+        
+        if (customResponse.statusCode == 200) {
+          final customResult = json.decode(customResponse.body);
+          if (customResult['success']) {
+            print('✅ Custom assignment completed successfully!');
+            return true;
+          }
+        }
+      } catch (e) {
+        print('❌ Method 3 failed: $e');
+      }
+      
+      print('❌ All auto-registration methods failed');
+      return false;
+      
+    } catch (e) {
+      print('❌ Auto-registration error: $e');
+      print('❌ Stack trace: ${StackTrace.current}');
+      return false;
+    }
+  }
+
+  // Show company registration dialog
+  Future<bool> _showCompanyRegistrationDialog() async {
+    try {
+      // Get user phone number
+      final userId = LocalAuthService.getUserId();
+      if (userId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('User not logged in')),
+        );
+        return false;
+      }
+
+      // Get user info to get phone number
+      final response = await http.get(
+        Uri.parse('${Config.baseNodeApiUrl}/users/user-info/${userId.toString()}'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success']) {
+          final userInfo = data['data'];
+          final userPhone = userInfo['phone'];
+
+          if (userPhone != null) {
+            // Show registration screen
+            final registered = await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CompanyRegistrationScreen(
+                  userPhone: userPhone,
+                  userId: userId.toString(),
+                ),
+              ),
+            );
+
+            return registered == true;
+          }
+        }
+      }
+      
+      return false;
+    } catch (e) {
+      print('Error showing registration dialog: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
     }
   }
 
@@ -4289,41 +4727,185 @@ class _AddProductBasicInfoScreenState extends State<AddProductBasicInfoScreen> {
             ),
             Padding(
               padding: AppSpacing.paddingHorizontalLG.add(AppSpacing.paddingVerticalSM),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _saveProduct('draft'),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: AppColors.border(context), width: 2),
-                        foregroundColor: AppColors.textPrimary(context),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  // DEBUG: Test buttons (remove in production)
+                  if (true) // Set to false to hide debug buttons
+                    Column(
+                      children: [
+                        // Server connectivity test
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                print('🧪 DEBUG: Testing server connectivity...');
+                                try {
+                                  final url = '${Config.baseNodeApiUrl}/users/test';
+                                  print('🌐 Calling test endpoint: $url');
+                                  
+                                  final response = await http.get(
+                                    Uri.parse(url),
+                                  ).timeout(const Duration(seconds: 5));
+                                  
+                                  print('📡 Response status: ${response.statusCode}');
+                                  print('📡 Response body: ${response.body}');
+                                  
+                                  if (response.statusCode == 200) {
+                                    final data = json.decode(response.body);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('✅ Server Connected: ${data['message']}'),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('❌ Server Error: ${response.statusCode}'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  print('❌ Server test failed: $e');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('❌ Server Connection Failed: $e'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                              child: const Text('🌐 DEBUG: Test Server Connection'),
+                            ),
+                          ),
                         ),
-                        padding: AppSpacing.paddingVerticalMD,
-                        minimumSize: const Size(0, 48),
-                      ),
-                      child: Text(
-                        'Save as Draft',
-                        style: AppTypography.button(context).copyWith(
-                          color: AppColors.textPrimary(context),
+                        
+                        // Company check test
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                print('🧪 DEBUG: Manual company check test...');
+                                final hasCompany = await _checkUserCompany();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Company Status: ${hasCompany ? "Registered" : "Not Registered"}'),
+                                    backgroundColor: hasCompany ? Colors.green : Colors.orange,
+                                  ),
+                                );
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.purple,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                              child: const Text('🏢 DEBUG: Test Company Check'),
+                            ),
+                          ),
                         ),
-                        overflow: TextOverflow.visible,
-                      ),
-                    ),
-                  ),
-                  AppSpacing.horizontalSpaceMD,
-                  Expanded(
-                    child: GradientButton(
-                      text: 'Publish',
-                      onPressed: () => _saveProduct('publish'),
-                      height: 48,
-                      icon: Icons.publish,
-                      gradientColors: [
-                        AppColors.orange(context),
-                        AppColors.orange(context).withOpacity(0.8),
+                        
+                        // Force auto-registration test
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                print('🔧 DEBUG: Force auto-registration test...');
+                                
+                                // Get user info first
+                                final userId = LocalAuthService.getUserId();
+                                if (userId != null) {
+                                  try {
+                                    final url = '${Config.baseNodeApiUrl}/users/user-info-by-id/${userId.toString()}';
+                                    final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+                                    
+                                    if (response.statusCode == 200) {
+                                      final data = json.decode(response.body);
+                                      if (data['success'] && data['data'] != null) {
+                                        final userInfo = data['data'];
+                                        print('👤 Forcing auto-registration for: ${userInfo['name']}');
+                                        
+                                        final registered = await _autoRegisterCompanyForAdmin(userInfo);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Auto-Registration: ${registered ? "SUCCESS" : "FAILED"}'),
+                                            backgroundColor: registered ? Colors.green : Colors.red,
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  } catch (e) {
+                                    print('❌ Force registration error: $e');
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Error: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                              child: const Text('🔧 DEBUG: Force Auto-Register'),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
+                  
+                  // Main buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _saveProduct('draft'),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: AppColors.border(context), width: 2),
+                            foregroundColor: AppColors.textPrimary(context),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: AppSpacing.paddingVerticalMD,
+                            minimumSize: const Size(0, 48),
+                          ),
+                          child: Text(
+                            'Save as Draft',
+                            style: AppTypography.button(context).copyWith(
+                              color: AppColors.textPrimary(context),
+                            ),
+                            overflow: TextOverflow.visible,
+                          ),
+                        ),
+                      ),
+                      AppSpacing.horizontalSpaceMD,
+                      Expanded(
+                        child: GradientButton(
+                          text: 'Publish',
+                          onPressed: () => _saveProduct('publish'),
+                          height: 48,
+                          icon: Icons.publish,
+                          gradientColors: [
+                            AppColors.orange(context),
+                            AppColors.orange(context).withOpacity(0.8),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

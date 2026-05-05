@@ -337,6 +337,266 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // Send special cancellation message for all unavailable items
+  Future<void> _sendAllUnavailableCancellationMessage() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      if (customerPhone == null || customerPhone == 'N/A' || customerPhone.toString().trim().isEmpty) {
+        print('Customer phone not available for unavailable items cancellation message');
+        return;
+      }
+
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Create list of unavailable items
+      List<String> unavailableItems = [];
+      for (var item in orderItems) {
+        final itemId = item['id'].toString();
+        final availability = _itemAvailability[itemId] ?? 'Available';
+        if (availability == 'Not Available') {
+          final itemName = item['product_name'] ?? item['name'] ?? 'Unknown Product';
+          final itemVariant = item['variant'] != null && item['variant'].toString().isNotEmpty 
+            ? ' (${item['variant']})' 
+            : '';
+          unavailableItems.add('• $itemName$itemVariant');
+        }
+      }
+
+      // Create special cancellation message for all unavailable items
+      String message = '''*Order ID:* #${widget.orderId}
+
+We're sorry, this product is currently unavailable. Kindly choose another product or variant. Thank you for visiting BangkokMart.''';
+
+      // Send via WhatsApp API
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending all unavailable cancellation message to phone: $formattedPhone');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Short cancellation message sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending all unavailable cancellation message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending cancellation message: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Send payment cancellation message to customer
+  Future<void> _sendPaymentCancellationMessageToCustomer() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      if (customerPhone == null || customerPhone == 'N/A' || customerPhone.toString().trim().isEmpty) {
+        print('Customer phone not available for payment cancellation message');
+        return;
+      }
+
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Create payment cancellation message
+      String message = '''Dear Customer,
+
+Your order has been cancelled due to non-receipt of payment within the required time.
+
+If you are still interested, you're welcome to place a new order anytime on our website.
+Thank you for your understanding.
+
+Bangkok Mart''';
+
+      // Send via WhatsApp API
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending payment cancellation message to phone: $formattedPhone');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Payment cancellation message sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending payment cancellation message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending cancellation message: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Send cancellation message to customer
+  Future<void> _sendCancellationMessageToCustomer() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      if (customerPhone == null || customerPhone == 'N/A' || customerPhone.toString().trim().isEmpty) {
+        print('Customer phone not available for cancellation message');
+        return;
+      }
+
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Create cancellation message
+      String message = '''*Order Cancelled - #${widget.orderId}*
+
+Dear Customer,
+
+We regret to inform you that your order has been cancelled.
+
+If you have already made a payment, a refund will be processed within 5-7 working days.
+
+For any questions, please contact our customer support.
+
+Thank you for your understanding.
+BangkokMart Team''';
+
+      // Send via WhatsApp API
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending cancellation message to phone: $formattedPhone');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cancellation message sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending cancellation message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending cancellation message: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Send payment confirmation to customer
+  Future<void> _sendPaymentConfirmationToCustomer() async {
+    try {
+      final customerPhone = order!['customer_phone'] ?? order!['shipping_phone'];
+      if (customerPhone == null || customerPhone == 'N/A' || customerPhone.toString().trim().isEmpty) {
+        print('Customer phone not available for payment confirmation');
+        return;
+      }
+
+      // Format phone number
+      String formattedPhone = customerPhone.replaceAll(RegExp(r'[^\d]'), '');
+      if (formattedPhone.length == 10) {
+        formattedPhone = '91$formattedPhone';
+      } else if (formattedPhone.length == 11 && formattedPhone.startsWith('0')) {
+        formattedPhone = '91${formattedPhone.substring(1)}';
+      } else if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = formattedPhone;
+      }
+
+      // Create payment confirmation message
+      String message = '''*Payment Confirmed - #${widget.orderId}*
+
+Dear Customer,
+
+Great news! Your payment has been confirmed and your order is now being prepared for shipment.
+
+📦 *Order Details:*
+• Order ID: #${widget.orderId}
+• Total Amount: ₹${_totalAmount.toStringAsFixed(2)}
+• Status: Ready for Shipment
+
+Your order will be shipped soon. You will receive tracking details once shipped.
+
+Thank you for shopping with BangkokMart!
+Team BangkokMart''';
+
+      // Send via WhatsApp API
+      String encodedText = Uri.encodeComponent(message);
+      String whatsappUrl = "https://wa.me/$formattedPhone?text=$encodedText";
+      
+      print('📱 Sending payment confirmation to phone: $formattedPhone');
+      
+      // Log the message
+      await _logWhatsAppMessage(widget.orderId, customerPhone, message);
+      
+      // Open WhatsApp
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Payment confirmation sent successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error sending payment confirmation: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending payment confirmation: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   // Function to update manual stock quantity on server
   Future<void> _updateManualStockOnServer(String itemId, int manualStockQuantity, bool useManualStock) async {
     try {
@@ -372,7 +632,140 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  // Update availability status on server
+  // Show confirmation dialog before marking product as unavailable
+  Future<void> _showDeleteConfirmationDialog(String itemId, dynamic item) async {
+    final productName = item['product_name'] ?? 'Product';
+    final color = item['color']?.toString() ?? '';
+    final size = item['size']?.toString() ?? '';
+    
+    String variantInfo = '';
+    if (color.isNotEmpty && size.isNotEmpty) {
+      variantInfo = ' ($color, Size: $size)';
+    } else if (color.isNotEmpty) {
+      variantInfo = ' ($color)';
+    } else if (size.isNotEmpty) {
+      variantInfo = ' (Size: $size)';
+    }
+
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false, // User must tap button to close
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.orange[700],
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Confirm Product Deletion',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Do you want to delete this product variant?',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      productName + variantInfo,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '⚠️ This action will:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '• Mark this item as "Not Available"\n• Delete the product variant from database\n• This action cannot be undone',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog without changes
+              },
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                // Proceed with marking as unavailable
+                setState(() {
+                  _itemAvailability[itemId] = 'Not Available';
+                });
+                // Update server with unavailable status (1)
+                _updateItemAvailabilityOnServer(itemId, 1);
+                // Recalculate totals
+                _recalculateTotals();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.delete, size: 16),
+                  SizedBox(width: 4),
+                  Text('Yes, Delete'),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+// Update availability status on server
   Future<void> _updateItemAvailabilityOnServer(String itemId, int availabilityStatus) async {
     try {
       final response = await http.post(
@@ -391,14 +784,54 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         final responseData = json.decode(response.body);
         if (responseData['success'] == true) {
           print('✅ Updated availability status for item $itemId to $availabilityStatus');
+          
+          // Check if variants were deleted
+          if (responseData['data'] != null && responseData['data']['deletedVariants'] != null) {
+            final deletedVariants = responseData['data']['deletedVariants'] as List;
+            if (deletedVariants.isNotEmpty) {
+              // Show success message for variant deletion
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('✅ Product variant(s) deleted successfully: ${deletedVariants.join(', ')}'),
+                  backgroundColor: Colors.green,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+              print('🗑️ Deleted variants: ${deletedVariants.join(', ')}');
+            }
+          }
         } else {
           print('❌ Failed to update availability status: ${responseData['message']}');
+          // Show error message to user
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ ${responseData['message']}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 2),
+            ),
+          );
         }
       } else {
         print('❌ HTTP error updating availability status: ${response.statusCode}');
+        // Show error message to user
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Failed to update availability status'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
       print('❌ Error updating availability status: $e');
+      // Show error message to user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -470,7 +903,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget build(BuildContext context) {
     print('🔍 OrderDetailScreen Build - isAdmin: $isAdmin');
     
-    return Scaffold(
+    return WillPopScope(
+      onWillPop: () async {
+        // Save any pending changes before going back
+        await _savePendingChanges();
+        return true;
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
@@ -545,9 +984,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
             ),
             child: IconButton(
-              onPressed: _copyOrderDetails,
-              icon: const Icon(Icons.copy_outlined, size: 20),
-              tooltip: 'Copy Order Details',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => OrderStatusTrackingScreen(
+                      orderId: widget.orderId,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.track_changes, size: 20),
+              tooltip: 'Track Order',
             ),
           ),
           // Share button - only for admin users
@@ -574,7 +1022,43 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           : order == null
           ? _buildEmptyView()
           : _buildOrderDetails(),
+      ),
     );
+  }
+
+  // Check if all items are unavailable
+  bool _areAllItemsUnavailable() {
+    if (orderItems.isEmpty) return false;
+    
+    return orderItems.every((item) {
+      final itemId = item['id'].toString();
+      final availability = _itemAvailability[itemId] ?? 'Available';
+      return availability == 'Not Available';
+    });
+  }
+
+  // Save pending changes before navigation
+  Future<void> _savePendingChanges() async {
+    try {
+      // Check if manual stock changes need to be saved
+      if (_showManualStockMode && isAdmin) {
+        print('💾 Saving pending manual stock changes...');
+        
+        // Save all manual stock changes
+        for (String itemId in _manualStockQuantities.keys) {
+          final useManualStock = _useManualStock[itemId] ?? false;
+          final manualStockQuantity = _manualStockQuantities[itemId] ?? 0;
+          
+          await _updateManualStockOnServer(itemId, manualStockQuantity, useManualStock);
+        }
+      }
+      
+      // Force refresh to ensure latest data
+      await _fetchOrderDetails(silent: true);
+      
+    } catch (e) {
+      print('❌ Error saving pending changes: $e');
+    }
   }
 
   Widget _buildErrorView() {
@@ -668,54 +1152,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Widget _buildOrderDetails() {
-    return Column(
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Order Status Card
-                _buildStatusCard(),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Order Status Card
+          _buildStatusCard(),
 
-                const SizedBox(height: 16),
+          const SizedBox(height: 6),
 
-                // Manual Stock Management - only for admin users and Pending orders
-                if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending')) _buildManualStockManagement(),
+          // Manual Stock Management - temporarily hidden
+          // if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending')) _buildManualStockManagement(),
 
-                const SizedBox(height: 16),
+          const SizedBox(height: 6),
 
-                // Order Items
-                _buildOrderItems(),
+          // Order Items
+          _buildOrderItems(),
 
-                const SizedBox(height: 16),
+          const SizedBox(height: 6),
 
-                // Shipping Address
-                _buildShippingAddress(),
-
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ),
-        // Order Summary - Fixed at the bottom
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.2),
-                spreadRadius: 2,
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: _buildOrderSummary(),
-        ),
-      ],
+          // Order Summary - Now scrollable with other content
+          _buildOrderSummary(),
+        ],
+      ),
     );
   }
 
@@ -809,18 +1269,74 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
             child: Column(
               children: [
-                // User Name
-                _buildCompactInfoRow(
-                  Icons.person_outline,
-                  'Customer Name',
-                  order!['display_name'] ?? 'N/A',
+                // User Name and Phone Number in same row
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildCompactInfoRow(
+                        Icons.person_outline,
+                        'Customer Name',
+                        order!['display_name'] ?? 'N/A',
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildCompactInfoRow(
+                        Icons.phone_outlined,
+                        'Phone Number',
+                        order!['customer_phone'] ?? order!['shipping_phone'] ?? 'N/A',
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
-                // User Phone Number
-                _buildCompactInfoRow(
-                  Icons.phone_outlined,
-                  'Phone Number',
-                  order!['customer_phone'] ?? order!['shipping_phone'] ?? 'N/A',
+                // Shipping Address
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: Colors.grey[600],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Shipping Address',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        order!['shipping_street'] ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Text(
+                        '${order!['shipping_city'] ?? 'N/A'}, ${order!['shipping_state'] ?? 'N/A'} - ${order!['shipping_pincode'] ?? 'N/A'}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 8),
                 // Order Date and Payment Method on same line
@@ -846,32 +1362,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Track Order Button
-                if (order!['order_status'] != null)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => OrderStatusTrackingScreen(
-                              orderId: widget.orderId,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.track_changes, size: 16),
-                      label: const Text('Track Order'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -1547,95 +2037,96 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 ] else ...[
                   const Spacer(),
                   // Master availability dropdown
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: allItemsUnavailable 
-                          ? [Colors.red[400]!, Colors.red[300]!]
-                          : [Colors.green[400]!, Colors.green[300]!],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: allItemsUnavailable ? Colors.red[500]! : Colors.green[500]!,
-                        width: 1.0,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: allItemsUnavailable 
-                            ? Colors.red.withOpacity(0.2)
-                            : Colors.green.withOpacity(0.2),
-                          blurRadius: 3,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                    child: DropdownButton<String>(
-                      value: allItemsUnavailable ? 'All Unavailable' : 'All Available',
-                      icon: const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
-                      underline: const SizedBox(),
-                      isDense: true,
-                      style: const TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black26,
-                            offset: Offset(0, 0.5),
-                            blurRadius: 1,
-                          ),
-                        ],
-                      ),
-                      dropdownColor: allItemsUnavailable ? Colors.red[400] : Colors.green[400],
-                      items: [
-                        DropdownMenuItem(
-                          value: 'All Available',
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.check, size: 12, color: Colors.white),
-                              const SizedBox(width: 4),
-                              const Text('All Available'),
-                            ],
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 'All Unavailable',
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.close, size: 12, color: Colors.white),
-                              const SizedBox(width: 4),
-                              const Text('All Unavailable'),
-                            ],
-                          ),
-                        ),
-                      ],
-                      onChanged: (String? newValue) {
-                        if (newValue != null) {
-                          final makeAllUnavailable = newValue == 'All Unavailable';
-                          setState(() {
-                            // Toggle all items
-                            for (var item in orderItems) {
-                              final itemId = item['id'].toString();
-                              _itemAvailability[itemId] = makeAllUnavailable ? 'Not Available' : 'Available';
-                            }
-                          });
-                          // Update all items availability status on server
-                          int availabilityStatus = makeAllUnavailable ? 1 : 0;
-                          for (var item in orderItems) {
-                            final itemId = item['id'].toString();
-                            _updateItemAvailabilityOnServer(itemId, availabilityStatus);
-                          }
-                          // Recalculate totals
-                          _recalculateTotals();
-                        }
-                      },
-                    ),
-                  ),
+                  // if (isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
+                  //   Container(
+                  //     height: 32,
+                  //     decoration: BoxDecoration(
+                  //       gradient: LinearGradient(
+                  //         colors: allItemsUnavailable 
+                  //           ? [Colors.red[400]!, Colors.red[300]!]
+                  //           : [Colors.green[400]!, Colors.green[300]!],
+                  //         begin: Alignment.topLeft,
+                  //         end: Alignment.bottomRight,
+                  //       ),
+                  //       borderRadius: BorderRadius.circular(16),
+                  //       border: Border.all(
+                  //         color: allItemsUnavailable ? Colors.red[500]! : Colors.green[500]!,
+                  //         width: 1.0,
+                  //       ),
+                  //       boxShadow: [
+                  //         BoxShadow(
+                  //           color: allItemsUnavailable 
+                  //             ? Colors.red.withOpacity(0.2)
+                  //             : Colors.green.withOpacity(0.2),
+                  //           blurRadius: 3,
+                  //           offset: const Offset(0, 1),
+                  //         ),
+                  //       ],
+                  //     ),
+                  //     child: DropdownButton<String>(
+                  //       value: allItemsUnavailable ? 'All Unavailable' : 'All Available',
+                  //       icon: const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
+                  //       underline: const SizedBox(),
+                  //       isDense: true,
+                  //       style: const TextStyle(
+                  //         fontSize: 9,
+                  //         fontWeight: FontWeight.w700,
+                  //         color: Colors.white,
+                  //         shadows: [
+                  //           Shadow(
+                  //             color: Colors.black26,
+                  //             offset: Offset(0, 0.5),
+                  //             blurRadius: 1,
+                  //           ),
+                  //         ],
+                  //       ),
+                  //       dropdownColor: allItemsUnavailable ? Colors.red[400] : Colors.green[400],
+                  //       items: [
+                  //         DropdownMenuItem(
+                  //           value: 'All Available',
+                  //           child: Row(
+                  //             mainAxisSize: MainAxisSize.min,
+                  //             children: [
+                  //               const Icon(Icons.check, size: 12, color: Colors.white),
+                  //               const SizedBox(width: 4),
+                  //               const Text('All Available'),
+                  //             ],
+                  //           ),
+                  //         ),
+                  //         DropdownMenuItem(
+                  //           value: 'All Unavailable',
+                  //           child: Row(
+                  //             mainAxisSize: MainAxisSize.min,
+                  //             children: [
+                  //               const Icon(Icons.close, size: 12, color: Colors.white),
+                  //               const SizedBox(width: 4),
+                  //               const Text('All Unavailable'),
+                  //             ],
+                  //           ),
+                  //         ),
+                  //       ],
+                  //       onChanged: (String? newValue) {
+                  //         if (newValue != null) {
+                  //           final makeAllUnavailable = newValue == 'All Unavailable';
+                  //           setState(() {
+                  //             // Toggle all items
+                  //             for (var item in orderItems) {
+                  //               final itemId = item['id'].toString();
+                  //               _itemAvailability[itemId] = makeAllUnavailable ? 'Not Available' : 'Available';
+                  //             }
+                  //           });
+                  //           // Update all items availability status on server
+                  //           int availabilityStatus = makeAllUnavailable ? 1 : 0;
+                  //           for (var item in orderItems) {
+                  //             final itemId = item['id'].toString();
+                  //             _updateItemAvailabilityOnServer(itemId, availabilityStatus);
+                  //           }
+                  //           // Recalculate totals
+                  //           _recalculateTotals();
+                  //         }
+                  //       },
+                  //     ),
+                  //   ),
                 ],
               ],
             ),
@@ -1673,8 +2164,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final List<dynamic> uniqueVariants = consolidatedVariants.values.toList();
 
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
@@ -1686,7 +2177,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           // Product Name Header with exact UI as shown in image
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: Colors.blue[50],
               borderRadius: BorderRadius.circular(8),
@@ -1709,7 +2200,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
           ),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
           // Unique Variants List (show each variant only once)
           ...uniqueVariants.asMap().entries.map((entry) {
@@ -1758,8 +2249,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: statusColor,
         borderRadius: BorderRadius.circular(8),
@@ -1793,20 +2284,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   
                   // Color Badge
                   if (item['color'] != null && item['color'].toString().isNotEmpty)
-                    Container(
-                      margin: const EdgeInsets.only(right: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _getColorFromString(item['color']),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[300]!, width: 1),
-                      ),
-                      child: Text(
-                        item['color'],
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                    Flexible(
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getColorFromString(item['color']),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[300]!, width: 1),
+                        ),
+                        child: Text(
+                          item['color'],
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
                     ),
@@ -1831,7 +2326,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ),
                     ),
                   
-                  // Availability Dropdown or Disabled Indicator
+                  const Spacer(),
+                  
+                  // Availability Dropdown or Disabled Indicator - moved to right
                   if (_showManualStockMode && useManualStock)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1910,14 +2407,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         ],
                         onChanged: (String? newValue) {
                           if (newValue != null && !(_showManualStockMode && useManualStock)) {
-                            setState(() {
-                              _itemAvailability[itemId] = newValue == 'Unavailable' ? 'Not Available' : 'Available';
-                            });
-                            // Update server
-                            int availabilityStatus = newValue == 'Unavailable' ? 1 : 0;
-                            _updateItemAvailabilityOnServer(itemId, availabilityStatus);
-                            // Recalculate totals
-                            _recalculateTotals();
+                            // If changing to Unavailable, show confirmation dialog
+                            if (newValue == 'Unavailable') {
+                              _showDeleteConfirmationDialog(itemId, item);
+                            } else {
+                              // If changing to Available, proceed normally
+                              setState(() {
+                                _itemAvailability[itemId] = 'Available';
+                              });
+                              // Update server
+                              _updateItemAvailabilityOnServer(itemId, 0);
+                              // Recalculate totals
+                              _recalculateTotals();
+                            }
                           }
                         },
                       ),
@@ -1933,50 +2435,111 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               GestureDetector(
                 onTap: () => _showFullScreenImage(context, item),
                 child: Container(
-                  width: 60,
-                  height: 60,
+                  width: 70,
+                  height: 70,
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey[300]!),
+                    border: Border.all(color: Colors.blue[300]!, width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: _buildProductImage(item),
+                    child: Stack(
+                      children: [
+                        _buildProductImage(item),
+                        // Add a subtle zoom icon overlay to indicate it's clickable
+                        Positioned(
+                          bottom: 2,
+                          right: 2,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.zoom_in,
+                              color: Colors.white,
+                              size: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
 
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
 
               // Variant Details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Price and Quantity
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Show requested quantity
-                        Text(
-                          'Requested: $requestedQuantity x ₹${itemPrice.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                        // Show available quantity and calculated total - only when global toggle is ON
-                        if (_showManualStockMode && useManualStock && isAdmin && (order!['order_status'] == 'Pending' || order!['order_status'] == 'pending'))
-                          Text(
-                            'Available: $availableQuantity x ₹${itemPrice.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.blue[700],
-                              fontWeight: FontWeight.w600,
+                        // Show requested quantity - always editable for testing
+                        Row(
+                          children: [
+                            Text(
+                              'Requested: ',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
+                            InkWell(
+                              onTap: () {
+                                _showQuantityEditDialog(item, requestedQuantity, itemPrice);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[50],
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.blue[300]!),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '$requestedQuantity',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.blue[700],
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Icon(
+                                      Icons.edit,
+                                      size: 10,
+                                      color: Colors.blue[700],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            Text(
+                              ' x Rs.${itemPrice.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 2),
                         // Show total based on available quantity
                         Text(
@@ -2042,17 +2605,39 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       } else {
         imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
       }
+      print('🖼️ _buildProductImage using item image_url: $imageUrl');
     }
-    // 2. Check if order has image_url (fallback)
+    // 2. Check if item has product_image
+    else if (item['product_image'] != null && item['product_image'].toString().isNotEmpty) {
+      String tempImageUrl = item['product_image'].toString();
+      if (tempImageUrl.startsWith('http')) {
+        imageUrl = tempImageUrl;
+      } else {
+        imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+      }
+      print('🖼️ _buildProductImage using item product_image: $imageUrl');
+    }
+    // 3. Check if item has imageUrl
+    else if (item['imageUrl'] != null && item['imageUrl'].toString().isNotEmpty) {
+      String tempImageUrl = item['imageUrl'].toString();
+      if (tempImageUrl.startsWith('http')) {
+        imageUrl = tempImageUrl;
+      } else {
+        imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+      }
+      print('🖼️ _buildProductImage using item imageUrl: $imageUrl');
+    }
+    // 4. Check if order has image_url (fallback)
     else if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
       imageUrl = order!['image_url'];
+      print('🖼️ _buildProductImage using order image_url: $imageUrl');
     }
 
     if (imageUrl != null) {
       return Image.network(
         imageUrl,
-        width: 60,
-        height: 60,
+        width: 70,
+        height: 70,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
       );
@@ -2063,8 +2648,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Widget _buildPlaceholderImage({String? productName}) {
     return Container(
-      width: 60,
-      height: 60,
+      width: 70,
+      height: 70,
       color: Colors.grey[200],
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -2272,7 +2857,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget _buildOrderSummary() {
     // Parse total_amount as double since it comes as string from database
     final subtotalAmount = _subtotalAmount;
-    final deliveryFee = _deliveryFee; 
+    final deliveryFee = _deliveryFee;
     final totalAmount = _totalAmount;
 
     return Container(
@@ -2331,68 +2916,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Manual Payment Confirmation Button - only for admin users
-                    if (order!['order_status'] == 'Waiting for Payment' && isAdmin)
-                      Container(
-                        height: 32,
-                        child: GestureDetector(
-                          onTap: () async {
-                            // Show confirmation dialog
-                            final confirmed = await _showStatusChangeDialog(
-                              'Confirm Payment',
-                              'Are you sure you want to confirm payment and move this order to "Ready for Shipment"?',
-                              Icons.payment,
-                              Colors.orange,
-                            );
-                            
-                            if (confirmed == true) {
-                              // Process payment and update status to "Ready for Shipment"
-                              await _processPaymentAndUpdateStatus();
-                              
-                              // Send WhatsApp payment confirmation receipt to customer
-                              await _sendPaymentConfirmationReceipt();
-                              
-                              // Navigate to ready shipment screen
-                              if (mounted) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const ReadyShipmentOrdersScreen(),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.orange[100],
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.orange[300]!, width: 1),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.payment,
-                                  color: Colors.orange[700],
-                                  size: 14,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Confirm',
-                                  style: TextStyle(
-                                    color: Colors.orange[700],
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                     // Ship Button for Ready for Shipment
                     if (order!['order_status'] == 'Ready for Shipment')
                       Container(
@@ -2406,11 +2929,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               Icons.local_shipping,
                               Colors.blue,
                             );
-                            
+
                             if (confirmed == true) {
                               // Update order status to "Shipped"
                               await _updateOrderStatus('Shipped');
-                              
+
                               // Navigate to shipped screen
                               if (mounted) {
                                 Navigator.push(
@@ -2465,11 +2988,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               Icons.check_circle,
                               Colors.purple,
                             );
-                            
+
                             if (confirmed == true) {
                               // Update order status to "Delivered"
                               await _updateOrderStatus('Delivered');
-                              
+
                               // Navigate to delivered screen
                               if (mounted) {
                                 Navigator.push(
@@ -2511,10 +3034,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
-                    // Cancel Button for cancellable orders
-                    if (order!['order_status'] == 'Pending' || 
-                        order!['order_status'] == 'Waiting for Payment' || 
-                        order!['order_status'] == 'Ready for Shipment')
+                    // Cancel Button for cancellable orders - Only for non-admin users
+                    if (!isAdmin && (order!['order_status'] == 'Pending' ||
+                        order!['order_status'] == 'Waiting for Payment' ||
+                        order!['order_status'] == 'Ready for Shipment'))
                       Container(
                         height: 32,
                         child: GestureDetector(
@@ -2526,11 +3049,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               Icons.cancel,
                               Colors.red,
                             );
-                            
+
                             if (confirmed == true) {
                               // Update order status to "Cancelled"
                               await _updateOrderStatus('Cancelled');
-                              
+
                               // Navigate back to appropriate screen based on previous status
                               if (mounted) {
                                 Navigator.pushAndRemoveUntil(
@@ -2538,7 +3061,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   MaterialPageRoute(
                                     builder: (context) => const PendingOrdersScreen(),
                                   ),
-                                  (route) => false,
+                                      (route) => false,
                                 );
                               }
                             }
@@ -2572,54 +3095,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
-                    // Share Order Details Button - Green Arrow - only for admin users
-                    if (order!['order_status'] == 'Pending' && isAdmin)
-                      Container(
-                        height: 32,
-                        margin: const EdgeInsets.only(left: 8), // Add gap between buttons
-                        child: GestureDetector(
-                          onTap: () async {
-                            // Show confirmation dialog
-                            final confirmed = await _showStatusChangeDialog(
-                              'Move to Waiting for Payment',
-                              'Are you sure you want to move this order to "Waiting for Payment"?',
-                              Icons.arrow_forward,
-                              Colors.green,
-                            );
-                            
-                            if (confirmed == true) {
-                              // Update order status to "Waiting for Payment"
-                              await _updateOrderStatus('Waiting for Payment');
-                              
-                              // Send WhatsApp order receipt to customer
-                              await _sendOrderReceiptToCustomer();
-                              
-                              // Navigate to waiting payment screen
-                              if (mounted) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const WaitingPaymentOrdersScreen(),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.green[100],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green[300]!, width: 1),
-                            ),
-                            child: Icon(
-                              Icons.arrow_forward_ios,
-                              color: Colors.green[700],
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -2646,6 +3121,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Expanded(
+                            key: ValueKey('delivery_fee_$_deliveryFee'),
                             child: _buildCompactSummaryRow('Delivery Fee', '₹${_deliveryFee.toStringAsFixed(2)}'),
                           ),
                           GestureDetector(
@@ -2667,10 +3143,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         ],
                       ),
                       const Divider(height: 16),
-                      _buildCompactSummaryRow(
-                        'Total Amount',
-                        '₹${_totalAmount.toStringAsFixed(2)}',
-                        isTotal: true,
+                      Container(
+                        key: ValueKey('total_amount_$_totalAmount'),
+                        child: _buildCompactSummaryRow(
+                          'Total Amount',
+                          '₹${_totalAmount.toStringAsFixed(2)}',
+                          isTotal: true,
+                        ),
                       ),
                     ],
                   ),
@@ -2678,6 +3157,285 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ),
             ],
           ),
+
+          // Action Buttons - Only for Waiting for Payment orders (admin only)
+          if (order!['order_status'] == 'Waiting for Payment' && isAdmin)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 16),
+              child: Row(
+                children: [
+                  // Cancel Order Button
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.red[100],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.red[300]!, width: 1.5),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Cancel Order - Non Payment',
+                              'Cancel order due to non-receipt of payment? Customer will receive a cancellation message.',
+                              Icons.cancel,
+                              Colors.red,
+                            );
+
+                            if (confirmed == true) {
+                              // Update order status to "Cancelled"
+                              await _updateOrderStatus('Cancelled');
+
+                              // Send payment cancellation message to customer
+                              await _sendPaymentCancellationMessageToCustomer();
+
+                              // Go back to orders list
+                              if (mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            }
+                          },
+                          child: Center(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.cancel_outlined,
+                                  color: Colors.red[700],
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Cancel Order',
+                                  style: TextStyle(
+                                    color: Colors.red[700],
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(width: 12),
+
+                  // Confirm Payment Button - with original functionality
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.orange[100],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange[300]!, width: 1.5),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () async {
+                            // Show confirmation dialog
+                            final confirmed = await _showStatusChangeDialog(
+                              'Confirm Payment',
+                              'Are you sure you want to confirm payment and move this order to "Ready for Shipment"?',
+                              Icons.payment,
+                              Colors.orange,
+                            );
+
+                            if (confirmed == true) {
+                              // Process payment and update status to "Ready for Shipment"
+                              await _processPaymentAndUpdateStatus();
+
+                              // Send WhatsApp payment confirmation receipt to customer
+                              await _sendPaymentConfirmationReceipt();
+
+                              // Navigate to ready shipment screen
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const ReadyShipmentOrdersScreen(),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Center(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.payment,
+                                  color: Colors.orange[700],
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Confirm Payment',
+                                  style: TextStyle(
+                                    color: Colors.orange[700],
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // Warning message for all unavailable items
+          if (_areAllItemsUnavailable() && order!['order_status'] == 'Pending')
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_outlined,
+                    color: Colors.red[700],
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'All items are unavailable. Clicking "Cancel Order" will cancel this order and send a short message to the customer.',
+                      style: TextStyle(
+                        color: Colors.red[700],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // Confirm Order Button - Only for Pending orders (admin only)
+          if (order!['order_status'] == 'Pending' && isAdmin)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 12),
+              child: GestureDetector(
+                onTap: () async {
+                  // Check if all items are unavailable
+                  final allUnavailable = _areAllItemsUnavailable();
+                  print('🔍 All items unavailable: $allUnavailable');
+
+                  if (allUnavailable) {
+                    // All items are unavailable - cancel the order
+                    final confirmed = await _showStatusChangeDialog(
+                      'Cancel Order (All Items Unavailable)',
+                      'All items are unavailable. Order will be cancelled and customer will receive a short cancellation message.',
+                      Icons.cancel,
+                      Colors.red,
+                    );
+
+                    if (confirmed == true) {
+                      // Update order status to "Cancelled"
+                      await _updateOrderStatus('Cancelled');
+                      
+                      // Send special cancellation message for all unavailable items
+                      await _sendAllUnavailableCancellationMessage();
+                      
+                      // Go back to orders list
+                      if (mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    }
+                  } else {
+                    // Normal confirmation flow
+                    final confirmed = await _showStatusChangeDialog(
+                      'Move to Waiting for Payment',
+                      'Are you sure you want to move this order to "Waiting for Payment"?',
+                      Icons.arrow_forward,
+                      Colors.green,
+                    );
+
+                    if (confirmed == true) {
+                      // Update order status to "Waiting for Payment"
+                      await _updateOrderStatus('Waiting for Payment');
+
+                      // Send WhatsApp order receipt to customer
+                      await _sendOrderReceiptToCustomer();
+
+                      // Navigate to waiting payment screen
+                      if (mounted) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const WaitingPaymentOrdersScreen(),
+                          ),
+                        );
+                      }
+                    }
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: _areAllItemsUnavailable()
+                          ? [Colors.red[300]!, Colors.red[500]!]
+                          : [Colors.green[300]!, Colors.green[500]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _areAllItemsUnavailable()
+                            ? Colors.red.withOpacity(0.3)
+                            : Colors.green.withOpacity(0.3),
+                        spreadRadius: 2,
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _areAllItemsUnavailable() ? Icons.cancel : Icons.check_circle,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _areAllItemsUnavailable() ? 'Cancel Order' : 'Confirm Order',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -2748,20 +3506,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       print('New delivery fee: ${result['delivery_fee']}');
       print('New total: ${result['total']}');
       
-      // Update state immediately
+      // Update state immediately and forcefully
       if (mounted) {
+        // Update local state variables first
+        final newDeliveryFee = result['delivery_fee']?.toDouble() ?? _deliveryFee;
+        final newTotal = result['total']?.toDouble() ?? _totalAmount;
+        
         print('=== BEFORE setState ===');
         print('Current _deliveryFee: $_deliveryFee');
-        print('New delivery fee: ${result['delivery_fee']}');
+        print('New delivery fee: $newDeliveryFee');
         
+        // Force immediate state update
         setState(() {
-          _deliveryFee = result['delivery_fee'];
-          _totalAmount = result['total'];
+          _deliveryFee = newDeliveryFee;
+          _totalAmount = newTotal;
           
           // Update order object with new delivery fee
           if (order != null) {
-            order!['delivery_fee'] = result['delivery_fee'];
+            order!['delivery_fee'] = newDeliveryFee;
+            order!['total_amount'] = newTotal;
             print('Updated order delivery_fee: ${order!['delivery_fee']}');
+            print('Updated order total_amount: ${order!['total_amount']}');
           }
         });
         
@@ -2770,33 +3535,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         print('Updated _totalAmount: $_totalAmount');
       }
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Delivery fee updated to ₹${_deliveryFee.toStringAsFixed(2)}'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Force multiple UI updates with mounted check
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) setState(() {}); // Additional UI trigger
-      
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) setState(() {}); // Another UI trigger
-      
-      // Test setState with a visible change
+      // Show success message
       if (mounted) {
-        setState(() {
-          // Force a visible change to test if setState works
-          print('setState called with _deliveryFee: $_deliveryFee');
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Delivery fee updated to ₹${_deliveryFee.toStringAsFixed(2)}'),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
       
-      // Also refresh from server after a delay to ensure database sync
-      await Future.delayed(const Duration(seconds: 1));
-      if (mounted) _fetchOrderDetails(silent: true);
+      // Refresh from server to ensure database sync (after a short delay)
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted) {
+        await _fetchOrderDetails(silent: true);
+      }
       
-      print('Multiple UI updates triggered');
+      print('Delivery fee update completed with immediate UI refresh');
     } else {
       print('=== DELIVERY FEE UPDATE FAILED ===');
       print('Result: $result');
@@ -4357,15 +5112,39 @@ Thank you for your order! 🙏
     String? imageUrl;
 
     // Try to get the image URL from the same sources as _buildProductImage
-    if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
-      imageUrl = order!['image_url'];
-    } else if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+    // 1. Check if item has image_url (from order items - first priority)
+    if (item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
       String tempImageUrl = item['image_url'].toString();
       if (tempImageUrl.startsWith('http')) {
         imageUrl = tempImageUrl;
       } else {
         imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
       }
+      print('🖼️ Using item image_url: $imageUrl');
+    }
+    // 2. Check if order has image_url (fallback)
+    else if (order?['image_url'] != null && order!['image_url'].toString().isNotEmpty) {
+      imageUrl = order!['image_url'];
+      print('🖼️ Using order image_url: $imageUrl');
+    }
+    // 3. Try additional image fields
+    else if (item['product_image'] != null && item['product_image'].toString().isNotEmpty) {
+      String tempImageUrl = item['product_image'].toString();
+      if (tempImageUrl.startsWith('http')) {
+        imageUrl = tempImageUrl;
+      } else {
+        imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+      }
+      print('🖼️ Using item product_image: $imageUrl');
+    }
+    else if (item['imageUrl'] != null && item['imageUrl'].toString().isNotEmpty) {
+      String tempImageUrl = item['imageUrl'].toString();
+      if (tempImageUrl.startsWith('http')) {
+        imageUrl = tempImageUrl;
+      } else {
+        imageUrl = 'http://184.168.126.71/api/uploads/$tempImageUrl';
+      }
+      print('🖼️ Using item imageUrl: $imageUrl');
     }
 
     if (imageUrl != null) {
@@ -5082,6 +5861,204 @@ Thank you for your order! 🙏
       case 'Available':
       default:
         return Colors.green[700]!;
+    }
+  }
+  
+  // Show quantity edit dialog
+  Future<void> _showQuantityEditDialog(dynamic item, int currentQuantity, double itemPrice) async {
+    // Store item data to avoid scope issues
+    final String itemId = item['id'].toString();
+    final String productName = item['product_name'] ?? 'Unknown Product';
+    final String? itemColor = item['color'];
+    final String? itemSize = item['size'];
+    
+    final TextEditingController _quantityController = TextEditingController(text: currentQuantity.toString());
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Edit Quantity'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Product: $productName'),
+              const SizedBox(height: 8),
+              if (itemColor != null && itemColor.isNotEmpty)
+                Text('Color: $itemColor'),
+              if (itemSize != null && itemSize.isNotEmpty)
+                Text('Size: $itemSize'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _quantityController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'New Quantity',
+                  border: OutlineInputBorder(),
+                  prefixText: 'Qty: ',
+                ),
+                onChanged: (value) {
+                  // Allow only positive numbers
+                  if (value.isNotEmpty && int.tryParse(value) == null) {
+                    _quantityController.text = currentQuantity.toString();
+                    _quantityController.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _quantityController.text.length),
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'New Total: Rs.${itemPrice * (int.tryParse(_quantityController.text) ?? currentQuantity)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.orange[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.orange[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Note: Editing quantity will enable manual stock mode and update availability automatically',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newQuantity = int.tryParse(_quantityController.text);
+                
+                if (newQuantity != null && newQuantity > 0) {
+                  try {
+                    // Update the quantity in the database
+                    await _updateItemQuantity(itemId, newQuantity);
+                    
+                    Navigator.of(context).pop();
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Quantity updated successfully! Manual stock mode enabled.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a valid quantity'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Update'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Update item quantity on server
+  Future<void> _updateItemQuantity(String itemId, int newQuantity) async {
+    try {
+      // Enable manual stock mode when quantity is edited
+      setState(() {
+        _useManualStock[itemId] = true;
+        _manualStockQuantities[itemId] = newQuantity;
+        
+        // Update availability status based on new quantity
+        final requestedQuantity = int.tryParse(orderItems.firstWhere((item) => item['id'].toString() == itemId)['quantity'].toString()) ?? 1;
+        if (newQuantity == 0) {
+          _itemAvailability[itemId] = 'Not Available';
+        } else if (newQuantity < requestedQuantity) {
+          _itemAvailability[itemId] = 'Partial Available';
+        } else {
+          _itemAvailability[itemId] = 'Available';
+        }
+      });
+
+      final response = await http.post(
+        Uri.parse('${Config.baseNodeApiUrl}/orders/update-manual-stock'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'orderId': widget.orderId,
+          'itemId': itemId,
+          'manualStockQuantity': newQuantity,
+          'useManualStock': true,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true) {
+          print('Quantity updated successfully for item $itemId to $newQuantity (manual stock enabled)');
+          
+          // Update the order items locally to reflect the change
+          setState(() {
+            // Find and update the specific item in orderItems
+            for (var item in orderItems) {
+              if (item['id'].toString() == itemId) {
+                item['quantity'] = newQuantity.toString();
+                item['manual_stock_quantity'] = newQuantity.toString();
+                item['use_manual_stock'] = true;
+                item['available_quantity'] = newQuantity.toString();
+                break;
+              }
+            }
+            
+            // Stop auto-refresh when manual stock is enabled
+            _stopAutoRefresh();
+            _isAutoRefreshEnabled = false;
+            _showManualStockMode = true;
+            
+            // Recalculate totals after update
+            _recalculateTotals();
+          });
+        } else {
+          print('Failed to update quantity: ${responseData['message']}');
+        }
+      } else {
+        print('HTTP error updating quantity: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error updating quantity: $e');
     }
   }
 }

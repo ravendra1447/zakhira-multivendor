@@ -80,12 +80,21 @@ class _EditDeliveryFeeScreenState extends State<EditDeliveryFeeScreen> {
         if (response.statusCode == 200) {
           if (data['success'] == true) {
             print('Success: Extracting delivery fee and total');
+            
+            // Extract values safely with proper type conversion
+            final deliveryFee = data['data']?['delivery_fee']?.toDouble() ?? double.tryParse(_deliveryFeeController.text) ?? 0.0;
+            final total = data['data']?['total']?.toDouble() ?? _newTotal;
+            
+            print('Returning delivery_fee: $deliveryFee, total: $total');
+            
+            // Navigate back immediately with results
             Navigator.pop(context, {
-              'delivery_fee': data['data']['delivery_fee'],
-              'total': data['data']['total'],
+              'delivery_fee': deliveryFee,
+              'total': total,
               'success': true,
             });
             
+            // Show success message after navigation (optional)
             _showSuccess('Delivery fee updated successfully!');
           } else {
             print('Failed: ${data['message']}');
